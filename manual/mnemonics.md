@@ -1,0 +1,1088 @@
+# ND-5000/5800 Microcode Mnemonic Reference
+
+Generated from microcode-5000-def.json
+
+This document lists all mnemonic symbols used in ND-5000/5800 microcode programming,
+organized by field groups matching the JSON definition file.
+
+---
+
+## ALU: Arithmetic Logic Unit control
+
+### ALU_TRUE (Bits 127-122)
+
+ALU operation when condition is true (4-bit ALU + 2-bit carry)
+
+#### ALU (Bits 127-124)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | ALU,FZRO | FORCE ZERO ALU OUTPUT |
+| 1 | ALU,ADIRC | ALU OUTPUT COMPLEMENTED |
+| 2 | ALU,AND | LOGICAL AND OF A AND B |
+| 3 | ALU,ANDCB | LOGICAL AND OF A AND B COMPLEMENTED |
+| 4 | ALU,A | A OPERAND DIRECT THROUGH THE ALU |
+| 5 | ALU,XOR | LOGICAL EXCLUSIVE OR OF A AND B |
+| 6 | ALU,ANDCA | LOGICAL AND OF A COMPLEMENTED AND B |
+| 7 | ALU,OR | LOGICAL OR OF A AND B |
+| 8 | ALU,A-1 | DECREMENT A OPERAND |
+| 9 | ALU,A,/2 | FBUS = ALU.OUTPUT/2; FBUS(31) = CARRY |
+| 10 | ALU,A-B | A MINUS B OPERAND (carry selects -1 or +C) |
+| 11 | ALU,A-B,*2 | FBUS = ALU.OUTPUT*2; FBUS(00) = 0 |
+| 12 | ALU,A+B,/2 | FBUS = ALU.OUTPUT/2; FBUS(31) = CARRY |
+| 13 | ALU,A+B | A OPERAND ADDED B OPERAND |
+| 14 | ALU,B-A | B OPERAND MINUS A OPERAND (carry selects -1 or +C) |
+| 15 | ALU,A+B,*2 | FBUS = ALU.OUTPUT*2; FBUS(00) = 0 |
+
+#### CARRY (Bits 123-122)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (zero) | Carry input = 0 |
+| 1 | CRY,ONE | ONE AS CARRY |
+| 2 | CRY,C | C FROM STATUS AS CARRY |
+| 3 | CRY,MC | MICRO CARRY AS CARRY |
+
+### ALU_FALSE (Bits 121-116)
+
+ALU operation when condition is false (4-bit ALU + 2-bit carry)
+
+#### ALU (Bits 121-118)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | ALUF,FZRO | FORCE ZERO ALU OUTPUT |
+| 1 | ALUF,ADRC | ALU OUTPUT COMPLEMENTED |
+| 2 | ALUF,AND | LOGICAL AND OF A AND B |
+| 3 | ALUF,ANDCB | LOGICAL AND OF A AND B COMPLEMENTED |
+| 4 | ALUF,A | A OPERAND DIRECT THROUGH THE ALU |
+| 5 | ALUF,XOR | LOGICAL EXCLUSIVE OR OF A AND B |
+| 6 | ALUF,ANDCA | LOGICAL AND OF A COMPLEMENTED AND B |
+| 7 | ALUF,OR | LOGICAL OR OF A AND B |
+| 8 | ALUF,A-1 | DECREMENT A OPERAND |
+| 9 | ALUF,A,/2 | FBUS = ALU.OUTPUT/2; FBUS(31) = CARRY |
+| 10 | ALUF,A-B | A MINUS B OPERAND (carry selects -1 or +C) |
+| 11 | ALUF,A-B,*2 | FBUS = ALU.OUTPUT*2 |
+| 12 | ALUF,A+B,/2 | FBUS = ALU.OUTPUT/2 |
+| 13 | ALUF,A+B | A OPERAND ADDED B OPERAND |
+| 14 | ALUF,B-A | B OPERAND MINUS A OPERAND (carry selects -1 or +C) |
+| 15 | ALUF,A+B,*2 | FBUS = ALU.OUTPUT*2 |
+
+#### CARRY (Bits 117-116)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (zero) | Carry input = 0 |
+| 1 | CRYF,ONE | ONE AS CARRY |
+| 2 | CRYF,C | C FROM STATUS AS CARRY |
+| 3 | CRYF,MC | MICRO CARRY AS CARRY |
+
+### EXUC (Bits 115-115)
+
+Execute unconditional - for sneak instructions during pipeline breaks
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (normal) | Normal conditional execution |
+| 1 | EXUC | EXECUTE UNCONDITIONAL |
+
+### COND_ALU (Bits 114-114)
+
+Enable conditional ALU operation
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (true only) | ALU uses true function only |
+| 1 | C,ALU | ENABLE CONDITIONAL ALU OPERATION |
+
+---
+
+## Q_REGISTER: Q shift register control
+
+### Q_REG (Bits 113-111)
+
+Q-register operation (hold, load, shift, rotate)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | No Q-register operation |
+| 1 | Q,F | Q <- ALU OUTPUT |
+| 2 | Q,Q*DIV | Q <- Q*2; Q(00) <- DIVR (divide shift) |
+| 3 | Q,Q*LOG | Q <- Q*2; Q(00) <- 0 (logical shift left) |
+| 4 | Q,Q/ARI | Q <- Q/2; Q(SIGN.BIT) <- Q(SIGN.BIT) (arithmetic shift right) |
+| 5 | Q,Q/LOG | Q <- Q/2; Q(SIGN.BIT) <- 0 (logical shift right) |
+| 6 | Q,Q/ROT | Q <- Q/2; Q(SIGN.BIT) <- Q(00) (rotate right) |
+| 7 | Q,Q*ROT | Q <- Q*2; Q(00) <- Q(SIGN.BIT) (rotate left) |
+
+---
+
+## AAP: Additional Arithmetic Processor control
+
+### AAP_CTRL (Bits 110-103)
+
+AAP type (bits 7-5) + operation (bits 4-0)
+
+#### TYPE (Bits 110-108)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | No AAP operation |
+| 1 | AAP1 | ND-570 floating point unit |
+| 2 | AAP2 | Extended AAP |
+| 6 | EXPISO | Exponent isolate (standalone) |
+
+#### AAP1_OP (Bits 107-103)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 1 | AAP1,CTF | CONVERT TO FLOATING |
+| 2 | AAP1,CTDF | CONVERT TO DOUBLE FLOATING |
+| 3 | AAP1,UCTF | UNSIGNED CONVERT TO FLOATING |
+| 4 | AAP1,UCTDF | UNSIGNED CONVERT TO DOUBLE FLOATING |
+| 5 | AAP1,CTBYR | CONVERT TO BYTE ROUNDED |
+| 6 | AAP1,CTHWR | CONVERT TO HALFWORD ROUNDED |
+| 7 | AAP1,CTWR | CONVERT TO WORD ROUNDED |
+| 8 | AAP1,CTBY | CONVERT TO BYTE |
+| 9 | AAP1,CTHW | CONVERT TO HALFWORD |
+| 10 | AAP1,CTW | CONVERT TO WORD |
+| 11 | AAP1,INTR | INTEGER-PART ROUNDED |
+| 12 | AAP1,INT | INTEGER-PART TRUNCATED |
+| 13 | AAP1,SHA | SHIFT ARITHMETICAL |
+| 14 | AAP1,SHL | SHIFT LOGICAL |
+| 15 | AAP1,SHR | SHIFT ROTATIONAL |
+| 16 | AAP1,DTOFR | CONVERT DOUBLE TO FLOATING ROUNDED |
+| 17 | AAP1,A+B | A+B |
+| 18 | AAP1,B-A | B-A |
+| 19 | AAP1,B/A | B/A |
+| 20 | AAP1,A-B | A-B |
+| 21 | AAP1,COMP | COMPARE (A-B) |
+| 22 | AAP1,A/B | A/B |
+| 23 | AAP1,DIVP | PARTIAL DIVIDE A/B |
+| 24 | AAP1,A*B | A*B |
+| 25 | AAP1,UMUL | UNSIGNED MULTIPLY |
+| 26 | AAP1,MUL4 | MULTIPLY WITH OVERFLOW |
+| 27 | AAP1,RRF | READ AAP REGISTERFILE |
+| 28 | AAP1,WRF | WRITE AAP REGISTERFILE |
+| 30 | AAP1,CLEAR | COPY A TO F / RESET AAP |
+
+#### AAP2_OP (Bits 107-103)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | AAP2,SUBAB | SUBTRACT A-B |
+| 1 | AAP2,ABSSUB | MAGNITUDE OF DIFFERENCE |
+| 2 | AAP2,MUL | MULTIPLY |
+| 3 | AAP2,MULABSA | B TIMES MAGNITUDE OF A |
+| 4 | AAP2,NEG | NEGATE |
+| 5 | AAP2,MULABSB | A TIMES MAGNITUDE OF B |
+| 6 | AAP2,MULNEG | MULTIPLY AND NEGATE |
+| 7 | AAP2,MULNEGA | B TIMES NEGATIVE VALUE OF A |
+| 8 | AAP2,ADD | ADD |
+| 9 | AAP2,ABSADD | MAGNITUDE OF SUM |
+| 10 | AAP2,ADDABS | SUM OF MAGNITUDES |
+| 11 | AAP2,MULNEGB | A TIMES NEGATIVE VALUE OF B |
+| 12 | AAP2,PASS | IDENTITY |
+| 13 | AAP2,MULNEGAB | NEGATIVE VALUE OF A TIMES B |
+| 14 | AAP2,PASSABS | ABSOLUTE VALUE |
+| 16 | AAP2,SUBBA | SUBTRACT B-A |
+| 17 | AAP2,SUBABABS | DIFFERENCE OF MAGNITUDES (A-B) |
+| 18 | AAP2,SUBBAABS | DIFFERENCE OF MAGNITUDES (B-A) |
+| 20 | AAP2,IMUL | INTEGER MUL, ONE RESULT |
+| 21 | AAP2,IMULD | INTEGER MUL, TWO RESULTS |
+| 22 | AAP2,IMULU | INTEGER UMUL, ONE RESULT |
+| 23 | AAP2,IMULUD | INTEGER UMUL, TWO RESULTS |
+| 24 | AAP2,CLEAR | CLEAR ONGOING AAP2-SEQUENCE |
+| 27 | AAP2,CTI | CONVERT TO INTEGER |
+| 28 | AAP2,CTIR | CONVERT TO INTEGER ROUNDED |
+| 29 | AAP2,CTF | CONVERT TO FLOATING |
+| 30 | AAP2,CBF | CONVERT TO OTHER FLOATING FORMAT |
+| 31 | AAP2,EXPISO | EXPONENT ISOLATE |
+
+---
+
+## TIMING: Microcycle timing control
+
+### TIMING (Bits 102-101)
+
+Cycle time selection
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (NORM) | Normal cycle time |
+| 1 | SLOW1 | CYCLE TIME = 110 N.SEC. |
+| 2 | SLOW2 | CYCLE TIME = 160 N.SEC. |
+| 3 | SLOW3 | Slowest cycle time |
+
+---
+
+## DATATYPE: Data type control
+
+### DATATYPE (Bits 100-98)
+
+Data type for operation
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | TYP,W | DATA TYPE IS WORD (32 bits) |
+| 1 | TYP,F | DATA TYPE IS SINGLE FLOATING (32 bits) |
+| 2 | TYP,HW | DATA TYPE IS HALF WORD (16 bits) |
+| 3 | TYP,BY | DATA TYPE IS BYTE (8 bits) |
+| 4 | TYP,BI | DATA TYPE IS BIT |
+| 5 | TYP,DF | DATA TYPE IS DOUBLE FLOATING (64 bits) |
+| 6 | TYP,DD | DATA TYPE IS 128 BITS FLOATING POINT |
+| 7 | TYP,DR | DATA TYPE CONTROLLED BY ICA (OR-logic) |
+
+---
+
+## OPERANDS: ALU operand selection
+
+### OR_ENABLE (Bits 97-97)
+
+Enable OR control logic for operand/destination selection
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (disabled) | OR control disabled |
+| 1 | ORA/ORD | OR control enabled |
+
+### A_OP (Bits 96-89)
+
+A-operand select (3-bit group XXX + 5-bit register ZZZZZ)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | A,BM00 | A-BUS IS BIT MASK 0 |
+| 1 | A,BM01 | A-BUS IS BIT MASK 1 |
+| 2 | A,BM02 | A-BUS IS BIT MASK 2 |
+| 3 | A,BM03 | A-BUS IS BIT MASK 3 |
+| 4 | A,BM04 | A-BUS IS BIT MASK 4 |
+| 5 | A,BM05 | A-BUS IS BIT MASK 5 |
+| 6 | A,BM06 | A-BUS IS BIT MASK 6 |
+| 7 | A,BM07 | A-BUS IS BIT MASK 7 |
+| 8 | A,BM10 | A-BUS IS BIT MASK 10 |
+| 9 | A,BM11 | A-BUS IS BIT MASK 11 |
+| 10 | A,BM12 | A-BUS IS BIT MASK 12 |
+| 11 | A,BM13 | A-BUS IS BIT MASK 13 |
+| 12 | A,BM14 | A-BUS IS BIT MASK 14 |
+| 13 | A,BM15 | A-BUS IS BIT MASK 15 |
+| 14 | A,BM16 | A-BUS IS BIT MASK 16 |
+| 15 | A,BM17 | A-BUS IS BIT MASK 17 |
+| 16 | A,BM20 | A-BUS IS BIT MASK 20 |
+| 17 | A,BM21 | A-BUS IS BIT MASK 21 |
+| 18 | A,BM22 | A-BUS IS BIT MASK 22 |
+| 19 | A,BM23 | A-BUS IS BIT MASK 23 |
+| 20 | A,BM24 | A-BUS IS BIT MASK 24 |
+| 21 | A,BM25 | A-BUS IS BIT MASK 25 |
+| 22 | A,BM26 | A-BUS IS BIT MASK 26 |
+| 23 | A,BM27 | A-BUS IS BIT MASK 27 |
+| 24 | A,BM30 | A-BUS IS BIT MASK 30 |
+| 25 | A,BM31 | A-BUS IS BIT MASK 31 |
+| 26 | A,BM32 | A-BUS IS BIT MASK 32 |
+| 27 | A,BM33 | A-BUS IS BIT MASK 33 |
+| 28 | A,BM34 | A-BUS IS BIT MASK 34 |
+| 29 | A,BM35 | A-BUS IS BIT MASK 35 |
+| 30 | A,BM36 | A-BUS IS BIT MASK 36 |
+| 31 | A,BM37 | A-BUS IS BIT MASK 37 |
+| 32 | A,X1 | A-BUS IS INDEX REGISTER X1 |
+| 33 | A,X2 | A-BUS IS INDEX REGISTER X2 |
+| 34 | A,X3 | A-BUS IS INDEX REGISTER X3 |
+| 35 | A,X4 | A-BUS IS INDEX REGISTER X4 |
+| 36 | A,A1 | A-BUS IS FLOATING MOST REGISTER A1 |
+| 37 | A,A2 | A-BUS IS FLOATING MOST REGISTER A2 |
+| 38 | A,A3 | A-BUS IS FLOATING MOST REGISTER A3 |
+| 39 | A,A4 | A-BUS IS FLOATING MOST REGISTER A4 |
+| 40 | A,SC1 | A-BUS IS SCRATCH REGISTER 1 |
+| 41 | A,SC2 | A-BUS IS SCRATCH REGISTER 2 |
+| 42 | A,SC3 | A-BUS IS SCRATCH REGISTER 3 |
+| 43 | A,SC4 | A-BUS IS SCRATCH REGISTER 4 |
+| 44 | A,E1 | A-BUS IS FLOATING LEAST REGISTER E1 |
+| 45 | A,E2 | A-BUS IS FLOATING LEAST REGISTER E2 |
+| 46 | A,E3 | A-BUS IS FLOATING LEAST REGISTER E3 |
+| 47 | A,E4 | A-BUS IS FLOATING LEAST REGISTER E4 |
+| 48 | A,SC5 | A-BUS IS SCRATCH REGISTER 5 |
+| 49 | A,SC6 | A-BUS IS SCRATCH REGISTER 6 |
+| 50 | A,SC7 | A-BUS IS SCRATCH REGISTER 7 |
+| 51 | A,SC10 | A-BUS IS SCRATCH REGISTER 10 |
+| 52 | A,SC11 | A-BUS IS SCRATCH REGISTER 11 |
+| 53 | A,SC12 | A-BUS IS SCRATCH REGISTER 12 |
+| 54 | A,SC13 | A-BUS IS SCRATCH REGISTER 13 |
+| 55 | A,SC14 | A-BUS IS SCRATCH REGISTER 14 |
+| 56 | A,DATA | A-BUS IS DATA INPUT REGISTER |
+| 57 | A,BMLC | A-BUS IS BIT MASK FROM LOOP COUNTER |
+| 58 | A,AAPRES | A-BUS IS AAP RESULT |
+| 59 | A,Q | A-BUS IS Q-REGISTER |
+| 60 | A,ALU,STS | A-BUS IS ALU STATUS BITS |
+| 61 | A,ALU,TE | A-BUS IS ALU TRAP ENABLE BITS |
+| 62 | A,PXBM | A-BUS IS POST-INDEX BIT-MASK |
+| 63 | A,ALU,REG37 | [UNDOCUMENTED GUESS] A-BUS IS ALU REGISTER 37 - very common (674 uses), possibly special/reserved register |
+| 64 | A,DMM,PSTP | A-BUS IS DMM PSTP REGISTER |
+| 65 | A,DMM,PUWP | A-BUS IS DMM PUWP REGISTER |
+| 66 | A,DMM,LA | A-BUS IS DMM LA REGISTER |
+| 67 | A,DMM,WR | A-BUS IS DMM WR REGISTER |
+| 68 | A,DMM,CAP | A-BUS IS DMM CAPABILITY |
+| 69 | A,DMM,PS | A-BUS IS DMM PS REGISTER |
+| 70 | A,DMM,PHS | A-BUS IS DMM PHS REGISTER |
+| 71 | A,DMM,DOM | A-BUS IS DMM DOM REGISTER |
+| 72 | A,DMM,MEM | A-BUS IS DATA MEMORY |
+| 74 | A,DMM,PHYS | A-BUS IS DATA PHYSICAL ADDRESS |
+| 75 | A,DMM,STS | A-BUS IS DMM STS REGISTER |
+| 79 | A,DMM,ADOM | A-BUS IS DMM ADOM REGISTER |
+| 80 | A,IMM,PSTP | A-BUS IS IMM PSTP REGISTER |
+| 81 | A,IMM,PUWP | A-BUS IS IMM PUWP REGISTER |
+| 82 | A,IMM,LA | A-BUS IS IMM LA REGISTER |
+| 83 | A,IMM,WR | A-BUS IS IMM WR REGISTER |
+| 84 | A,IMM,CAP | A-BUS IS IMM CAPABILITY |
+| 85 | A,IMM,PS | A-BUS IS IMM PS REGISTER |
+| 86 | A,IMM,PHS | A-BUS IS IMM PHS REGISTER |
+| 87 | A,IMM,DOM | A-BUS IS IMM DOM REGISTER |
+| 88 | A,IMM,MEM | A-BUS IS INSTRUCTION MEMORY |
+| 90 | A,IMM,PHYS | A-BUS IS INSTRUCTION PHYSICAL ADDR |
+| 91 | A,IMM,STS | A-BUS IS IMM STS REGISTER |
+| 95 | A,IMM,ADOM | A-BUS IS IMM ADOM REGISTER |
+| 96 | A,SPEC,MOD | A-BUS IS MODUS-REGISTER |
+| 97 | A,SPEC,AOB | A-BUS IS AOB-REGISTER |
+| 98 | A,SPEC,IAR | A-BUS IS IAR-REGISTER |
+| 99 | A,SPEC,OC,DP | A-BUS IS DPA-PART OF OC |
+| 100 | A,SPEC,OC,AD | A-BUS IS NADDR-PART OF OC |
+| 101 | A,SPEC,OC,CO | A-BUS IS CONTROL-PART OF OC |
+| 102 | A,SPEC,AC | A-BUS IS ADDRESS-CACHE |
+| 103 | A,SPEC,IC | A-BUS IS INSTRUCTION-CACHE |
+| 104 | A,SPEC,OLAH2 | A-BUS IS OLAH2-REGISTER |
+| 105 | A,SPEC,AFLAG | A-BUS IS ACCP-FLAG-REGISTER |
+| 106 | A,SPEC,AOBASR | A-BUS IS COMM.-REGISTER |
+| 107 | A,SPEC,IRL | A-BUS IS INSTR.-READ-LATCH |
+| 108 | A,SPEC,DACR | A-BUS IS DAC-REGISTER |
+| 109 | A,SPEC,ACH | A-BUS IS AC-HOLD-REGISTER |
+| 110 | A,SPEC,DLAH | A-BUS IS DLA-HOLD-REGISTER |
+| 111 | A,SPEC,LA | A-BUS IS LA-LATCH |
+| 112 | A,SPEC,FLA | A-BUS IS FORWARD-LA-LATCH |
+| 113 | A,SPEC,DPSDOM | A-BUS IS DATA PS/DOM |
+| 114 | A,SPEC,IPSDOM | A-BUS IS INSTRUCTION PS/DOM |
+| 115 | A,SPEC,IDIR | A-BUS IS INSTR.-CACHE-DIR |
+| 116 | A,SPEC,DCALA | A-BUS IS DATA-CACHE LA |
+| 117 | A,SPEC,CSTRC | A-BUS IS CSTRC |
+| 118 | A,SPEC,DCADAT | A-BUS IS DATA-CACHE DATA |
+| 119 | A,SPEC,STRACE | A-BUS IS STRACE |
+| 120 | A,SPEC,ITRACE | A-BUS IS ITRACE |
+| 121 | A,SPEC,ATRACE | A-BUS IS ATRACE |
+| 122 | A,SPEC,DTRACE | A-BUS IS DTRACE |
+| 123 | A,SPEC,CTRACE | A-BUS IS CTRACE |
+| 124 | A,SPEC,REG34 | [UNDOCUMENTED GUESS] A-BUS IS SPEC REGISTER 34 - unknown purpose, single use with ALU,XOR at address 004615 |
+| 128 | A,MIC,MISTS | A-BUS IS MIC STATUS REGISTER |
+| 129 | A,MIC,VECT | A-BUS IS MIC VECTOR REGISTER |
+| 130 | A,MIC,RFA1 | A-BUS IS RF-ADDRESS REGISTER 1 |
+| 131 | A,MIC,RFA2 | A-BUS IS RF-ADDRESS REGISTER 2 |
+| 132 | A,MIC,STS | A-BUS IS MIC STATUS BITS |
+| 133 | A,MIC,TE | A-BUS IS MIC TRAP ENABLE BITS |
+| 134 | A,MIC,CURR | A-BUS IS MIC CURR REGISTER |
+| 135 | A,MIC,CNT32 | A-BUS IS MIC 32-BIT COUNTER |
+| 140 | A,RF1 | A-BUS IS REG.FILE POINTED TO BY RF1 REGISTER |
+| 141 | A,RF2 | A-BUS IS REG.FILE POINTED TO BY RF2 REGISTER |
+| 142 | A,RF1D | A-BUS IS REG.FILE POINTED TO BY RF1, RF1 DECREMENT |
+| 143 | A,RF2D | A-BUS IS REG.FILE POINTED TO BY RF2, RF2 DECREMENT |
+| 144 | A,SRF0 | A-BUS IS SRF-WORD 0 |
+| 145 | A,SRF1 | A-BUS IS SRF-WORD 1 |
+| 146 | A,SRF2 | A-BUS IS SRF-WORD 2 |
+| 147 | A,SRF3 | A-BUS IS SRF-WORD 3 |
+| 148 | A,SRF4 | A-BUS IS SRF-WORD 4 |
+| 149 | A,SRF5 | A-BUS IS SRF-WORD 5 |
+| 150 | A,SRF6 | A-BUS IS SRF-WORD 6 |
+| 151 | A,SRF7 | A-BUS IS SRF-WORD 7 |
+| 152 | A,SRF10 | A-BUS IS SRF-WORD 10 |
+| 153 | A,SRF11 | A-BUS IS SRF-WORD 11 |
+| 154 | A,SRF12 | A-BUS IS SRF-WORD 12 |
+| 155 | A,SRF13 | A-BUS IS SRF-WORD 13 |
+| 156 | A,SRF14 | A-BUS IS SRF-WORD 14 |
+| 157 | A,SRF15 | A-BUS IS SRF-WORD 15 |
+| 158 | A,SRF16 | A-BUS IS SRF-WORD 16 |
+| 159 | A,SRF17 | A-BUS IS SRF-WORD 17 |
+| 160 | A,IDU,TE | A-BUS IS MIC TRAP ENABLE REGISTER |
+| 161 | A,IDU,HL | A-BUS IS IDU HL REGISTER |
+| 162 | A,IDU,LL | A-BUS IS IDU LL REGISTER |
+| 163 | A,IDU,LIMC | A-BUS IS IDU LIMIT CONTROL REGISTER |
+| 164 | A,IDU,B2 | A-BUS IS IDU BUFFER-2 |
+| 165 | A,IDU,STS | A-BUS IS IDU STATUS REGISTER |
+| 166 | A,IDU,DPA | A-BUS IS DPA-BUS-REGISTER |
+| 195 | A,IAC,ILAR | A-BUS IS IAC LA-REGISTER |
+| 196 | A,IAC,S | A-BUS IS IAC SCRATCH REGISTER |
+| 197 | A,IAC,Y | A-BUS IS IAC Y REGISTER |
+| 198 | A,IAC,SP | A-BUS IS IAC SP REGISTER |
+| 202 | A,IAC,L | A-BUS IS IAC L (LINK) REGISTER |
+| 203 | A,IAC,P | A-BUS IS IAC P REGISTER |
+| 204 | A,IAC,NPC | A-BUS IS IAC NPC REGISTER |
+| 227 | A,DAC,DLAR | A-BUS IS DAC LA-REGISTER |
+| 228 | A,DAC,EAO | A-BUS IS DAC EAO REGISTER |
+| 229 | A,DAC,EA1 | A-BUS IS DAC EA1 REGISTER |
+| 230 | A,DAC,EA2 | A-BUS IS DAC EA2 REGISTER |
+| 231 | A,DAC,EA3 | A-BUS IS DAC EA3 REGISTER |
+| 233 | A,MARG | A-BUS IS MINI ARGUMENT |
+| 234 | A,DAC,B | A-BUS IS DAC B REGISTER |
+| 235 | A,DAC,R | A-BUS IS DAC R REGISTER |
+| 238 | A,SARG | A-BUS IS SHORT ARGUMENT |
+| 239 | A,LARG | A-BUS IS LONG ARGUMENT |
+| 245 | A,DAC,XFER | [UNDOCUMENTED GUESS] A-BUS IS DAC TRANSFER REGISTER - used at DAC_R_SC10, DAC_R_SC6 for DAC-to-scratch transfers |
+
+#### GROUP (Bits 96-94)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | BMG | Bit Mask Group (000) |
+| 1 | ALU | Working Register File (001) |
+| 2 | MMS | Memory Management System (010) |
+| 3 | SPEC | Special Registers (011) |
+| 4 | MIC | Microcode Control (100) |
+| 5 | IDU | Instruction Decode Unit (101) |
+| 6 | IAC | Instruction Address Control (110) |
+| 7 | DAC | Data Address Control (111) |
+
+#### REGISTER (Bits 93-89)
+
+### B_OP (Bits 88-84)
+
+B-operand select
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | B,X1 | B-BUS IS INDEX REGISTER X1 |
+| 1 | B,X2 | B-BUS IS INDEX REGISTER X2 |
+| 2 | B,X3 | B-BUS IS INDEX REGISTER X3 |
+| 3 | B,X4 | B-BUS IS INDEX REGISTER X4 |
+| 4 | B,A1 | B-BUS IS FLOATING MOST REGISTER A1 |
+| 5 | B,A2 | B-BUS IS FLOATING MOST REGISTER A2 |
+| 6 | B,A3 | B-BUS IS FLOATING MOST REGISTER A3 |
+| 7 | B,A4 | B-BUS IS FLOATING MOST REGISTER A4 |
+| 8 | B,SC1 | B-BUS IS SCRATCH REGISTER SC1 |
+| 9 | B,SC2 | B-BUS IS SCRATCH REGISTER SC2 |
+| 10 | B,SC3 | B-BUS IS SCRATCH REGISTER SC3 |
+| 11 | B,SC4 | B-BUS IS SCRATCH REGISTER SC4 |
+| 12 | B,E1 | B-BUS IS FLOATING LEAST REGISTER E1 |
+| 13 | B,E2 | B-BUS IS FLOATING LEAST REGISTER E2 |
+| 14 | B,E3 | B-BUS IS FLOATING LEAST REGISTER E3 |
+| 15 | B,E4 | B-BUS IS FLOATING LEAST REGISTER E4 |
+| 16 | B,SC5 | B-BUS IS SCRATCH REGISTER SC5 |
+| 17 | B,SC6 | B-BUS IS SCRATCH REGISTER SC6 |
+| 18 | B,SC7 | B-BUS IS SCRATCH REGISTER SC7 |
+| 19 | B,SC10 | B-BUS IS SCRATCH REGISTER SC10 |
+| 20 | B,SC11 | B-BUS IS SCRATCH REGISTER SC11 |
+| 21 | B,SC12 | B-BUS IS SCRATCH REGISTER SC12 |
+| 22 | B,SC13 | B-BUS IS SCRATCH REGISTER SC13 |
+| 23 | B,SC14 | B-BUS IS SCRATCH REGISTER SC14 |
+| 24 | B,LC | B-BUS IS LOOP COUNTER (LC) |
+| 25 | B,Q | B-BUS IS Q-REGISTER |
+| 26 | B,BCD | B-BUS IS BCD CORRECTION (1/4 OR 0/8) |
+| 27 | B,IXC | B-BUS IS INDEX-COUNTERS |
+| 31 | ORB,IN | OR B-operand from instruction |
+
+### DEST (Bits 83-76)
+
+Destination select (3-bit group + 5-bit register)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | D,X1 | DESTINATION IS INDEX REGISTER X1 |
+| 1 | D,X2 | DESTINATION IS INDEX REGISTER X2 |
+| 2 | D,X3 | DESTINATION IS INDEX REGISTER X3 |
+| 3 | D,X4 | DESTINATION IS INDEX REGISTER X4 |
+| 4 | D,A1 | DESTINATION IS FLOATING MOST REGISTER A1 |
+| 5 | D,A2 | DESTINATION IS FLOATING MOST REGISTER A2 |
+| 6 | D,A3 | DESTINATION IS FLOATING MOST REGISTER A3 |
+| 7 | D,A4 | DESTINATION IS FLOATING MOST REGISTER A4 |
+| 8 | D,SC1 | DESTINATION IS SCRATCH REGISTER SC1 |
+| 9 | D,SC2 | DESTINATION IS SCRATCH REGISTER SC2 |
+| 10 | D,SC3 | DESTINATION IS SCRATCH REGISTER SC3 |
+| 11 | D,SC4 | DESTINATION IS SCRATCH REGISTER SC4 |
+| 12 | D,E1 | DESTINATION IS FLOATING LEAST REGISTER E1 |
+| 13 | D,E2 | DESTINATION IS FLOATING LEAST REGISTER E2 |
+| 14 | D,E3 | DESTINATION IS FLOATING LEAST REGISTER E3 |
+| 15 | D,E4 | DESTINATION IS FLOATING LEAST REGISTER E4 |
+| 16 | D,SC5 | DESTINATION IS SCRATCH REGISTER SC5 |
+| 17 | D,SC6 | DESTINATION IS SCRATCH REGISTER SC6 |
+| 18 | D,SC7 | DESTINATION IS SCRATCH REGISTER SC7 |
+| 19 | D,SC10 | DESTINATION IS SCRATCH REGISTER SC10 |
+| 20 | D,SC11 | DESTINATION IS SCRATCH REGISTER SC11 |
+| 21 | D,SC12 | DESTINATION IS SCRATCH REGISTER SC12 |
+| 22 | D,SC13 | DESTINATION IS SCRATCH REGISTER SC13 |
+| 23 | D,SC14 | DESTINATION IS SCRATCH REGISTER SC14 |
+| 24 | D,NONE | NO DESTINATION |
+| 25 | D,IXC | DESTINATION IS INDEX-COUNTERS CLEAR |
+| 26 | D,LC | DESTINATION IS LOOP COUNTER (LC) |
+| 31 | D,ALU,REG37 | [UNDOCUMENTED GUESS] DESTINATION IS ALU REGISTER 37 - very common (253 uses), possibly special/reserved register |
+| 32 | D,SPEC,MOD | WRITE MODUS REGISTER |
+| 33 | D,SPEC,AIB | WRITE ACCP-INPUT-BUFFER |
+| 34 | D,SPEC,DCADAT | WRITE DATA-CACHE DATA |
+| 35 | D,SPEC,OC,DP | WRITE DPA-PART OF OC |
+| 36 | D,SPEC,OC,AD | WRITE NADDR-PART OF OC |
+| 37 | D,SPEC,OC,CO | WRITE CONTROL-PART OF OC |
+| 38 | D,SPEC,AC | WRITE ADDRESS-CACHE |
+| 39 | D,SPEC,IC | WRITE INSTRUCTION-CACHE |
+| 40 | D,SPEC,MIB | WRITE MIB-REGISTER |
+| 41 | D,SPEC,TRPARM | TRAP-ARM |
+| 42 | D,SPEC,TRPCLR | TRAP-CLEAR |
+| 43 | D,SPEC,CC | WRITE CONTROL-WORD-CACHE |
+| 44 | D,SPEC,LA | WRITE LA-REGISTER |
+| 45 | D,SPEC,FLA | WRITE FORWARD-LA-REGISTER |
+| 46 | D,SPEC,CLDCA | CLEAR DATA-CACHE |
+| 47 | D,SPEC,CLICA | CLEAR INSTRUCTION-CACHE |
+| 48 | D,SPEC,CTRACE | WRITE CTRACE |
+| 80 | D,DMM,PSTP | DESTINATION IS DMM PSTP REGISTER |
+| 81 | D,DMM,PUWP | DESTINATION IS DMM PUWP REGISTER |
+| 82 | D,DMM,LA | DESTINATION IS DMM LA REGISTER |
+| 83 | D,DMM,WR | DESTINATION IS DMM WR REGISTER |
+| 84 | D,DMM,CAP | DESTINATION IS DMM CAPABILITY REGISTER |
+| 85 | D,DMM,PS | DESTINATION IS DMM PS REGISTER |
+| 86 | D,DMM,PHS | DESTINATION IS DMM PHS REGISTER |
+| 87 | D,DMM,DOM | DESTINATION IS DMM DOM REGISTER |
+| 88 | D,DMM,MEM | WRITE MEMORY DMM |
+| 89 | D,DMM,WTSB | DESTINATION IS DMM TSB |
+| 90 | D,DMM,CTSB | DMM TSB CLEAR |
+| 91 | D,DMM,CTRPOCK | TRAP CLEAR AND UNLOCK THE DMM |
+| 94 | D,DMM,DIRTY | DESTINATION IS DMM DIRTY-DOM-PS REGISTER |
+| 95 | D,DMM,ADOM | DESTINATION IS DMM ADOM REGISTER |
+| 96 | D,IMM,PSTP | DESTINATION IS IMM PSTP REGISTER |
+| 97 | D,IMM,PUWP | DESTINATION IS IMM PUWP REGISTER |
+| 98 | D,IMM,LA | DESTINATION IS IMM LA REGISTER |
+| 99 | D,IMM,WR | DESTINATION IS IMM WR REGISTER |
+| 100 | D,IMM,CAP | DESTINATION IS IMM CAPABILITY REGISTER |
+| 101 | D,IMM,PS | DESTINATION IS IMM PS REGISTER |
+| 102 | D,IMM,PHS | DESTINATION IS IMM PHS REGISTER |
+| 103 | D,IMM,DOM | DESTINATION IS IMM DOM REGISTER |
+| 104 | D,IMM,MEM | WRITE MEMORY IMM |
+| 105 | D,IMM,WTSB | DESTINATION IS IMM TSB |
+| 106 | D,IMM,CTSB | IMM TSB CLEAR |
+| 107 | D,IMM,CTRP | TRAP CLEAR AND UNLOCK THE IMM |
+| 110 | D,IMM,DIRTY | DESTINATION IS IMM DIRTY-DOM-PS REGISTER |
+| 111 | D,IMM,ADOM | DESTINATION IS IMM ADOM REGISTER |
+| 112 | D,MM,PSTP | DESTINATION IS IMM AND DMM PSTP REGISTER |
+| 113 | D,MM,PUWP | DESTINATION IS IMM AND DMM PUWP REGISTER |
+| 114 | D,MM,LA | DESTINATION IS IMM AND DMM LA REGISTER |
+| 115 | D,MM,WR | DESTINATION IS IMM AND DMM WR REGISTER |
+| 116 | D,MM,CAP | DESTINATION IS IMM AND DMM CAP REGISTERS |
+| 117 | D,MM,PS | DESTINATION IS IMM AND DMM PS REGISTER |
+| 118 | D,MM,PHS | DESTINATION IS IMM AND DMM PHS REGISTER |
+| 119 | D,MM,DOM | DESTINATION IS IMM AND DMM DOM REGISTER |
+| 121 | D,MM,WTSB | DESTINATION IS IMM AND DMM TSB |
+| 122 | D,MM,CTSB | IMM AND DMM TSB CLEAR |
+| 123 | D,MM,CTRP | TRAP CLEAR AND UNLOCK THE IMM AND DMM |
+| 126 | D,MM,DIRTY | DESTINATION IS IMM AND DMM DIRTY-DOM-PS REGISTER |
+| 127 | D,MM,ADOM | DESTINATION IS IMM AND DMM ADOM REGISTER |
+| 128 | D,MIC,MISTS | DESTINATION IS MIC STATUS REGISTER |
+| 129 | D,MIC,VECT | DESTINATION IS MIC VECTOR REGISTER |
+| 130 | D,RFA1 | DEST. IS RF1 ADDR. REG. |
+| 131 | D,RFA2 | DEST. IS RF2 ADDR. REG. |
+| 132 | D,MIC,STS | DESTINATION IS MIC STS-BITS |
+| 133 | D,MIC,TE | DESTINATION IS MIC TRAP ENABLE BITS |
+| 134 | D,MIC,BRK | DESTINATION IS MIC BREAKPOINT-REGISTER |
+| 135 | D,MIC,CNT32 | DESTINATION IS MIC 32-BIT COUNTER |
+| 136 | D,MIC,RESTU | CLEAR STACK UNDERFLOW |
+| 140 | D,RF1 | DESTINATION IS REG.FILE POINTED TO BY RF1 REGISTER |
+| 141 | D,RF2 | DESTINATION IS REG.FILE POINTED TO BY RF2 REGISTER |
+| 142 | D,RF1D | DESTINATION IS REG.FILE POINTED TO BY RF1, RF1 DECR. |
+| 143 | D,RF2D | DESTINATION IS REG.FILE POINTED TO BY RF2, RF2 DECR. |
+| 144 | D,SRF0 | DESTINATION IS SRF-WORD 0 |
+| 145 | D,SRF1 | DESTINATION IS SRF-WORD 1 |
+| 146 | D,SRF2 | DESTINATION IS SRF-WORD 2 |
+| 147 | D,SRF3 | DESTINATION IS SRF-WORD 3 |
+| 148 | D,SRF4 | DESTINATION IS SRF-WORD 4 |
+| 149 | D,SRF5 | DESTINATION IS SRF-WORD 5 |
+| 150 | D,SRF6 | DESTINATION IS SRF-WORD 6 |
+| 151 | D,SRF7 | DESTINATION IS SRF-WORD 7 |
+| 152 | D,SRF10 | DESTINATION IS SRF-WORD 10 |
+| 153 | D,SRF11 | DESTINATION IS SRF-WORD 11 |
+| 154 | D,SRF12 | DESTINATION IS SRF-WORD 12 |
+| 155 | D,SRF13 | DESTINATION IS SRF-WORD 13 |
+| 156 | D,SRF14 | DESTINATION IS SRF-WORD 14 |
+| 157 | D,SRF15 | DESTINATION IS SRF-WORD 15 |
+| 158 | D,SRF16 | DESTINATION IS SRF-WORD 16 |
+| 159 | D,SRF17 | DESTINATION IS SRF-WORD 17 |
+| 160 | D,IDU,TE | DESTINATION IS MIC TRAP ENABLE REGISTER |
+| 161 | D,IDU,HL | DESTINATION IS IDU HL REGISTER |
+| 162 | D,IDU,LL | DESTINATION IS IDU LL REGISTER |
+| 163 | D,IDU,LIMC | DESTINATION IS IDU LIMIT CONTROL REGISTER |
+| 164 | D,IDU,CSIT | CONDITIONAL SETTING OF SINGLE INSTRUCTION-TRAP |
+| 165 | D,IDU,STS | DESTINATION IS IDU STATUS REGISTER |
+| 166 | D,IDU,AREG | DESTINATION IS IDU ADDRESS REGISTER |
+| 167 | D,IDU,IBUF | DESTINATION IS IDU IBUF-REGISTER |
+| 193 | D,IAC,NPC | DESTINATION IS IAC NPC REGISTER |
+| 194 | D,IAC,P | DESTINATION IS IAC P REGISTER |
+| 196 | D,IAC,L | DESTINATION IS IAC L (LINK) REGISTER |
+| 197 | D,IAC,SUML | SUM IS TRANSFERRED TO IAC Y REGISTER |
+| 200 | D,IAC,DPA | DESTINATION IS IAC-DPA-REGISTER |
+| 205 | D,IAC,CLKNPC | LA -> NPC |
+| 206 | D,IAC,CLKP | NPC -> P |
+| 207 | D,IAC,CLKSP | P -> SP |
+| 225 | D,DAC,R | DESTINATION IS DAC R (RECORD) REGISTER |
+| 226 | D,DAC,B | DESTINATION IS DAC B (BASE) REGISTER |
+| 227 | D,DAC,SUMB | SUM IS TRANSFERRED TO DAC B REGISTER |
+| 228 | D,DAC,REG04 | [UNDOCUMENTED GUESS] DESTINATION IS DAC REGISTER 04 - 8 occurrences |
+| 229 | D,DAC,REG05 | [UNDOCUMENTED GUESS] DESTINATION IS DAC REGISTER 05 - 12 occurrences |
+| 232 | D,DAC,DPA | DESTINATION IS DAC DPA-REGISTER |
+| 252 | D,DAC,LDRES | [UNDOCUMENTED GUESS] DESTINATION IS DAC LOAD RESULT REGISTER - used at LOADR, LOADCT_R, LOADRB_R with READ operations |
+
+#### GROUP (Bits 83-81)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | ALU | Working Register File (000) |
+| 1 | SPEC | Special Registers (001) |
+| 2 | MMS_NOOP | Memory Management NOOP (010) |
+| 3 | MMS_DMM | Memory Management DMM (011) |
+| 4 | MIC | Microcode Control (100) |
+| 5 | IDU | Instruction Decode Unit (101) |
+| 6 | IAC | Instruction Address Control (110) |
+| 7 | DAC | Data Address Control (111) |
+
+#### REGISTER (Bits 80-76)
+
+---
+
+## STATUS: Status and flag control
+
+### STATUS (Bits 75-72)
+
+Status bits control
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | Hold status unchanged |
+| 1 | K,ONE | SET K (FLAG) 1 TO K |
+| 2 | K,ZRO | CLEAR K (FLAG) 0 TO K |
+| 3 | K,1IFZ | SET K TO 1 IF ALU OPERATION IS 0 |
+| 4 | ST,SAVA | SAVE STATUS FROM ALU OPERATION |
+| 5 | ST,SAVC | SAVE STATUS FROM ALU IN COMPARE |
+| 6 | ST,SAVF | SAVE STATUS FROM FLOATING OPERATION |
+| 7 | ST,SAVB | SAVE STATUS FROM BCD OPERATION |
+| 8 | ST,LOAD | LOAD ALU STATUS |
+| 9 | ST,SAVM | SAVE MIXED STATUS FOR INTEGER MULTIPLY |
+| 12 | ST,ACCA | SAVE AND ACCUMULATE ALU STATUS |
+| 13 | ST,ACCM | SAVE AND ACCUMULATE MIXED STATUS |
+| 14 | ST,ACCF | SAVE AND ACCUMULATE AAP STATUS |
+| 15 | TE,ALU,LOAD | LOAD ALU TRAP ENABLE BITS |
+
+### IXC_INCR (Bits 71-71)
+
+Index counter increment
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | No index counter adjustment |
+| 1 | IXADJ | INDEX COUNTER INCREMENT |
+
+### LC_DECR (Bits 70-70)
+
+Loop counter decrement
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | No loop counter decrement |
+| 1 | LCDECR | DECREMENT THE LOOP COUNTER |
+
+---
+
+## SEQUENCER: Microprogram sequence control
+
+### COND_SEQ (Bits 69-69)
+
+Enable conditional sequence
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | Use true sequence only |
+| 1 | C,SEQ | ENABLE CONDITIONAL SEQUENCE |
+
+### SEQ_TRUE (Bits 68-65)
+
+Sequence control when condition true (2-bit type + 2-bit stack)
+
+#### TYPE (Bits 68-67)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | T,JMP | JUMP TO ADDRESS (1 cycle) |
+| 1 | T,JMPREL | JUMP RELATIVE / VECTOR (2 cycles) |
+| 2 | T,RETURN | RETURN TO SEQUENCER ADDRESS (2 cycles) |
+| 3 | T,NEXT | NEXT MICRO INSTRUCTION (2 cycles) |
+
+#### STACK (Bits 66-65)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | T,HOLD | HOLD SEQUENCER STACK |
+| 1 | T,POP | POP SEQUENCER STACK |
+| 2 | T,LOAD | LOAD SEQUENCER STACK |
+| 3 | T,PUSH | PUSH SEQUENCER STACK |
+
+### SEQ_FALSE (Bits 64-61)
+
+Sequence control when condition false (2-bit type + 2-bit stack)
+
+#### TYPE (Bits 64-63)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | F,JMP | FALSE JUMP TO ADDRESS |
+| 1 | F,JMPREL | FALSE VECTOR JUMP TO ADDRESS |
+| 2 | F,RETURN | FALSE RETURN TO TOP OF STACK |
+| 3 | F,NEXT | FALSE NEXT MICRO INSTRUCTION |
+
+#### STACK (Bits 62-61)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | F,HOLD | FALSE HOLD SEQUENCER STACK |
+| 1 | F,POP | FALSE POP SEQUENCER STACK |
+| 2 | F,LOAD | FALSE LOAD SEQUENCER STACK |
+| 3 | F,PUSH | FALSE PUSH SEQUENCER STACK |
+
+### INVSEQ (Bits 60-60)
+
+Invert test condition for sequence selection
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | Use condition as-is |
+| 1 | INVSEQ | INVERT TEST CONDITION FOR SEQUENCE |
+
+### CSAVE (Bits 59-59)
+
+Save test condition to stack
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | Don't save condition |
+| 1 | CSAVE | PUSH TEST CONDITION TO STACK(2) |
+
+### TESTOBJ (Bits 58-53)
+
+Test condition select
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | COND,MSEXO | EXOR OF S AND O FROM ALU RESULT |
+| 1 | COND,MSORZ | OR OF S AND Z FROM ALU OPERATION |
+| 2 | COND,SORZ | OR OF S AND Z FROM STATUS (S1) |
+| 3 | COND,MCNZ | AND OF C AND NOT Z FROM ALU OPERATION |
+| 8 | COND,CNZ | AND OF C AND NOT Z FROM STATUS (S1) |
+| 9 | COND,MZRO | Z FROM ALU OPERATION |
+| 10 | COND,MCRY | C FROM ALU OPERATION |
+| 11 | COND,MSGN | S FROM ALU OPERATION |
+| 16 | COND,MOVFL | O FROM ALU OPERATION |
+| 17 | COND,ZRO | Z FROM S1 |
+| 18 | COND,CRY | C FROM S1 |
+| 19 | COND,SGN | S FROM S1 |
+| 20 | COND,K | K FROM S1 |
+| 21 | COND,OVFL | O FROM S1 |
+| 24 | COND,PARITY | PARITY OF LEAST SIGNIFICANT BYTE OF F-BUS |
+| 25 | COND,Q0 | Q-REGISTER BIT 0 |
+| 26 | COND,SAVC1 | TOP BIT OF SAVED CONDITION STACK |
+| 27 | COND,SAVC2 | BOTTOM BIT OF SAVED CONDITION STACK |
+| 28 | COND,LCZ | LOOP COUNTER ZERO RESULT |
+| 32 | COND,ENTER | CHECK FOR ENT- INSTRUCTIONS |
+| 34 | COND,DATOP | CHECK FOR DATA AS OPERAND |
+| 35 | COND,CONOP | CHECK FOR CONSTANT AS OPERAND |
+| 36 | COND,PDONE | PART DONE FROM STATUS (S1) |
+| 37 | COND,MFS | S FROM FLOATING AAP |
+| 40 | COND,MFO | O FROM FLOATING AAP |
+| 41 | COND,MFU | U FROM FLOATING AAP |
+| 42 | COND,MDZ | DIVIDE BY 0 FROM FLOATING AAP |
+| 43 | COND,MIVO | INVALID OPERATION FROM BCD AAP |
+| 44 | COND,MBO | O FROM BCD AAP |
+| 48 | COND,RF1OCT | ZERO IN RF-ADDRESS 1 BITS 0-2 |
+| 49 | COND,RF2OCT | ZERO IN RF-ADDRESS 2 BITS 0-2 |
+| 56 | COND,GOOPS | GET-TYPE IS G,OOPS |
+| 57 | COND,AQSLZ | Q0 FOR ALU, LCZ FOR SEQ. |
+| 59 | COND,IRALT | FIRST-OPERAND IS ALT-ADDRESSED |
+| 60 | COND,CALL | MACROINSTR. IS CALL |
+| 61 | COND,ENTM | MACROINSTR. IS ENTM |
+| 62 | COND,ENTT | MACROINSTR. IS ENTT |
+| 63 | COND,JUMPG | MACROINSTR. IS JUMPG |
+
+---
+
+## IAC: Instruction Address Control
+
+### ABR (Bits 52-51)
+
+Alternative branch control
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | No alternative branch |
+| 1 | ABR,NEXT | CALCULATE NEXT INSTRUCTION STREAM ADDRESS |
+| 2 | ABR,NPCREL | CALCULATE JUMP TARGET ADDRESS |
+| 3 | ABR,NEXTL | CALCULATE NEXT ADDRESS TO LINK REGISTER |
+
+### TBC (Bits 50-48)
+
+Target branch cache control
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | TBC,NEXT | CACHE WRITE NEXT INSTRUCTION STREAM ADDRESS |
+| 1 | TBC,SUBR | CACHE WRITE SUBROUTINE ADDRESS |
+| 2 | TBC,L | CACHE WRITE LINK REGISTER (ASSUMING) |
+| 3 | TBC,NPCREL | CACHE WRITE NPC RELATIVE JUMP ADDRESS |
+| 4 | TBC,PREL | CACHE WRITE P RELATIVE JUMP ADDRESS |
+| 6 | TBC,INCILAR | ILAR + 4 -> ILAR |
+| 7 | TBC,NOOP | NO TBC-OPERATION |
+
+### GET (Bits 47-44)
+
+Instruction/operand fetch control
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | No fetch operation |
+| 1 | CLEAR | CLEAR IAC |
+| 3 | ISAMP | INTERRUPT SAMPLE |
+| 4 | G,OOPS | GET NEXT INSTRUCTION AND OPERAND SPECIFIER |
+| 5 | G,OOPS,T | GET NEXT INSTRUCTION AND OPERAND SPECIFIER IF TRUE |
+| 6 | G,OOPS,F | GET NEXT INSTRUCTION AND OPERAND SPECIFIER IF FALSE |
+| 7 | G,COOPS | GET NEXT INSTRUCTION AND OPERAND AFTER CALL |
+| 8 | G,DIR1 | GET IMMEDIATE OPERAND 1 BYTE LONG |
+| 9 | G,DIR2 | GET IMMEDIATE OPERAND 2 BYTES LONG |
+| 10 | G,OPS | GET SECOND OR LATER OPERAND SPECIFIER |
+| 11 | G,DIR4 | GET IMMEDIATE OPERAND 4 BYTES LONG |
+| 13 | G,OPSTRD | GET SECOND OPERAND SPECIFIER FOR STRING INSTR |
+| 14 | G,TOOPS | GET NEXT INSTRUCTION CODE, FOR TESTING ONLY |
+| 15 | LOADLA | SET START ADDRESS FROM IB TO LA |
+
+---
+
+## CONTROL: Miscellaneous control
+
+### STOP (Bits 43-43)
+
+Stop microprogram execution
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (continue) | Continue execution |
+| 1 | STOP | STOP-MICROPROGRAM |
+
+### AAPSYNC (Bits 42-42)
+
+Wait for AAP ready
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | Normal operation |
+| 1 | AAPSYNC | WAIT FOR AAP READY |
+
+---
+
+## MEMORY: Data memory control
+
+### MEMORY (Bits 41-32)
+
+Memory control (split field: bit 41 + bits 34-32)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | No data request |
+| 1 | LADDR | PERFORM A LADDER REQUEST |
+| 2 | WR,POF | PERFORM A PHYSICAL WRITE WITH MMS |
+| 3 | CCD | CLEAR CACHE AND DUMP DIRTY |
+| 4 | WR,PHYS | WRITE PHYSICAL SEGMENT |
+| 5 | WR,DOM | WRITE DATA MEMORY IN NORMAL DOMAIN |
+| 6 | WR,ADOM | WRITE DATA MEMORY IN ALTERNATIVE DOMAIN |
+| 7 | WRITE | WRITE DATA MEMORY |
+| 8 | QVACC | FORCE QVACC (USE WITH A,IAC, AND LOADLA) |
+| 9 | RD,POF | PERFORM A PHYSICAL READ WITH MMS |
+| 11 | RD,PX | READ DATA MEMORY, WRITE PERMIT REQUIRED |
+| 12 | RD,PHYS | READ PHYSICAL SEGMENT |
+| 13 | RD,DOM | READ DATA MEMORY IN NORMAL DOMAIN |
+| 14 | RD,ADOM | READ DATA MEMORY IN ALTERNATIVE DOMAIN |
+| 15 | READ | READ DATA MEMORY |
+
+### EA_SAVE (Bits 39-38)
+
+EA save control
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (none) | No EA save |
+| 1 | EA1SAVE | SAVE ADDRESS IN EA1 AND EAO |
+| 2 | EA2SAVE | SAVE ADDRESS IN EA2 AND EAO |
+| 3 | EA3SAVE | SAVE ADDRESS IN EA3 AND EAO |
+
+### MEMOT (Bits 37-37)
+
+Memory request if data operand
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (req) | Request |
+| 1 | C,MEMOT | MEMORY REQUEST IF DATA-OPERAND |
+
+### ADACT (Bits 35-35)
+
+Address arithmetic activate
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (hold) | Hold |
+| 1 | ADACT | ADDRESS ARITHMETIC ACTIVATE |
+
+---
+
+## ADDRESS: Address and argument fields
+
+### ABS_ADDR (Bits 31-16)
+
+Absolute microprogram jump address (also overlaps with long/short argument)
+
+### LARG (Bits 31-0)
+
+Long Argument (32-bit)
+
+### SARG (Bits 15-0)
+
+Short Argument (16-bit, sign extended)
+
+### MARG (Bits 7-0)
+
+Mini Argument (8-bit)
+
+### AA (Bits 15-13)
+
+Address A-operand
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | AA,0 | ADDRESS A OPERAND IS ZERO |
+| 1 | AA,MARG | ADDRESS A OPERAND IS MINIARGUMENT |
+| 2 | AA,DISP | ADDRESS A OPERAND IS DISPLACEMENT |
+| 3 | AA,DATA | ADDRESS A OPERAND IS DATA REGISTER |
+| 4 | AA,EAO | ADDRESS A OPERAND IS EAO REGISTER |
+| 5 | AA,EA1 | ADDRESS A OPERAND IS EA1 REGISTER |
+| 6 | AA,EA2 | ADDRESS A OPERAND IS EA2 REGISTER |
+| 7 | AA,EA3 | ADDRESS A OPERAND IS EA3 REGISTER |
+
+### AB (Bits 12-9)
+
+Address B-operand
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | AB,0 | ADDRESS B OPERAND IS ZERO |
+| 1 | AB,MARG | ADDRESS B OPERAND IS MINIARGUMENT |
+| 2 | AB,B | ADDRESS B OPERAND IS BASE (B) REGISTER |
+| 3 | AB,R | ADDRESS B OPERAND IS RECORD (R) REGISTER |
+| 4 | AB,IX1 | ADDRESS B OPERAND IS INDEX REGISTER X1 |
+| 5 | AB,IX2 | ADDRESS B OPERAND IS INDEX REGISTER X2 |
+| 6 | AB,IX3 | ADDRESS B OPERAND IS INDEX REGISTER X3 |
+| 7 | AB,IX4 | ADDRESS B OPERAND IS INDEX REGISTER X4 |
+| 8 | AB,CMBRET | RETURN FROM CMISS U-CODE |
+| 9 | AB,ADR | EAO IF RECYCLE NOT NECESSARY |
+| 10 | AB,EA1DIR | EA1 IF RECYCLE NOT NECESSARY |
+| 11 | AB,ADR+4 | PREVIOUS ADDRESS +4 IF RECYCLE NOT NECESSARY |
+| 12 | AB,X1ORS | DESC(X)(I1), I1 SCALED ACCORDING TO INSTRUCTION |
+| 13 | AB,X2ORS | DESC(X)(I2), I2 SCALED ACCORDING TO INSTRUCTION |
+| 14 | AB,X3ORS | DESC(X)(I3), I3 SCALED ACCORDING TO INSTRUCTION |
+| 15 | AB,X4ORS | DESC(X)(I4), I4 SCALED ACCORDING TO INSTRUCTION |
+
+### SCAL (Bits 8-6)
+
+Index scaling
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | IX*1 | SCALING = *1 (Byte) |
+| 1 | IX*2 | SCALING = *2 (Halfword) |
+| 2 | IX*4 | SCALING = *4 (Word/Single float) |
+| 3 | IX*8 | SCALING = *8 (Double float) |
+| 4 | IX/8 | SCALING = /8 (Bit) |
+| 5 | IX*16 | SCALING = *16 (80-bit floating) |
+
+### ORCON (Bits 5-0)
+
+OR logic control field
+
+#### ORCON_N (Bits 5-5)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (current) | OR-CONTROL IS FOR CURRENT CYCLE |
+| 1 | OR.N | OR-CONTROL IS FOR NEXT CYCLE |
+
+#### ORCON_E (Bits 4-4)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | (disabled) | EXTENSION REGISTER DISABLED |
+| 1 | OR,NE | ENABLE EXTENSION REGISTER IN NEXT MICRO CYCLE |
+
+#### ORCON_A (Bits 3-2)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | ORA,IN | OR A OPERAND FROM INSTRUCTION |
+| 1 | ORA,OP | OR A OPERAND FROM OPERAND SPECIFIER |
+| 3 | ORA,ALTEN | OR A OPERAND FROM STRING SOURCE OPERAND |
+
+#### ORCON_D (Bits 1-0)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0 | ORD,IN | OR DESTINATION FROM INSTRUCTION |
+| 1 | ORD,OP | OR DESTINATION FROM OPERAND SPECIFIER |
+| 2 | ORD,OP1 | OR DESTINATION FROM FIRST OPERAND SPECIFIER |
+| 3 | ORD,ALTEN | OR DESTINATION FROM STRING DEST. OPERAND |
+
+---
+
+## Composite ALU Mnemonics (Assembler Shortcuts)
+
+The following mnemonics are composite forms that combine an ALU operation with a CARRY selection.
+These are shortcuts supported by the assembler that expand to the base ALU operation plus the
+appropriate carry modifier.
+
+### ALU True Path Composites
+
+These combine ALU operations (bits 127-124) with CRY,ONE (carry=1, bits 123-122):
+
+| Composite Mnemonic | Expands To | Description |
+|-------------------|------------|-------------|
+| ALU,A+1 | ALU,A + CRY,ONE | A operand plus 1 |
+| ALU,A+B+1 | ALU,A+B + CRY,ONE | A plus B plus 1 |
+| ALU,A-B | ALU,A-B + CRY,ONE | A minus B (with borrow compensation) |
+| ALU,A-B,*2 | ALU,A-B,*2 + CRY,ONE | (A minus B) times 2 |
+| ALU,B-A | ALU,B-A + CRY,ONE | B minus A (with borrow compensation) |
+
+These combine ALU operations with CRY,C (carry from status):
+
+| Composite Mnemonic | Expands To | Description |
+|-------------------|------------|-------------|
+| ALU,A-B-1+C | ALU,A-B + CRY,C | A minus B minus 1 plus status carry |
+
+These use base carry=0:
+
+| Composite Mnemonic | Expands To | Description |
+|-------------------|------------|-------------|
+| ALU,A-B-1 | ALU,A-B + (zero) | A minus B minus 1 |
+| ALU,A-B-1,*2 | ALU,A-B,*2 + (zero) | (A minus B minus 1) times 2 |
+| ALU,B-A-1 | ALU,B-A + (zero) | B minus A minus 1 |
+
+### ALU False Path Composites
+
+Same pattern as True path but using ALUF and CRYF prefixes:
+
+| Composite Mnemonic | Expands To | Description |
+|-------------------|------------|-------------|
+| ALUF,A+1 | ALUF,A + CRYF,ONE | A operand plus 1 |
+| ALUF,A+B+1 | ALUF,A+B + CRYF,ONE | A plus B plus 1 |
+| ALUF,A-B | ALUF,A-B + CRYF,ONE | A minus B (with borrow compensation) |
+| ALUF,A-B,*2 | ALUF,A-B,*2 + CRYF,ONE | (A minus B) times 2 |
+| ALUF,B-A | ALUF,B-A + CRYF,ONE | B minus A (with borrow compensation) |
+| ALUF,A-B-1+C | ALUF,A-B + CRYF,C | A minus B minus 1 plus status carry |
+| ALUF,B-A-1+C | ALUF,B-A + CRYF,C | B minus A minus 1 plus status carry |
+| ALUF,A-B-1 | ALUF,A-B + (zero) | A minus B minus 1 |
+| ALUF,A-B-1,*2 | ALUF,A-B,*2 + (zero) | (A minus B minus 1) times 2 |
+| ALUF,B-A-1 | ALUF,B-A + (zero) | B minus A minus 1 |
+
+**Note:** The disassembler displays the base ALU operation and CARRY as separate mnemonics
+(e.g., "ALU,A CRY,ONE" instead of "ALU,A+1"). This provides more explicit information about
+the actual microcode encoding.
+
+---
+
