@@ -206,61 +206,77 @@
         }
 
         /* Detail panel */
-        .detail-panel {
+        .hex-bar {
             background: var(--bg-card);
             border-bottom: 1px solid var(--border);
-            padding: 15px 20px;
+            padding: 8px 20px;
             display: none;
+            align-items: center;
+            gap: 15px;
             flex-shrink: 0;
-            max-height: 35vh;
+            font-family: 'Courier New', monospace;
+        }
+
+        .hex-bar.visible {
+            display: flex;
+        }
+
+        .hex-addr {
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        .hex-label {
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .hex-value {
+            flex: 1;
+            color: var(--text-secondary);
+            font-size: 13px;
+            letter-spacing: 1px;
+        }
+
+        .hex-bar .close-btn {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 0 5px;
+        }
+
+        .hex-bar .close-btn:hover {
+            color: var(--accent);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .detail-panel {
+            width: 320px;
+            background: var(--bg-card);
+            border-left: 1px solid var(--border);
+            display: none;
+            flex-direction: column;
+            flex-shrink: 0;
             overflow-y: auto;
         }
 
         .detail-panel.visible {
-            display: block;
+            display: flex;
         }
 
         .detail-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .detail-title {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .detail-addr {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--primary);
-            font-family: 'Courier New', monospace;
-        }
-
-        .detail-label {
+            padding: 10px 15px;
             font-weight: 600;
             color: var(--text-primary);
-        }
-
-        .detail-hex {
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
+            border-bottom: 1px solid var(--border);
             background: var(--bg-code);
-            padding: 8px 12px;
-            border-radius: 4px;
-            word-break: break-all;
-            margin-bottom: 10px;
-        }
-
-        .bit-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 8px;
         }
 
         .bit-field-row {
@@ -317,42 +333,19 @@
             font-weight: 500;
         }
 
+        #bitDisplay {
+            padding: 10px 15px;
+        }
+
         .bit-fields-grid {
-            display: grid;
-            grid-template-rows: repeat(12, auto);
-            grid-auto-flow: column;
-            gap: 4px 0;
-            margin-top: 10px;
-        }
-
-        .bit-fields-grid > * {
-            padding-right: 15px;
-            margin-left: 15px;
-            padding-left: 10px;
-            border-left: 1px solid var(--border);
-        }
-
-        .bit-fields-grid > *:nth-child(-n+12) {
-            border-left: none;
-            margin-left: 0;
-            padding-left: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
         }
 
         .bit-field-group-wrap {
             display: flex;
             flex-direction: column;
-        }
-
-        .bit-row-label {
-            min-width: 80px;
-            font-size: 11px;
-            color: var(--text-secondary);
-            font-family: 'Courier New', monospace;
-        }
-
-        .bits-container {
-            display: flex;
-            gap: 1px;
         }
 
         .bit-box {
@@ -400,6 +393,7 @@
             flex: 1;
             overflow-y: auto;
             background: var(--bg-card);
+            min-width: 0;
         }
 
         .listing {
@@ -454,7 +448,8 @@
 
         .mnemonic {
             display: inline;
-            margin-right: 6px;
+            margin-right: 8px;
+            white-space: nowrap;
         }
 
         .mnemonic:hover {
@@ -1052,7 +1047,14 @@
             <button class="btn-primary" id="jumpBtn">Go</button>
         </div>
         <div class="control-group">
-            <button class="btn-outline" id="showHexBtn">Show Hex</button>
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="showHexCheckbox"> Show Hex
+            </label>
+        </div>
+        <div class="control-group">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="showBitsCheckbox" checked> Show Fields
+            </label>
         </div>
         <div class="control-group">
             <select id="downloadFormat">
@@ -1078,21 +1080,22 @@
         </div>
     </div>
 
-    <div class="detail-panel" id="detailPanel">
-        <div class="detail-header">
-            <div class="detail-title">
-                <span class="detail-addr" id="detailAddr"></span>
-                <span class="detail-label" id="detailLabel"></span>
-            </div>
-            <button class="close-btn" id="closeDetailBtn">&times;</button>
-        </div>
-        <div class="detail-hex" id="detailHex"></div>
-        <div id="bitDisplay"></div>
+    <div class="hex-bar" id="hexBar">
+        <span class="hex-addr" id="hexAddr"></span>
+        <span class="hex-label" id="hexLabel"></span>
+        <span class="hex-value" id="hexValue"></span>
+        <button class="close-btn" id="closeDetailBtn">&times;</button>
     </div>
 
-    <div class="listing-container" id="listingContainer">
-        <div class="listing" id="listing">
-            <div class="loading">Loading microcode data...</div>
+    <div class="main-content">
+        <div class="listing-container" id="listingContainer">
+            <div class="listing" id="listing">
+                <div class="loading">Loading microcode data...</div>
+            </div>
+        </div>
+        <div class="detail-panel" id="detailPanel">
+            <div class="detail-header">Field Breakdown</div>
+            <div id="bitDisplay"></div>
         </div>
     </div>
 
@@ -1314,7 +1317,8 @@
 
         function decodeAlu(v) {
             const op = (v >> 2) & 0xF, c = v & 3;
-            return `ALU,${ALU_OPS[op]||'?'}${CARRY_OPS[c]||''}`;
+            const carry = CARRY_OPS[c] || '';
+            return `ALU,${ALU_OPS[op]||'?'}${carry ? ' ' + carry : ''}`;
         }
 
         function decodeAap(v) {
@@ -1503,7 +1507,6 @@
                 // Find the file info from manifest to get labelFile
                 const fileInfo = microcodeManifest?.files?.find(f => f.path === filePath);
                 const labelFilePath = fileInfo?.labelFile || filePath;
-                console.log('switchMicrocode:', filePath, 'fileInfo:', fileInfo, 'labelFilePath:', labelFilePath);
 
                 const wc = await loadMicrocodeData(filePath);
                 const lc = await loadLabels(labelFilePath);
@@ -1529,10 +1532,7 @@
             for (const k of Object.keys(labels)) delete labels[k];
             for (const k of Object.keys(labelsByAddr)) delete labelsByAddr[k];
 
-            const url = filePath + '.LABE';
-            console.log('loadLabels: fetching', url);
-            const r = await fetch(url);
-            console.log('loadLabels: response status', r.status, r.ok);
+            const r = await fetch(filePath + '.LABE');
             if (!r.ok) {
                 console.log('No labels file for: ' + filePath);
                 return 0;
@@ -1731,7 +1731,9 @@
                 html += `<span class="inst-addr">${toOctal(inst.address)}</span>`;
                 html += `<span class="inst-label">${inst.label}</span>`;
                 html += `<span class="inst-mnemonics">`;
-                for (const m of inst.mnemonics) {
+                for (let mi = 0; mi < inst.mnemonics.length; mi++) {
+                    const m = inst.mnemonics[mi];
+                    if (mi > 0) html += '&nbsp;';
                     if (m.isAddr) {
                         html += `<span class="mnemonic addr-ref" data-target="${m.targetAddr}" data-field="${m.field}">${m.text}</span>`;
                     } else if (m.isUndefined) {
@@ -1760,21 +1762,21 @@
             const inst = disassembledInstructions[addr];
             if (!inst) return;
 
+            // Populate and show hex bar
+            const hb = document.getElementById('hexBar');
+            hb.classList.add('visible');
+            document.getElementById('hexAddr').textContent = toOctal(addr);
+            document.getElementById('hexLabel').textContent = inst.label || '';
+            document.getElementById('hexValue').textContent = inst.hex;
+
+            // Show detail panel if checkbox is checked
             const dp = document.getElementById('detailPanel');
-            dp.classList.add('visible');
-                        document.getElementById('detailAddr').textContent = toOctal(addr);
-            document.getElementById('detailLabel').textContent = inst.label || '';
-            document.getElementById('detailHex').textContent = inst.hex;
-
-            let bh = '<div class="bit-row"><span class="bit-row-label">128 bits:</span><div class="bits-container">';
-            for (let b = 127; b >= 0; b--) {
-                const v = Number((inst.bigIntValue >> BigInt(b)) & 1n);
-                const fieldInfo = getFieldForBit(b);
-                bh += `<div class="bit-box ${v?'on':'off'}" data-bit="${b}" data-field="${fieldInfo.name}">${v}</div>`;
+            if (document.getElementById('showBitsCheckbox').checked) {
+                dp.classList.add('visible');
             }
-            bh += '</div></div>';
 
-            // Build 3-column grid of all fields from JSON, sorted by bit position (highest first)
+            // Build single column of all fields from JSON, sorted by bit position (highest first)
+            let bh = '';
             const allFields = [];
             if (microcodeDef && microcodeDef.fieldGroups) {
                 for (const [gn, g] of Object.entries(microcodeDef.fieldGroups)) {
@@ -1888,12 +1890,6 @@
 
             bh += '</div>';
             document.getElementById('bitDisplay').innerHTML = bh;
-
-            // Add hover handlers for 128-bit display
-            document.querySelectorAll('#bitDisplay .bit-box[data-bit]').forEach(el => {
-                el.addEventListener('mouseenter', showBitTooltip);
-                el.addEventListener('mouseleave', hideTooltip);
-            });
 
             // Add hover handlers for field rows
             document.querySelectorAll('#bitDisplay .bit-field-row').forEach(el => {
@@ -2106,14 +2102,27 @@
                 document.getElementById('searchInput').addEventListener('keypress', e => { if (e.key === 'Enter') { const t = document.getElementById('searchInput').value.trim(); if (t) searchLabel(t, searchMatches.length > 0 && t.toUpperCase() === lastSearchTerm); } });
                 document.getElementById('jumpBtn').addEventListener('click', () => { const a = parseInt(document.getElementById('jumpInput').value.trim(), 8); if (!isNaN(a) && a >= 0 && a < disassembledInstructions.length) jumpToAddress(a); else alert('Invalid address'); });
                 document.getElementById('jumpInput').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('jumpBtn').click(); });
-                document.getElementById('showHexBtn').addEventListener('click', () => { showHex = !showHex; document.getElementById('showHexBtn').textContent = showHex ? 'Hide Hex' : 'Show Hex'; document.getElementById('showHexBtn').classList.toggle('active', showHex); renderListing(); });
+                document.getElementById('showHexCheckbox').addEventListener('change', e => { showHex = e.target.checked; renderListing(); });
                 document.getElementById('downloadFormat').addEventListener('change', e => { if (e.target.value) { downloadDisassembly(e.target.value); e.target.value = ''; } });
                 document.getElementById('themeBtn').addEventListener('click', () => { isDarkTheme = !isDarkTheme; document.body.classList.toggle('dark-theme', isDarkTheme); });
                 document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderListing(); document.getElementById('listingContainer').scrollTop = 0; } });
                 document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < Math.ceil(disassembledInstructions.length / pageSize)) { currentPage++; renderListing(); document.getElementById('listingContainer').scrollTop = 0; } });
                 document.getElementById('pageSizeSelect').addEventListener('change', e => { pageSize = parseInt(e.target.value); currentPage = 1; renderListing(); });
                 document.getElementById('microcodeSelect').addEventListener('change', e => { if (e.target.value) switchMicrocode(e.target.value); });
-                document.getElementById('closeDetailBtn').addEventListener('click', () => { document.getElementById('detailPanel').classList.remove('visible'); selectedAddr = null; renderListing(); });
+                document.getElementById('closeDetailBtn').addEventListener('click', () => {
+                    document.getElementById('hexBar').classList.remove('visible');
+                    document.getElementById('detailPanel').classList.remove('visible');
+                    selectedAddr = null;
+                    renderListing();
+                });
+                document.getElementById('showBitsCheckbox').addEventListener('change', e => {
+                    const dp = document.getElementById('detailPanel');
+                    if (e.target.checked && selectedAddr !== null) {
+                        dp.classList.add('visible');
+                    } else {
+                        dp.classList.remove('visible');
+                    }
+                });
 
                 // Reference modal events
                 document.getElementById('refBtn').addEventListener('click', openRefModal);
