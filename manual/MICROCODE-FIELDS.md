@@ -132,7 +132,37 @@ Structure: **ALU** (bits 127-124, 4 bits) + **C** (bits 123-122, 2 bits)
 
 Structure: **ALU** (bits 121-118, 4 bits) + **C** (bits 117-116, 2 bits)
 
-Same encoding as True field. When False ALU is used, it automatically enables conditional ALU execution.
+Same encoding as True field but uses `ALUF,` and `CRYF,` mnemonic prefixes. When False ALU is used (non-zero value), it automatically enables conditional ALU execution (sets C,ALU).
+
+#### ALU Function (bits 121-118)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 0000 | ALUF,FZRO | Force zero output |
+| 0001 | ALUF,ADRC | A-operand inverted (complement) |
+| 0010 | ALUF,AND | A AND B |
+| 0011 | ALUF,ANDCB | A AND (NOT B) |
+| 0100 | ALUF,A | A-operand direct through ALU |
+| 0101 | ALUF,XOR | A XOR B |
+| 0110 | ALUF,ANDCA | (NOT A) AND B |
+| 0111 | ALUF,OR | A OR B |
+| 1000 | ALUF,A-1 | A minus 1 |
+| 1001 | ALUF,A,/2 | FBUS = ALU.output/2, FBUS(31) = carry |
+| 1010 | ALUF,A-B | A minus B |
+| 1011 | ALUF,A-B,*2 | FBUS = ALU.output*2, FBUS(0) = 0 |
+| 1100 | ALUF,A+B,/2 | FBUS = ALU.output/2, FBUS(31) = carry |
+| 1101 | ALUF,A+B | A plus B |
+| 1110 | ALUF,B-A | B minus A |
+| 1111 | ALUF,A+B,*2 | FBUS = ALU.output*2, FBUS(0) = 0 |
+
+#### C - Carry Select (bits 117-116)
+
+| Value | Mnemonic | Description |
+|-------|----------|-------------|
+| 00 | (zero) | Carry input = 0 |
+| 01 | CRYF,ONE | ONE AS CARRY |
+| 10 | CRYF,C | C FROM STATUS AS CARRY |
+| 11 | CRYF,MC | MICRO CARRY AS CARRY |
 
 ---
 
@@ -151,6 +181,13 @@ Same encoding as True field. When False ALU is used, it automatically enables co
 |-------|----------|-------------|
 | 0 | (true only) | ALU uses true function only |
 | 1 | C,ALU | ENABLE CONDITIONAL ALU OPERATION |
+
+When C,ALU is enabled, the disassembly syntax is:
+```
+C,ALU ALU,<func> [CRY,<mode>] ALUF,<func> [CRYF,<mode>]
+```
+
+Example: `C,ALU ALU,A-B CRY,ONE ALUF,A+B` performs subtraction on true condition, addition on false.
 
 ---
 
