@@ -1197,6 +1197,8 @@
         let DATATYPE_OPS = {};
         let ALU_OPS = {};
         let CARRY_OPS = {};
+        let ALUF_OPS = {};
+        let CRYF_OPS = {};
         let AAP1_OPS = {};
         let AAP2_OPS = {};
 
@@ -1294,6 +1296,10 @@
                 ALU_OPS = extractSubfield(fg.ALU.fields.ALU_TRUE, 'ALU');
                 CARRY_OPS = extractSubfield(fg.ALU.fields.ALU_TRUE, 'CARRY');
             }
+            if (fg.ALU?.fields?.ALU_FALSE?.subfields) {
+                ALUF_OPS = extractSubfield(fg.ALU.fields.ALU_FALSE, 'ALU');
+                CRYF_OPS = extractSubfield(fg.ALU.fields.ALU_FALSE, 'CARRY');
+            }
 
             // AAP group - subfields
             if (fg.AAP?.fields?.AAP_CTRL?.subfields) {
@@ -1319,6 +1325,12 @@
             const op = (v >> 2) & 0xF, c = v & 3;
             const carry = CARRY_OPS[c] || '';
             return `ALU,${ALU_OPS[op]||'?'}${carry ? ' ' + carry : ''}`;
+        }
+
+        function decodeAluFalse(v) {
+            const op = (v >> 2) & 0xF, c = v & 3;
+            const carry = CRYF_OPS[c] || '';
+            return `ALUF,${ALUF_OPS[op]||'?'}${carry ? ' ' + carry : ''}`;
         }
 
         function decodeAap(v) {
@@ -1363,8 +1375,9 @@
             const m = [];
 
             if (f.COND_ALU) {
-                m.push({text: decodeAlu(f.ALU_TRUE)+' (T)', field:'ALU_TRUE'});
-                m.push({text: decodeAlu(f.ALU_FALSE)+' (F)', field:'ALU_FALSE'});
+                m.push({text: 'C,ALU', field:'COND_ALU'});
+                m.push({text: decodeAlu(f.ALU_TRUE), field:'ALU_TRUE'});
+                m.push({text: decodeAluFalse(f.ALU_FALSE), field:'ALU_FALSE'});
             } else {
                 m.push({text: decodeAlu(f.ALU_TRUE), field:'ALU_TRUE'});
             }
