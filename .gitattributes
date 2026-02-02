@@ -3,3 +3,4 @@
 *.DATA binary
 *.TEXT binary
 *.img binary
+*.pdf filter=lfs diff=lfs merge=lfs -text
