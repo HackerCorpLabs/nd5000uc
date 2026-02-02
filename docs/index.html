@@ -1439,7 +1439,7 @@
 
         async function loadManifest() {
             try {
-                const r = await fetch('MC/manifest.json');
+                const r = await fetch('MC/manifest.json?v=' + Date.now());
                 if (!r.ok) throw new Error('Manifest not found');
                 microcodeManifest = await r.json();
                 return microcodeManifest;
@@ -1500,8 +1500,13 @@
             document.getElementById('listing').innerHTML = '<div class="loading">Loading microcode data...</div>';
 
             try {
+                // Find the file info from manifest to get labelFile
+                const fileInfo = microcodeManifest?.files?.find(f => f.path === filePath);
+                const labelFilePath = fileInfo?.labelFile || filePath;
+                console.log('switchMicrocode:', filePath, 'fileInfo:', fileInfo, 'labelFilePath:', labelFilePath);
+
                 const wc = await loadMicrocodeData(filePath);
-                const lc = await loadLabels(filePath);
+                const lc = await loadLabels(labelFilePath);
                 disassembleAll();
                 document.getElementById('statusLeft').textContent = wc + ' words, ' + Object.keys(labels).length + ' labels';
                 currentPage = 1;
@@ -1524,7 +1529,10 @@
             for (const k of Object.keys(labels)) delete labels[k];
             for (const k of Object.keys(labelsByAddr)) delete labelsByAddr[k];
 
-            const r = await fetch(filePath + '.LABE');
+            const url = filePath + '.LABE';
+            console.log('loadLabels: fetching', url);
+            const r = await fetch(url);
+            console.log('loadLabels: response status', r.status, r.ok);
             if (!r.ok) {
                 console.log('No labels file for: ' + filePath);
                 return 0;
@@ -1539,7 +1547,7 @@
             for (const line of lines) {
                 const t = line.trim();
                 if (!t || t.includes('microprogram cross reference table') || line.startsWith(' ')) continue;
-                const m = t.match(/^(\S+)\s+(\d+)\*/);
+                const m = t.match(/^(\S+)\s+(\d+)\*?/);
                 if (m) {
                     const addr = parseInt(m[2], 8);
                     labels[m[1]] = addr;
@@ -2084,7 +2092,9 @@
                 populateMicrocodeDropdown();
 
                 const defaultFile = microcodeManifest.default || 'MICRO-5800-B30';
-                const [wc, lc, dl] = await Promise.all([loadMicrocodeData(defaultFile), loadLabels(defaultFile), loadDefinition()]);
+                const defaultFileInfo = microcodeManifest?.files?.find(f => f.path === defaultFile);
+                const defaultLabelFile = defaultFileInfo?.labelFile || defaultFile;
+                const [wc, lc, dl] = await Promise.all([loadMicrocodeData(defaultFile), loadLabels(defaultLabelFile), loadDefinition()]);
                 document.getElementById('statusLeft').textContent = 'Disassembling...';
                 disassembleAll();
                 document.getElementById('statusLeft').textContent = `${wc} words, ${lc} labels`;
