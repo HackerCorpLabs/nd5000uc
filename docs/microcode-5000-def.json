@@ -243,8 +243,8 @@
               "description": "ALU uses true function only"
             },
             "1": {
-              "mnemonic": "(conditional)",
-              "description": "ALU selects function based on condition"
+              "mnemonic": "C,ALU",
+              "description": "ENABLE CONDITIONAL ALU OPERATION"
             }
           }
         }
