@@ -9,6 +9,12 @@ organized by field groups matching the JSON definition file.
 
 ## ALU: Arithmetic Logic Unit control
 
+The ALU has two paths: True and False. When conditional ALU is enabled (C,ALU), the microinstruction specifies both paths. The syntax is:
+- True path: `ALU,<func>` with optional `CRY,<mode>`
+- False path: `ALUF,<func>` with optional `CRYF,<mode>`
+
+Example: `C,ALU ALU,A-B CRY,ONE ALUF,A+B` - subtracts on true condition, adds on false.
+
 ### ALU_TRUE (Bits 127-122)
 
 ALU operation when condition is true (4-bit ALU + 2-bit carry)
