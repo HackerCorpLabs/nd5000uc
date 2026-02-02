@@ -1,0 +1,17 @@
+{
+  "files": [
+    {"path": "MC/MICRO-5800-B30", "name": "5800-B30", "model": "5800", "hasLabels": true},
+    {"path": "MC/MICRO-5800-B29", "name": "5800-B29", "model": "5800", "hasLabels": true},
+    {"path": "MC/MICRO-5800-A30", "name": "5800-A30", "model": "5800", "hasLabels": true},
+    {"path": "MC/MICRO-5800-A29", "name": "5800-A29", "model": "5800", "hasLabels": true},
+    {"path": "MC/MICRO-5800-M27", "name": "5800-M27", "model": "5800", "hasLabels": false},
+    {"path": "MC/MICRO-5700-M27", "name": "5700-M27", "model": "5700", "hasLabels": false},
+    {"path": "MC/MICRO-5500-M27", "name": "5500-M27", "model": "5500", "hasLabels": false},
+    {"path": "MC/MICRO-5200-M27", "name": "5200-M27", "model": "5200", "hasLabels": false},
+    {"path": "MC/MIC-5800-90-500", "name": "5800-90-500", "model": "MIC", "hasLabels": false},
+    {"path": "MC/MIC-5700-90-500", "name": "5700-90-500", "model": "MIC", "hasLabels": false},
+    {"path": "MC/MIC-5500-90-500", "name": "5500-90-500", "model": "MIC", "hasLabels": false},
+    {"path": "MC/MIC-5200-90-500", "name": "5200-90-500", "model": "MIC", "hasLabels": false}
+  ],
+  "default": "MC/MICRO-5800-B30"
+}

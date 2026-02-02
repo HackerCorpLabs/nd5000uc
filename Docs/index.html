@@ -1,0 +1,2417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ND-5000 Microcode Disassembler</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            --primary: #3498db;
+            --primary-dark: #2980b9;
+            --secondary: #2c3e50;
+            --accent: #e74c3c;
+            --bg-body: #f5f5f5;
+            --bg-card: #fff;
+            --bg-code: #ecf0f1;
+            --text-primary: #2c3e50;
+            --text-secondary: #7f8c8d;
+            --text-muted: #95a5a6;
+            --border: #ddd;
+            --hover-bg: #f0f0f0;
+            --active-bg: #e8f4fc;
+            --active-border: #3498db;
+            --bit-on: #27ae60;
+            --bit-off: #ecf0f1;
+            --bit-border: #bdc3c7;
+        }
+
+        .dark-theme {
+            --primary: #3498db;
+            --primary-dark: #5dade2;
+            --secondary: #0a0a15;
+            --accent: #e74c3c;
+            --bg-body: #1a1a2e;
+            --bg-card: #16213e;
+            --bg-code: #0f3460;
+            --text-primary: #ecf0f1;
+            --text-secondary: #bdc3c7;
+            --text-muted: #7f8c8d;
+            --border: #34495e;
+            --hover-bg: #1e2a4a;
+            --active-bg: #1e3a5f;
+            --active-border: #3498db;
+            --bit-on: #2ecc71;
+            --bit-off: #34495e;
+            --bit-border: #5d6d7e;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: var(--primary);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            flex-shrink: 0;
+        }
+
+        .header-logo {
+            height: 32px;
+            width: auto;
+            mix-blend-mode: multiply;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .settings-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        .settings-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Control bar */
+        .control-bar {
+            background: var(--bg-card);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .control-group label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        input[type="text"] {
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 13px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(52,152,219,0.2);
+        }
+
+        button {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #c0392b;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .btn-outline:hover {
+            background: var(--hover-bg);
+        }
+
+        .btn-outline.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        select {
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 13px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        /* Detail panel */
+        .detail-panel {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 20px;
+            display: none;
+            flex-shrink: 0;
+            max-height: 35vh;
+            overflow-y: auto;
+        }
+
+        .detail-panel.visible {
+            display: block;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .detail-title {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .detail-addr {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            font-family: 'Courier New', monospace;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .detail-hex {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: var(--bg-code);
+            padding: 8px 12px;
+            border-radius: 4px;
+            word-break: break-all;
+            margin-bottom: 10px;
+        }
+
+        .bit-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .bit-fields-grid {
+            display: grid;
+            grid-template-rows: repeat(12, auto);
+            grid-auto-flow: column;
+            gap: 4px 15px;
+            margin-top: 10px;
+        }
+
+        .bit-field-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .bit-field-row-label {
+            min-width: 70px;
+            color: var(--text-secondary);
+        }
+
+        .bit-field-row-bits {
+            display: flex;
+            gap: 1px;
+        }
+
+        .bit-field-row-val {
+            color: var(--text-muted);
+            font-size: 10px;
+            margin-left: 4px;
+        }
+
+        .bit-row-label {
+            min-width: 80px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: 'Courier New', monospace;
+        }
+
+        .bits-container {
+            display: flex;
+            gap: 1px;
+        }
+
+        .bit-box {
+            width: 8px;
+            height: 16px;
+            border: 1px solid var(--bit-border);
+            border-radius: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .bit-box.on {
+            background: var(--bit-on);
+            color: white;
+            border-color: var(--bit-on);
+        }
+
+        .bit-box.off {
+            background: var(--bit-off);
+            color: var(--text-muted);
+        }
+
+        .bit-box[data-bit] {
+            cursor: help;
+        }
+
+        .bit-box[data-bit]:hover {
+            transform: scale(1.3);
+            z-index: 10;
+            position: relative;
+        }
+
+        .field-val {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'Courier New', monospace;
+            margin-left: 5px;
+        }
+
+        /* Main listing */
+        .listing-container {
+            flex: 1;
+            overflow-y: auto;
+            background: var(--bg-card);
+        }
+
+        .listing {
+            padding: 5px 10px;
+        }
+
+        .instruction {
+            display: flex;
+            padding: 4px 10px;
+            border-left: 4px solid transparent;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            transition: all 0.1s;
+        }
+
+        .instruction:hover {
+            background: var(--hover-bg);
+        }
+
+        .instruction.selected {
+            background: var(--active-bg);
+            border-left-color: var(--active-border);
+        }
+
+        .inst-addr {
+            min-width: 55px;
+            color: var(--text-muted);
+        }
+
+        .inst-label {
+            min-width: 160px;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .inst-mnemonics {
+            flex: 1;
+            color: var(--text-primary);
+        }
+
+        .inst-hex {
+            min-width: 280px;
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-left: 15px;
+        }
+
+        .inst-hex.hidden {
+            display: none;
+        }
+
+        .mnemonic {
+            display: inline;
+            margin-right: 6px;
+        }
+
+        .mnemonic:hover {
+            color: var(--primary);
+        }
+
+        .mnemonic.undefined {
+            color: var(--accent);
+            font-style: italic;
+        }
+
+        .mnemonic.addr-ref {
+            color: var(--primary);
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .mnemonic.addr-ref:hover {
+            color: var(--accent);
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .page-info {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: fixed;
+            background: var(--bg-card);
+            border: 1px solid var(--primary);
+            border-radius: 6px;
+            padding: 10px 14px;
+            max-width: 350px;
+            z-index: 1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            pointer-events: none;
+        }
+
+        .tooltip-title {
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 5px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .tooltip-desc {
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+
+        .tooltip-field {
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border);
+        }
+
+        /* Status bar */
+        .status-bar {
+            background: var(--secondary);
+            color: rgba(255,255,255,0.8);
+            padding: 5px 20px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: var(--text-secondary);
+        }
+
+        .error {
+            color: var(--accent);
+            padding: 20px;
+            text-align: center;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 5px;
+        }
+
+        .close-btn:hover {
+            color: var(--accent);
+        }
+
+        /* Reference Modal */
+        .ref-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .ref-modal.active {
+            display: flex;
+        }
+
+        .ref-modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            width: 98%;
+            height: 92%;
+            max-width: none;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+            resize: both;
+            overflow: hidden;
+        }
+
+        .ref-header {
+            background: var(--primary);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .ref-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .ref-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0 5px;
+        }
+
+        .ref-close:hover {
+            color: var(--accent);
+        }
+
+        .ref-search {
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .ref-search input {
+            width: 100%;
+            max-width: 400px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 14px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .ref-search input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .ref-body {
+            flex: 1;
+            overflow: hidden;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        /* Bit Diagram */
+        .bit-diagram {
+            margin-bottom: 20px;
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+
+        .bit-diagram-inner {
+            display: flex;
+            min-width: max-content;
+        }
+
+        .bit-field {
+            display: flex;
+            flex-direction: column;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .bit-field:hover {
+            transform: translateY(-2px);
+        }
+
+        .bit-field.selected {
+            transform: translateY(-2px);
+        }
+
+        .bit-field-bar {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            padding: 0 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            border-right: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .bit-field.selected .bit-field-bar {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .bit-field.search-match .bit-field-bar {
+            box-shadow: 0 0 0 3px #f1c40f, 0 0 12px rgba(241, 196, 15, 0.6);
+        }
+
+        .bit-field.search-match .bit-field-name {
+            font-weight: bold;
+        }
+
+        .bit-field.search-dim {
+            opacity: 0.3;
+        }
+
+        .bit-field-bits {
+            font-size: 10px;
+            color: #444;
+            text-align: center;
+            padding: 2px 0;
+            font-weight: 500;
+        }
+
+        body.dark-mode .bit-field-bits {
+            color: #e8e8e8;
+        }
+
+        /* Field group colors */
+        .fg-alu { background: #3498db; }
+        .fg-qreg { background: #9b59b6; }
+        .fg-aap { background: #e67e22; }
+        .fg-timing { background: #1abc9c; }
+        .fg-datatype { background: #16a085; }
+        .fg-operands { background: #27ae60; }
+        .fg-status { background: #f39c12; }
+        .fg-sequencer { background: #e74c3c; }
+        .fg-iac { background: #8e44ad; }
+        .fg-control { background: #34495e; }
+        .fg-memory { background: #2c3e50; }
+        .fg-address { background: #7f8c8d; }
+
+        /* Detail Section */
+        .ref-detail {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .ref-detail-header {
+            background: var(--bg-code);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .ref-detail-header h3 {
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        .ref-detail-header .field-info {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .ref-detail-body {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        /* Group accordion */
+        .ref-group {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .ref-group:last-child {
+            border-bottom: none;
+        }
+
+        .ref-group-header {
+            padding: 12px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-card);
+            transition: background 0.2s;
+        }
+
+        .ref-group-header:hover {
+            background: var(--hover-bg);
+        }
+
+        .ref-group-toggle {
+            font-family: monospace;
+            font-size: 14px;
+            width: 20px;
+            color: var(--text-secondary);
+        }
+
+        .ref-group-name {
+            font-weight: 600;
+        }
+
+        .ref-group-count {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-left: auto;
+        }
+
+        .ref-group-values {
+            display: none;
+            padding: 0 20px 10px 50px;
+        }
+
+        .ref-group.expanded .ref-group-values {
+            display: block;
+        }
+
+        .ref-group.expanded .ref-group-toggle::before {
+            content: '−';
+        }
+
+        .ref-group-toggle::before {
+            content: '+';
+        }
+
+        .ref-value {
+            padding: 6px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 15px;
+        }
+
+        .ref-value:last-child {
+            border-bottom: none;
+        }
+
+        .ref-value-num {
+            color: var(--text-muted);
+            min-width: 50px;
+        }
+
+        .ref-value-mnem {
+            color: var(--primary);
+            min-width: 150px;
+            font-weight: 600;
+        }
+
+        .ref-value-desc {
+            color: var(--text-secondary);
+            flex: 1;
+        }
+
+        .ref-value.highlight {
+            background: var(--active-bg);
+        }
+
+        .ref-value.undocumented .ref-value-mnem {
+            color: var(--accent);
+            font-style: italic;
+        }
+
+        /* Simple field (no groups) */
+        .ref-simple-values {
+            padding: 10px 20px;
+        }
+
+        .ref-no-selection {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* Image Modal (CPU diagram) */
+        .img-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .img-modal.active {
+            display: flex;
+        }
+
+        .img-modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            width: 98%;
+            height: 92%;
+            max-width: none;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .img-modal-header {
+            background: var(--primary);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .img-modal-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .img-modal-header .zoom-info {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .img-modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0 5px;
+        }
+
+        .img-modal-close:hover {
+            color: var(--accent);
+        }
+
+        .img-modal-body {
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+            cursor: grab;
+        }
+
+        .img-modal-body:active {
+            cursor: grabbing;
+        }
+
+        .img-modal-body img {
+            max-width: none;
+            transform-origin: center center;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .img-modal-body.dragging {
+            cursor: grabbing !important;
+        }
+
+        .img-modal-body.dragging img {
+            pointer-events: none;
+        }
+
+        .img-zoom-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 16px;
+            border-radius: 8px;
+            z-index: 1001;
+        }
+
+        .img-zoom-controls button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+        }
+
+        .img-zoom-controls button:hover {
+            background: var(--primary-dark);
+        }
+
+        .img-zoom-controls .zoom-level {
+            color: white;
+            font-size: 14px;
+            min-width: 55px;
+            text-align: center;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ND-5000 Microcode Disassembler</h1>
+        <div class="header-controls">
+            <button class="settings-btn" id="cpuBtn" title="Microcode Definition Diagram">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M5 0a.5.5 0 0 1 .5.5V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2A2.5 2.5 0 0 1 14 4.5h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14a2.5 2.5 0 0 1-2.5 2.5v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14A2.5 2.5 0 0 1 2 11.5H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2A2.5 2.5 0 0 1 4.5 2V.5A.5.5 0 0 1 5 0zm-.5 3A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 11.5 3h-7zM5 6.5A1.5 1.5 0 0 1 6.5 5h3A1.5 1.5 0 0 1 11 6.5v3A1.5 1.5 0 0 1 9.5 11h-3A1.5 1.5 0 0 1 5 9.5v-3zM6.5 6a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3z"/>
+                </svg>
+            </button>
+            <button class="settings-btn" id="refBtn" title="Microcode Reference" style="font-size: 18px; font-weight: bold;">&mu;</button>
+            <button class="settings-btn" id="themeBtn" title="Toggle dark/light theme">&#9788;</button>
+            <img src="Logo_ND.png" alt="ND" class="header-logo">
+        </div>
+    </div>
+
+    <div class="control-bar">
+        <div class="control-group">
+            <label>Search:</label>
+            <input type="text" id="searchInput" placeholder="Label name..." style="width: 140px;">
+            <button class="btn-primary" id="searchBtn">Find</button>
+            <button class="btn-outline" id="searchNextBtn">Next</button>
+        </div>
+        <div class="control-group">
+            <label>Jump to:</label>
+            <input type="text" id="jumpInput" placeholder="Octal" style="width: 70px;">
+            <button class="btn-primary" id="jumpBtn">Go</button>
+        </div>
+        <div class="control-group">
+            <button class="btn-outline" id="showHexBtn">Show Hex</button>
+        </div>
+        <div class="control-group">
+            <select id="downloadFormat">
+                <option value="">Download...</option>
+                <option value="text">Text (.txt)</option>
+                <option value="markdown">Markdown (.md)</option>
+                <option value="pdf">PDF (.pdf)</option>
+            </select>
+        </div>
+        <div class="control-group" style="margin-left: auto;">
+            <label>Microcode:</label>
+            <select id="microcodeSelect">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <select id="pageSizeSelect">
+                <option value="100">100 / page</option>
+                <option value="250">250 / page</option>
+                <option value="500" selected>500 / page</option>
+                <option value="1000">1000 / page</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="detail-panel" id="detailPanel">
+        <div class="detail-header">
+            <div class="detail-title">
+                <span class="detail-addr" id="detailAddr"></span>
+                <span class="detail-label" id="detailLabel"></span>
+            </div>
+            <button class="close-btn" id="closeDetailBtn">&times;</button>
+        </div>
+        <div class="detail-hex" id="detailHex"></div>
+        <div id="bitDisplay"></div>
+    </div>
+
+    <div class="listing-container" id="listingContainer">
+        <div class="listing" id="listing">
+            <div class="loading">Loading microcode data...</div>
+        </div>
+    </div>
+
+    <div class="pagination">
+        <button class="btn-outline" id="prevPageBtn">&laquo; Prev</button>
+        <span class="page-info">Page <span id="currentPage">1</span> / <span id="totalPages">1</span></span>
+        <button class="btn-outline" id="nextPageBtn">Next &raquo;</button>
+    </div>
+
+    <div class="status-bar">
+        <span id="statusLeft">Loading...</span>
+        <span id="statusRight"></span>
+    </div>
+
+    <div class="tooltip" id="tooltip" style="display: none;"></div>
+
+    <!-- Microcode Definition Diagram Modal -->
+    <div class="img-modal" id="imgModal">
+        <div class="img-modal-content">
+            <div class="img-modal-header">
+                <h2>ND-5000 Microcode Definition Diagram</h2>
+                <button class="img-modal-close" id="imgCloseBtn">&times;</button>
+            </div>
+            <div class="img-modal-body" id="imgModalBody">
+                <img src="microcode-definition.png" alt="Microcode Definition" id="mcDefImg">
+            </div>
+            <div class="img-zoom-controls">
+                <button id="imgZoomOutBtn" title="Zoom Out">−</button>
+                <span class="zoom-level" id="zoomInfo">100%</span>
+                <button id="imgZoomInBtn" title="Zoom In">+</button>
+                <button id="imgResetBtn" title="Reset">R</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Microcode Reference Modal -->
+    <div class="ref-modal" id="refModal">
+        <div class="ref-modal-content">
+            <div class="ref-header">
+                <h2>ND-5000 Microcode Reference</h2>
+                <button class="ref-close" id="refCloseBtn">&times;</button>
+            </div>
+            <div class="ref-search">
+                <input type="text" id="refSearchInput" placeholder="Search mnemonics, descriptions...">
+            </div>
+            <div class="ref-body">
+                <div class="bit-diagram" id="bitDiagram"></div>
+                <div class="ref-detail" id="refDetail">
+                    <div class="ref-no-selection">Click a field in the diagram above to view details</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let microcodeDef = null;
+        let microcodeData = null;
+        let labels = {};
+        let labelsByAddr = {};
+        let disassembledInstructions = [];
+        let currentPage = 1;
+        let pageSize = 500;
+        let selectedAddr = null;
+        let showHex = false;
+        let isDarkTheme = false;
+        let lastSearchTerm = '';
+        let searchMatches = [];
+        let searchMatchIndex = -1;
+
+        const FIELDS = {
+            'ALU_TRUE': [127, 122], 'ALU_FALSE': [121, 116], 'EXUC': [115, 115],
+            'COND_ALU': [114, 114], 'Q_REG': [113, 111], 'AAP_CTRL': [110, 103],
+            'TIMING': [102, 101], 'DATATYPE': [100, 98], 'OR_ENABLE': [97, 97],
+            'A_OP': [96, 89], 'B_OP': [88, 84], 'DEST': [83, 76], 'STATUS': [75, 72],
+            'IXC_INCR': [71, 71], 'LC_DECR': [70, 70], 'COND_SEQ': [69, 69],
+            'SEQ_TRUE': [68, 65], 'SEQ_FALSE': [64, 61], 'INVSEQ': [60, 60],
+            'CSAVE': [59, 59], 'TESTOBJ': [58, 53], 'ABR': [52, 51], 'TBC': [50, 48],
+            'GET': [47, 44], 'STOP': [43, 43], 'AAPSYNC': [42, 42], 'MEM_BIT3': [41, 41],
+            'AD_ARTI': [40, 40], 'EA_SAVE': [39, 38], 'MEMOT': [37, 37], 'ADACT': [35, 35],
+            'MEM_BITS20': [34, 32], 'ABS_ADDR': [31, 16], 'AA': [15, 13], 'AB': [12, 9],
+            'SCAL': [8, 6], 'ORCON': [5, 0]
+        };
+
+        // Lookup tables - populated from JSON after loading
+        let A_OP_TABLE = {};
+        let B_OP_TABLE = {};
+        let DEST_TABLE = {};
+        let STATUS_OPS = {};
+        let TESTOBJ_TABLE = {};
+        let ABR_OPS = {};
+        let TBC_OPS = {};
+        let GET_OPS = {};
+        let EA_SAVE_OPS = {};
+        let SCAL_OPS = {};
+        let MEM_OPS = {};
+        let Q_REG_OPS = {};
+        let TIMING_OPS = {};
+        let DATATYPE_OPS = {};
+        let ALU_OPS = {};
+        let CARRY_OPS = {};
+        let AAP1_OPS = {};
+        let AAP2_OPS = {};
+
+        // Build lookup tables from JSON definition
+        function buildLookupTables() {
+            if (!microcodeDef?.fieldGroups) return;
+
+            const fg = microcodeDef.fieldGroups;
+
+            // Helper to extract mnemonic from values
+            // Returns null for "no-op" values like (hold), (none), etc. to suppress display
+            const extractValues = (fieldDef) => {
+                const table = {};
+                if (fieldDef?.values) {
+                    for (const [k, v] of Object.entries(fieldDef.values)) {
+                        let mnem = v.mnemonic || null;
+                        // Suppress display of no-op values
+                        if (mnem && (mnem.startsWith('(') || mnem === 'NOOP' || mnem === 'TBC,NOOP')) {
+                            mnem = null;
+                        }
+                        table[parseInt(k)] = mnem;
+                    }
+                }
+                return table;
+            };
+
+            // Helper to extract subfield values
+            const extractSubfield = (fieldDef, subfieldName) => {
+                const table = {};
+                if (fieldDef?.subfields?.[subfieldName]?.values) {
+                    for (const [k, v] of Object.entries(fieldDef.subfields[subfieldName].values)) {
+                        // Strip prefix for cleaner display
+                        let mnem = v.mnemonic || null;
+                        if (mnem && mnem.startsWith('ALU,')) mnem = mnem.substring(4);
+                        if (mnem && mnem.startsWith('ALUF,')) mnem = mnem.substring(5);
+                        if (mnem === '(zero)') mnem = '';
+                        table[parseInt(k)] = mnem;
+                    }
+                }
+                return table;
+            };
+
+            // OPERANDS group
+            if (fg.OPERANDS?.fields) {
+                A_OP_TABLE = extractValues(fg.OPERANDS.fields.A_OP);
+                B_OP_TABLE = extractValues(fg.OPERANDS.fields.B_OP);
+                DEST_TABLE = extractValues(fg.OPERANDS.fields.DEST);
+            }
+
+            // STATUS group
+            if (fg.STATUS?.fields) {
+                STATUS_OPS = extractValues(fg.STATUS.fields.STATUS);
+                EA_SAVE_OPS = extractValues(fg.STATUS.fields.EA_SAVE);
+            }
+
+            // SEQUENCER group
+            if (fg.SEQUENCER?.fields) {
+                TESTOBJ_TABLE = extractValues(fg.SEQUENCER.fields.TESTOBJ);
+            }
+
+            // IAC group
+            if (fg.IAC?.fields) {
+                ABR_OPS = extractValues(fg.IAC.fields.ABR);
+                TBC_OPS = extractValues(fg.IAC.fields.TBC);
+                GET_OPS = extractValues(fg.IAC.fields.GET);
+            }
+
+            // ADDRESS group
+            if (fg.ADDRESS?.fields) {
+                SCAL_OPS = extractValues(fg.ADDRESS.fields.SCAL);
+            }
+
+            // MEMORY group
+            if (fg.MEMORY?.fields) {
+                MEM_OPS = extractValues(fg.MEMORY.fields.MEM_CTRL);
+            }
+
+            // Q_REGISTER group
+            if (fg.Q_REGISTER?.fields) {
+                Q_REG_OPS = extractValues(fg.Q_REGISTER.fields.Q_OP);
+            }
+
+            // TIMING group
+            if (fg.TIMING?.fields) {
+                TIMING_OPS = extractValues(fg.TIMING.fields.CYCLE);
+            }
+
+            // DATATYPE group
+            if (fg.DATATYPE?.fields) {
+                DATATYPE_OPS = extractValues(fg.DATATYPE.fields.DATATYPE);
+            }
+
+            // ALU group - subfields
+            if (fg.ALU?.fields?.ALU_TRUE?.subfields) {
+                ALU_OPS = extractSubfield(fg.ALU.fields.ALU_TRUE, 'ALU');
+                CARRY_OPS = extractSubfield(fg.ALU.fields.ALU_TRUE, 'CARRY');
+            }
+
+            // AAP group - subfields
+            if (fg.AAP?.fields?.AAP_CTRL?.subfields) {
+                AAP1_OPS = extractSubfield(fg.AAP.fields.AAP_CTRL, 'AAP1_OP');
+                AAP2_OPS = extractSubfield(fg.AAP.fields.AAP_CTRL, 'AAP2_OP');
+            }
+
+            console.log('Lookup tables built from JSON:', {
+                A_OP: Object.keys(A_OP_TABLE).length,
+                DEST: Object.keys(DEST_TABLE).length,
+                TESTOBJ: Object.keys(TESTOBJ_TABLE).length
+            });
+        }
+
+        // AAP decode helper (type selector)
+        const AAP_SELECT = {0:null,1:'AAP1',2:'AAP2',6:'EXPISO'};
+
+        function extractField(v, h, l) { return Number((v >> BigInt(l)) & ((1n << BigInt(h-l+1))-1n)); }
+        function toOctal(n, w=6) { return n.toString(8).padStart(w,'0'); }
+        function toHex32(v) { return '0x'+v.toString(16).toUpperCase().padStart(32,'0'); }
+
+        function decodeAlu(v) {
+            const op = (v >> 2) & 0xF, c = v & 3;
+            return `ALU,${ALU_OPS[op]||'?'}${CARRY_OPS[c]||''}`;
+        }
+
+        function decodeAap(v) {
+            const s = (v >> 5) & 7, op = v & 0x1F, n = AAP_SELECT[s];
+            if (!n) return null;
+            if (n === 'AAP1') return AAP1_OPS[op] ? `AAP1,${AAP1_OPS[op]}` : null;
+            if (n === 'AAP2') return AAP2_OPS[op] ? `AAP2,${AAP2_OPS[op]}` : null;
+            return n;
+        }
+
+        function decodeSeq(v, p) {
+            const j = (v >> 2) & 3, h = v & 3;
+            const jn = {0:'JMP',1:'JMPREL',2:'RETURN',3:'NEXT'};
+            const hn = {0:'HOLD',1:'POP',2:'LOAD',3:'PUSH'};
+            const r = [];
+            if (j !== 3) r.push(`${p},${jn[j]}`);
+            if (h !== 0) r.push(`${p},${hn[h]}`);
+            return r.length ? r.join(', ') : null;
+        }
+
+        // Group names for undefined operand decoding
+        const A_OP_GROUPS = {0:'BMG',1:'ALU',2:'MMS',3:'SPEC',4:'MIC',5:'IDU',6:'IAC',7:'DAC'};
+        const DEST_GROUPS = {0:'ALU',1:'SPEC',2:'MMS',3:'MMS',4:'MIC',5:'IDU',6:'IAC',7:'DAC'};
+
+        function decodeUndefAop(val) {
+            const group = (val >> 5) & 7;
+            const reg = val & 0x1F;
+            const groupName = A_OP_GROUPS[group] || '?';
+            return {text: `A,${groupName},?${reg.toString(8).padStart(2,'0')}`, undefined: true, group: groupName, reg: reg};
+        }
+
+        function decodeUndefDest(val) {
+            const group = (val >> 5) & 7;
+            const reg = val & 0x1F;
+            const groupName = DEST_GROUPS[group] || '?';
+            return {text: `D,${groupName},?${reg.toString(8).padStart(2,'0')}`, undefined: true, group: groupName, reg: reg};
+        }
+
+        function disassemble(bigInt, addr) {
+            const f = {};
+            for (const [n,[h,l]] of Object.entries(FIELDS)) f[n] = extractField(bigInt,h,l);
+            const m = [];
+
+            if (f.COND_ALU) {
+                m.push({text: decodeAlu(f.ALU_TRUE)+' (T)', field:'ALU_TRUE'});
+                m.push({text: decodeAlu(f.ALU_FALSE)+' (F)', field:'ALU_FALSE'});
+            } else {
+                m.push({text: decodeAlu(f.ALU_TRUE), field:'ALU_TRUE'});
+            }
+
+            if (f.EXUC) m.push({text:'EXUC',field:'EXUC'});
+            if (Q_REG_OPS[f.Q_REG]) m.push({text:Q_REG_OPS[f.Q_REG],field:'Q_REG'});
+            const aap = decodeAap(f.AAP_CTRL);
+            if (aap) m.push({text:aap,field:'AAP_CTRL'});
+            if (TIMING_OPS[f.TIMING]) m.push({text:TIMING_OPS[f.TIMING],field:'TIMING'});
+            if (f.DATATYPE !== 0) m.push({text:DATATYPE_OPS[f.DATATYPE]||`TYP?${f.DATATYPE}`,field:'DATATYPE'});
+            if (A_OP_TABLE[f.A_OP]) {
+                m.push({text:A_OP_TABLE[f.A_OP],field:'A_OP'});
+            } else {
+                const undef = decodeUndefAop(f.A_OP);
+                m.push({text:undef.text,field:'A_OP',isUndefined:true,undefInfo:undef});
+            }
+            m.push({text:B_OP_TABLE[f.B_OP]||`B,?${f.B_OP}`,field:'B_OP'});
+            if (f.DEST !== 24) {
+                if (DEST_TABLE[f.DEST]) {
+                    m.push({text:DEST_TABLE[f.DEST],field:'DEST'});
+                } else {
+                    const undef = decodeUndefDest(f.DEST);
+                    m.push({text:undef.text,field:'DEST',isUndefined:true,undefInfo:undef});
+                }
+            }
+            if (STATUS_OPS[f.STATUS]) m.push({text:STATUS_OPS[f.STATUS],field:'STATUS'});
+            if (f.IXC_INCR) m.push({text:'IXADJ',field:'IXC_INCR'});
+            if (f.LC_DECR) m.push({text:'LCDECR',field:'LC_DECR'});
+
+            if (f.COND_SEQ) {
+                m.push({text:'C,SEQ',field:'COND_SEQ'});
+                const t = decodeSeq(f.SEQ_TRUE,'T'), fs = decodeSeq(f.SEQ_FALSE,'F');
+                if (t) m.push({text:t,field:'SEQ_TRUE'});
+                if (fs) m.push({text:fs,field:'SEQ_FALSE'});
+            } else {
+                const t = decodeSeq(f.SEQ_TRUE,'T');
+                if (t) m.push({text:t,field:'SEQ_TRUE'});
+            }
+
+            if (f.INVSEQ) m.push({text:'INVSEQ',field:'INVSEQ'});
+            if (f.CSAVE) m.push({text:'CSAVE',field:'CSAVE'});
+            if (TESTOBJ_TABLE[f.TESTOBJ]) m.push({text:TESTOBJ_TABLE[f.TESTOBJ],field:'TESTOBJ'});
+            if (ABR_OPS[f.ABR]) m.push({text:ABR_OPS[f.ABR],field:'ABR'});
+            if (TBC_OPS[f.TBC] && f.TBC !== 7) m.push({text:TBC_OPS[f.TBC],field:'TBC'});
+            if (GET_OPS[f.GET]) m.push({text:GET_OPS[f.GET],field:'GET'});
+            if (f.STOP) m.push({text:'STOP',field:'STOP'});
+            if (f.AAPSYNC) m.push({text:'AAPSYNC',field:'AAPSYNC'});
+            const mem = (f.MEM_BIT3 << 3) | f.MEM_BITS20;
+            if (MEM_OPS[mem]) m.push({text:MEM_OPS[mem],field:'MEM'});
+            if (EA_SAVE_OPS[f.EA_SAVE]) m.push({text:EA_SAVE_OPS[f.EA_SAVE],field:'EA_SAVE'});
+            if (f.ADACT) m.push({text:'ADACT',field:'ADACT'});
+            if (f.ABS_ADDR !== 0) {
+                const lbl = labelsByAddr[f.ABS_ADDR];
+                m.push({text:`ADDR=${lbl||toOctal(f.ABS_ADDR)}`,field:'ABS_ADDR',isAddr:true,targetAddr:f.ABS_ADDR});
+            }
+            if (SCAL_OPS[f.SCAL] && f.SCAL !== 0) m.push({text:SCAL_OPS[f.SCAL],field:'SCAL'});
+            if (f.OR_ENABLE) m.push({text:`ORCON=${f.ORCON.toString(16).toUpperCase().padStart(2,'0')}`,field:'ORCON'});
+
+            return {address:addr,bigIntValue:bigInt,hex:toHex32(bigInt),fields:f,mnemonics:m,label:labelsByAddr[addr]||''};
+        }
+
+        let currentMicrocodeFile = '';
+        let microcodeManifest = null;
+
+        async function loadManifest() {
+            try {
+                const r = await fetch('MC/manifest.json');
+                if (!r.ok) throw new Error('Manifest not found');
+                microcodeManifest = await r.json();
+                return microcodeManifest;
+            } catch (e) {
+                console.error('Failed to load manifest:', e);
+                // Fallback to default file
+                microcodeManifest = { files: [], default: 'MICRO-5800-B30' };
+                return microcodeManifest;
+            }
+        }
+
+        function populateMicrocodeDropdown() {
+            const select = document.getElementById('microcodeSelect');
+            select.innerHTML = '';
+
+            if (!microcodeManifest || microcodeManifest.files.length === 0) {
+                select.innerHTML = '<option value="MICRO-5800-B30">5800-B30 (default)</option>';
+                return;
+            }
+
+            // Group files by model
+            const groups = {};
+            for (const f of microcodeManifest.files) {
+                const model = f.model || 'Other';
+                if (!groups[model]) groups[model] = [];
+                groups[model].push(f);
+            }
+
+            // Sort files: labeled first, then by version descending (B > A > M)
+            for (const model of Object.keys(groups)) {
+                groups[model].sort((a, b) => {
+                    // Files with labels first
+                    if (a.hasLabels !== b.hasLabels) return a.hasLabels ? -1 : 1;
+                    // Then by name descending
+                    return b.name.localeCompare(a.name);
+                });
+            }
+
+            // Create optgroups in order: 5800, 5700, 5500, 5200, MIC, Other
+            const modelOrder = ['5800', '5700', '5500', '5200', 'MIC', 'Other'];
+            for (const model of modelOrder) {
+                if (!groups[model] || groups[model].length === 0) continue;
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = model === 'MIC' ? 'MIC (90-500)' : model;
+                for (const f of groups[model]) {
+                    const opt = document.createElement('option');
+                    opt.value = f.path;
+                    opt.textContent = f.name + (f.hasLabels === false ? ' (no labels)' : '');
+                    if (f.path === microcodeManifest.default) opt.selected = true;
+                    optgroup.appendChild(opt);
+                }
+                select.appendChild(optgroup);
+            }
+        }
+
+        async function switchMicrocode(filePath) {
+            document.getElementById('statusLeft').textContent = 'Loading...';
+            document.getElementById('listing').innerHTML = '<div class="loading">Loading microcode data...</div>';
+
+            try {
+                const wc = await loadMicrocodeData(filePath);
+                const lc = await loadLabels(filePath);
+                disassembleAll();
+                document.getElementById('statusLeft').textContent = wc + ' words, ' + Object.keys(labels).length + ' labels';
+                currentPage = 1;
+                renderListing();
+            } catch (e) {
+                document.getElementById('listing').innerHTML = '<div class="error">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function loadMicrocodeData(filePath) {
+            const r = await fetch(filePath + '.DATA');
+            if (!r.ok) throw new Error('Failed to load microcode data: ' + filePath);
+            microcodeData = new Uint8Array(await r.arrayBuffer());
+            currentMicrocodeFile = filePath;
+            return microcodeData.length / 16;
+        }
+
+        async function loadLabels(filePath) {
+            // Clear existing labels
+            for (const k of Object.keys(labels)) delete labels[k];
+            for (const k of Object.keys(labelsByAddr)) delete labelsByAddr[k];
+
+            const r = await fetch(filePath + '.LABE');
+            if (!r.ok) {
+                console.log('No labels file for: ' + filePath);
+                return 0;
+            }
+            // Strip bit 7 from each byte (old files have parity bit set)
+            const bytes = new Uint8Array(await r.arrayBuffer());
+            let text = '';
+            for (let i = 0; i < bytes.length; i++) {
+                text += String.fromCharCode(bytes[i] & 0x7F);
+            }
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const t = line.trim();
+                if (!t || t.includes('microprogram cross reference table') || line.startsWith(' ')) continue;
+                const m = t.match(/^(\S+)\s+(\d+)\*/);
+                if (m) {
+                    const addr = parseInt(m[2], 8);
+                    labels[m[1]] = addr;
+                    labelsByAddr[addr] = m[1];
+                }
+            }
+            return Object.keys(labels).length;
+        }
+
+        async function loadDefinition() {
+            try {
+                const r = await fetch('microcode-5000-def.json');
+                if (!r.ok) return false;
+                microcodeDef = await r.json();
+                buildLookupTables();
+                return true;
+            } catch { return false; }
+        }
+
+        function getMicrocodeWord(addr) {
+            if (!microcodeData) return null;
+            const off = addr * 16;
+            if (off + 16 > microcodeData.length) return null;
+            let v = 0n;
+            for (let i = 0; i < 16; i++) v = (v << 8n) | BigInt(microcodeData[off + i]);
+            return v;
+        }
+
+        function generateDisassemblyText() {
+            const lines = [];
+            const fileName = currentMicrocodeFile.split('/').pop() || 'MICRO-5800-B30';
+            lines.push('ND-5000 Microcode Disassembly');
+            lines.push('File: ' + fileName);
+            lines.push('Generated: ' + new Date().toISOString());
+            lines.push('Words: ' + disassembledInstructions.length + ', Labels: ' + Object.keys(labels).length);
+            lines.push('');
+            lines.push('='.repeat(120));
+            lines.push('');
+
+            for (const inst of disassembledInstructions) {
+                const addr = inst.address.toString(8).padStart(6, '0');
+                const label = inst.label ? inst.label.padEnd(16) : '                ';
+                const mnemonics = inst.mnemonics.map(m => m.text).join(' ');
+                lines.push(addr + '  ' + label + mnemonics + ' ;');
+            }
+            return lines.join('\n');
+        }
+
+        function generateDisassemblyMarkdown() {
+            const lines = [];
+            const fileName = currentMicrocodeFile.split('/').pop() || 'MICRO-5800-B30';
+            lines.push('# ND-5000 Microcode Disassembly');
+            lines.push('');
+            lines.push('| Property | Value |');
+            lines.push('|----------|-------|');
+            lines.push('| File | `' + fileName + '` |');
+            lines.push('| Generated | ' + new Date().toISOString() + ' |');
+            lines.push('| Words | ' + disassembledInstructions.length + ' |');
+            lines.push('| Labels | ' + Object.keys(labels).length + ' |');
+            lines.push('');
+            lines.push('## Disassembly Listing');
+            lines.push('');
+            lines.push('| Address | Label | Instruction |');
+            lines.push('|---------|-------|-------------|');
+
+            for (const inst of disassembledInstructions) {
+                const addr = inst.address.toString(8).padStart(6, '0');
+
+                // Label with HTML anchor for navigation
+                const label = inst.label
+                    ? '<a id="' + inst.label.toLowerCase().replace(/_/g, '-') + '"></a>**' + inst.label + '**'
+                    : '';
+
+                // Convert ADDR= references to clickable markdown links
+                let mnemonics = inst.mnemonics.map(m => {
+                    if (m.isAddr && m.text.startsWith('ADDR=')) {
+                        const target = m.text.substring(5);
+                        if (labelsByAddr[m.targetAddr]) {
+                            const anchor = target.toLowerCase().replace(/_/g, '-');
+                            return '[ADDR=' + target + '](#' + anchor + ')';
+                        }
+                        return m.text;
+                    }
+                    return m.text;
+                }).join(' ');
+
+                lines.push('| `' + addr + '` | ' + label + ' | ' + mnemonics + ' |');
+            }
+            return lines.join('\n');
+        }
+
+        function generateDisassemblyPDF() {
+            const { jsPDF } = window.jspdf;
+            const fileName = currentMicrocodeFile.split('/').pop() || 'MICRO-5800-B30';
+
+            // Create PDF in landscape A4
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 10;
+            const lineHeight = 4;
+            let y = margin;
+
+            // Title
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text('ND-5000 Microcode Disassembly', margin, y);
+            y += 7;
+
+            // Metadata
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.text('File: ' + fileName + '  |  Words: ' + disassembledInstructions.length + '  |  Labels: ' + Object.keys(labels).length + '  |  Generated: ' + new Date().toLocaleString(), margin, y);
+            y += 8;
+
+            // Listing
+            doc.setFontSize(7);
+            doc.setFont('courier', 'normal');
+
+            for (const inst of disassembledInstructions) {
+                if (y > pageHeight - margin) {
+                    doc.addPage();
+                    y = margin;
+                }
+
+                const addr = inst.address.toString(8).padStart(6, '0');
+                const label = (inst.label || '').padEnd(16);
+                const mnemonics = inst.mnemonics.map(m => m.text).join(' ');
+                const line = addr + '  ' + label + '  ' + mnemonics + ' ;';
+
+                doc.text(line, margin, y);
+                y += lineHeight;
+            }
+
+            // Save PDF
+            doc.save(fileName + '.pdf');
+        }
+
+        function downloadDisassembly(format) {
+            const fileName = (currentMicrocodeFile.split('/').pop() || 'MICRO-5800-B30');
+
+            if (format === 'text') {
+                const content = generateDisassemblyText();
+                downloadFile(content, fileName + '.txt', 'text/plain');
+            } else if (format === 'markdown') {
+                const content = generateDisassemblyMarkdown();
+                downloadFile(content, fileName + '.md', 'text/markdown');
+            } else if (format === 'pdf') {
+                generateDisassemblyPDF();
+            }
+        }
+
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function disassembleAll() {
+            disassembledInstructions = [];
+            const n = microcodeData.length / 16;
+            for (let i = 0; i < n; i++) {
+                const w = getMicrocodeWord(i);
+                if (w !== null) disassembledInstructions.push(disassemble(w, i));
+            }
+        }
+
+        function renderListing() {
+            const el = document.getElementById('listing');
+            const s = (currentPage - 1) * pageSize, e = Math.min(s + pageSize, disassembledInstructions.length);
+            let html = '';
+            for (let i = s; i < e; i++) {
+                const inst = disassembledInstructions[i];
+                html += `<div class="instruction${inst.address===selectedAddr?' selected':''}" data-addr="${inst.address}">`;
+                html += `<span class="inst-addr">${toOctal(inst.address)}</span>`;
+                html += `<span class="inst-label">${inst.label}</span>`;
+                html += `<span class="inst-mnemonics">`;
+                for (const m of inst.mnemonics) {
+                    if (m.isAddr) {
+                        html += `<span class="mnemonic addr-ref" data-target="${m.targetAddr}" data-field="${m.field}">${m.text}</span>`;
+                    } else if (m.isUndefined) {
+                        html += `<span class="mnemonic undefined" data-field="${m.field}">${m.text}</span>`;
+                    } else {
+                        html += `<span class="mnemonic" data-field="${m.field}">${m.text}</span>`;
+                    }
+                }
+                html += `;</span><span class="inst-hex${showHex?'':' hidden'}">${inst.hex}</span></div>`;
+            }
+            el.innerHTML = html;
+
+            const tp = Math.ceil(disassembledInstructions.length / pageSize);
+            document.getElementById('currentPage').textContent = currentPage;
+            document.getElementById('totalPages').textContent = tp;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= tp;
+
+            el.querySelectorAll('.instruction').forEach(x => x.addEventListener('click', () => selectInstruction(parseInt(x.dataset.addr))));
+            el.querySelectorAll('.mnemonic.addr-ref').forEach(x => x.addEventListener('click', ev => { ev.stopPropagation(); jumpToAddress(parseInt(x.dataset.target)); }));
+            el.querySelectorAll('.mnemonic').forEach(x => { x.addEventListener('mouseenter', showTooltip); x.addEventListener('mouseleave', hideTooltip); });
+        }
+
+        function selectInstruction(addr) {
+            selectedAddr = addr;
+            const inst = disassembledInstructions[addr];
+            if (!inst) return;
+
+            const dp = document.getElementById('detailPanel');
+            dp.classList.add('visible');
+                        document.getElementById('detailAddr').textContent = toOctal(addr);
+            document.getElementById('detailLabel').textContent = inst.label || '';
+            document.getElementById('detailHex').textContent = inst.hex;
+
+            let bh = '<div class="bit-row"><span class="bit-row-label">128 bits:</span><div class="bits-container">';
+            for (let b = 127; b >= 0; b--) {
+                const v = Number((inst.bigIntValue >> BigInt(b)) & 1n);
+                const fieldInfo = getFieldForBit(b);
+                bh += `<div class="bit-box ${v?'on':'off'}" data-bit="${b}" data-field="${fieldInfo.name}">${v}</div>`;
+            }
+            bh += '</div></div>';
+
+            // Build 3-column grid of all fields from JSON, sorted by bit position (highest first)
+            const allFields = [];
+            if (microcodeDef && microcodeDef.fieldGroups) {
+                for (const [gn, g] of Object.entries(microcodeDef.fieldGroups)) {
+                    if (g.fields) {
+                        for (const [fn, fd] of Object.entries(g.fields)) {
+                            if (fd.highBit !== undefined && FIELDS[fn]) {
+                                allFields.push({ name: fn, high: fd.highBit, low: fd.lowBit });
+                            }
+                        }
+                    }
+                }
+            }
+            // Sort by high bit descending (highest bits first)
+            allFields.sort((a, b) => b.high - a.high);
+
+            bh += '<div class="bit-fields-grid">';
+            for (const f of allFields) {
+                const [h, l] = FIELDS[f.name] || [f.high, f.low];
+                const fv = inst.fields[f.name] || 0;
+                bh += `<div class="bit-field-row">`;
+                bh += `<span class="bit-field-row-label">${f.name}</span>`;
+                bh += `<span class="bit-field-row-bits">`;
+                for (let b = h; b >= l; b--) bh += `<div class="bit-box ${(fv>>(b-l))&1?'on':'off'}">${(fv>>(b-l))&1}</div>`;
+                bh += `</span>`;
+                bh += `<span class="bit-field-row-val">=${fv}</span>`;
+                bh += `</div>`;
+            }
+            bh += '</div>';
+            document.getElementById('bitDisplay').innerHTML = bh;
+
+            // Add hover handlers for 128-bit display
+            document.querySelectorAll('#bitDisplay .bit-box[data-bit]').forEach(el => {
+                el.addEventListener('mouseenter', showBitTooltip);
+                el.addEventListener('mouseleave', hideTooltip);
+            });
+
+            renderListing();
+        }
+
+        function getFieldForBit(bit) {
+            for (const [name, [high, low]] of Object.entries(FIELDS)) {
+                if (bit >= low && bit <= high) {
+                    return { name, high, low, position: bit - low };
+                }
+            }
+            return { name: 'UNKNOWN', high: bit, low: bit, position: 0 };
+        }
+
+        function showBitTooltip(ev) {
+            const bit = parseInt(ev.target.dataset.bit);
+            const fieldName = ev.target.dataset.field;
+            const fieldInfo = getFieldForBit(bit);
+            const bitValue = ev.target.textContent;
+
+            const tt = document.getElementById('tooltip');
+            let desc = '';
+
+            // Look up field description from JSON
+            if (microcodeDef?.fieldGroups) {
+                for (const g of Object.values(microcodeDef.fieldGroups)) {
+                    if (g.fields?.[fieldName]) {
+                        desc = g.fields[fieldName].description || '';
+                        break;
+                    }
+                }
+            }
+
+            tt.innerHTML = `
+                <div class="tooltip-title">Bit ${bit}</div>
+                <div class="tooltip-desc">Field: <strong>${fieldName}</strong> [${fieldInfo.high}:${fieldInfo.low}]</div>
+                <div class="tooltip-desc">Position in field: bit ${fieldInfo.position}</div>
+                <div class="tooltip-desc">Value: ${bitValue}</div>
+                ${desc ? `<div class="tooltip-field">${desc}</div>` : ''}
+            `;
+
+            const r = ev.target.getBoundingClientRect();
+            tt.style.left = `${Math.min(r.left, window.innerWidth - 300)}px`;
+            tt.style.top = `${r.bottom + 5}px`;
+            tt.style.display = 'block';
+        }
+
+        function showTooltip(ev) {
+            const f = ev.target.dataset.field;
+            if (!f) return;
+            const tt = document.getElementById('tooltip');
+            let title = ev.target.textContent, desc = '', fi = '';
+
+            // Check if this is an undefined value (contains ?)
+            if (title.includes(',?')) {
+                desc = 'UNDEFINED - This register/value is not documented in the microcode specification';
+                // Parse the undefined value to show more info
+                const match = title.match(/([AD]),(\w+),\?(\d+)/);
+                if (match) {
+                    const [, prefix, group, reg] = match;
+                    fi = `${f} - ${prefix === 'A' ? 'A-operand' : 'Destination'} group ${group}, register 0o${reg} (undocumented)`;
+                }
+            } else if (microcodeDef?.fieldGroups) {
+                for (const g of Object.values(microcodeDef.fieldGroups)) {
+                    if (g.fields?.[f]) {
+                        const fd = g.fields[f];
+                        fi = `${f} [${fd.highBit}:${fd.lowBit}]`;
+                        desc = fd.description || '';
+                        if (fd.values) for (const [,v] of Object.entries(fd.values)) if (ev.target.textContent.includes(v.mnemonic)) { desc = v.description; break; }
+                        if (fd.subfields) for (const [sn,sf] of Object.entries(fd.subfields)) if (sf.values) for (const [,v] of Object.entries(sf.values)) if (ev.target.textContent.includes(v.mnemonic)) { desc = v.description; fi += ` > ${sn}`; break; }
+                        break;
+                    }
+                }
+            }
+            tt.innerHTML = `<div class="tooltip-title">${title}</div>${desc?`<div class="tooltip-desc">${desc}</div>`:''}${fi?`<div class="tooltip-field">${fi}</div>`:''}`;
+            const r = ev.target.getBoundingClientRect();
+            tt.style.left = `${r.left}px`;
+            tt.style.top = `${r.bottom + 5}px`;
+            tt.style.display = 'block';
+        }
+
+        function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+
+        function jumpToAddress(addr) {
+            currentPage = Math.floor(addr / pageSize) + 1;
+            selectedAddr = addr;
+            renderListing();
+            setTimeout(() => {
+                const el = document.querySelector(`.instruction[data-addr="${addr}"]`);
+                if (el) el.scrollIntoView({behavior:'smooth',block:'center'});
+                selectInstruction(addr);
+            }, 50);
+        }
+
+        function searchLabel(term, findNext = false) {
+            term = term.toUpperCase();
+
+            // If new search term, rebuild matches
+            if (term !== lastSearchTerm) {
+                lastSearchTerm = term;
+                searchMatches = [];
+                searchMatchIndex = -1;
+                for (const [l, a] of Object.entries(labels)) {
+                    if (l.toUpperCase().includes(term)) {
+                        searchMatches.push({ label: l, addr: a });
+                    }
+                }
+                // Sort by address
+                searchMatches.sort((a, b) => a.addr - b.addr);
+            }
+
+            if (searchMatches.length === 0) {
+                alert(`Label "${term}" not found`);
+                return false;
+            }
+
+            // Find next match
+            if (findNext || searchMatchIndex >= 0) {
+                searchMatchIndex = (searchMatchIndex + 1) % searchMatches.length;
+            } else {
+                searchMatchIndex = 0;
+            }
+
+            const match = searchMatches[searchMatchIndex];
+            document.getElementById('statusRight').textContent = `Match ${searchMatchIndex + 1}/${searchMatches.length}: ${match.label}`;
+            jumpToAddress(match.addr);
+            return true;
+        }
+
+        async function init() {
+            try {
+                document.getElementById('statusLeft').textContent = 'Loading...';
+
+                // Load manifest and populate dropdown
+                await loadManifest();
+                populateMicrocodeDropdown();
+
+                const defaultFile = microcodeManifest.default || 'MICRO-5800-B30';
+                const [wc, lc, dl] = await Promise.all([loadMicrocodeData(defaultFile), loadLabels(defaultFile), loadDefinition()]);
+                document.getElementById('statusLeft').textContent = 'Disassembling...';
+                disassembleAll();
+                document.getElementById('statusLeft').textContent = `${wc} words, ${lc} labels`;
+                document.getElementById('statusRight').textContent = dl ? 'Definition loaded' : '';
+                renderListing();
+
+                document.getElementById('searchBtn').addEventListener('click', () => { const t = document.getElementById('searchInput').value.trim(); if (t) searchLabel(t, false); });
+                document.getElementById('searchNextBtn').addEventListener('click', () => { const t = document.getElementById('searchInput').value.trim(); if (t) searchLabel(t, true); });
+                document.getElementById('searchInput').addEventListener('keypress', e => { if (e.key === 'Enter') { const t = document.getElementById('searchInput').value.trim(); if (t) searchLabel(t, searchMatches.length > 0 && t.toUpperCase() === lastSearchTerm); } });
+                document.getElementById('jumpBtn').addEventListener('click', () => { const a = parseInt(document.getElementById('jumpInput').value.trim(), 8); if (!isNaN(a) && a >= 0 && a < disassembledInstructions.length) jumpToAddress(a); else alert('Invalid address'); });
+                document.getElementById('jumpInput').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('jumpBtn').click(); });
+                document.getElementById('showHexBtn').addEventListener('click', () => { showHex = !showHex; document.getElementById('showHexBtn').textContent = showHex ? 'Hide Hex' : 'Show Hex'; document.getElementById('showHexBtn').classList.toggle('active', showHex); renderListing(); });
+                document.getElementById('downloadFormat').addEventListener('change', e => { if (e.target.value) { downloadDisassembly(e.target.value); e.target.value = ''; } });
+                document.getElementById('themeBtn').addEventListener('click', () => { isDarkTheme = !isDarkTheme; document.body.classList.toggle('dark-theme', isDarkTheme); });
+                document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderListing(); document.getElementById('listingContainer').scrollTop = 0; } });
+                document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < Math.ceil(disassembledInstructions.length / pageSize)) { currentPage++; renderListing(); document.getElementById('listingContainer').scrollTop = 0; } });
+                document.getElementById('pageSizeSelect').addEventListener('change', e => { pageSize = parseInt(e.target.value); currentPage = 1; renderListing(); });
+                document.getElementById('microcodeSelect').addEventListener('change', e => { if (e.target.value) switchMicrocode(e.target.value); });
+                document.getElementById('closeDetailBtn').addEventListener('click', () => { document.getElementById('detailPanel').classList.remove('visible'); selectedAddr = null; renderListing(); });
+
+                // Reference modal events
+                document.getElementById('refBtn').addEventListener('click', openRefModal);
+                document.getElementById('refCloseBtn').addEventListener('click', closeRefModal);
+                document.getElementById('refModal').addEventListener('click', e => { if (e.target.id === 'refModal') closeRefModal(); });
+                document.getElementById('refSearchInput').addEventListener('input', e => searchRefModal(e.target.value));
+
+                // Image modal (CPU diagram) events
+                document.getElementById('cpuBtn').addEventListener('click', openImgModal);
+                document.getElementById('imgCloseBtn').addEventListener('click', closeImgModal);
+                document.getElementById('imgModal').addEventListener('click', e => { if (e.target.id === 'imgModal' && imgZoomLevel <= 1) closeImgModal(); });
+                document.getElementById('imgModalBody').addEventListener('wheel', handleImgZoom, { passive: false });
+                document.getElementById('imgModalBody').addEventListener('mousedown', handleImgDragStart);
+                document.getElementById('imgZoomInBtn').addEventListener('click', imgZoomIn);
+                document.getElementById('imgZoomOutBtn').addEventListener('click', imgZoomOut);
+                document.getElementById('imgResetBtn').addEventListener('click', imgResetZoom);
+                // Attach mousemove/mouseup to document so drag continues even when mouse leaves the container
+                document.addEventListener('mousemove', handleImgDragMove);
+                document.addEventListener('mouseup', handleImgDragEnd);
+
+                // Keyboard handler for modals
+                document.addEventListener('keydown', e => {
+                    if (e.key === 'Escape') {
+                        if (document.getElementById('refModal').classList.contains('active')) closeRefModal();
+                        if (document.getElementById('imgModal').classList.contains('active')) closeImgModal();
+                    }
+                    // Image modal zoom keyboard shortcuts
+                    if (document.getElementById('imgModal').classList.contains('active')) {
+                        if (e.key === '+' || e.key === '=') { imgZoomIn(); e.preventDefault(); }
+                        if (e.key === '-' || e.key === '_') { imgZoomOut(); e.preventDefault(); }
+                        if (e.key === 'r' || e.key === 'R') { imgResetZoom(); e.preventDefault(); }
+                    }
+                });
+            } catch (err) {
+                document.getElementById('listing').innerHTML = `<div class="error">Error: ${err.message}<br><br>Run via web server (start.bat)</div>`;
+            }
+        }
+
+        // ============================================
+        // Reference Modal Functions
+        // ============================================
+
+        let refSelectedField = null;
+        let refSearchTerm = '';
+
+        const REF_FIELD_LAYOUT = [
+            { name: 'ALU_TRUE', label: 'ALU_T', bits: [127, 122], group: 'alu' },
+            { name: 'ALU_FALSE', label: 'ALU_F', bits: [121, 116], group: 'alu' },
+            { name: 'EXUC', label: 'EX', bits: [115, 115], group: 'alu' },
+            { name: 'COND_ALU', label: 'CA', bits: [114, 114], group: 'alu' },
+            { name: 'Q_REG', label: 'Q', bits: [113, 111], group: 'qreg' },
+            { name: 'AAP_CTRL', label: 'AAP', bits: [110, 103], group: 'aap' },
+            { name: 'TIMING', label: 'TIM', bits: [102, 101], group: 'timing' },
+            { name: 'DATATYPE', label: 'TYP', bits: [100, 98], group: 'datatype' },
+            { name: 'OR_ENABLE', label: 'OR', bits: [97, 97], group: 'operands' },
+            { name: 'A_OP', label: 'A_OP', bits: [96, 89], group: 'operands' },
+            { name: 'B_OP', label: 'B_OP', bits: [88, 84], group: 'operands' },
+            { name: 'DEST', label: 'DEST', bits: [83, 76], group: 'operands' },
+            { name: 'STATUS', label: 'STAT', bits: [75, 72], group: 'status' },
+            { name: 'IXC_INCR', label: 'IX', bits: [71, 71], group: 'status' },
+            { name: 'LC_DECR', label: 'LC', bits: [70, 70], group: 'status' },
+            { name: 'COND_SEQ', label: 'CS', bits: [69, 69], group: 'sequencer' },
+            { name: 'SEQ_TRUE', label: 'SEQ_T', bits: [68, 65], group: 'sequencer' },
+            { name: 'SEQ_FALSE', label: 'SEQ_F', bits: [64, 61], group: 'sequencer' },
+            { name: 'INVSEQ', label: 'INV', bits: [60, 60], group: 'sequencer' },
+            { name: 'CSAVE', label: 'CSV', bits: [59, 59], group: 'sequencer' },
+            { name: 'TESTOBJ', label: 'TEST', bits: [58, 53], group: 'sequencer' },
+            { name: 'ABR', label: 'ABR', bits: [52, 51], group: 'iac' },
+            { name: 'TBC', label: 'TBC', bits: [50, 48], group: 'iac' },
+            { name: 'GET', label: 'GET', bits: [47, 44], group: 'iac' },
+            { name: 'STOP', label: 'STP', bits: [43, 43], group: 'control' },
+            { name: 'AAPSYNC', label: 'AAS', bits: [42, 42], group: 'control' },
+            { name: 'MEM_BIT3', label: 'M3', bits: [41, 41], group: 'memory' },
+            { name: 'AD_ARTI', label: 'ART', bits: [40, 40], group: 'memory' },
+            { name: 'EA_SAVE', label: 'EAS', bits: [39, 38], group: 'memory' },
+            { name: 'MEMOT', label: 'MOT', bits: [37, 37], group: 'memory' },
+            { name: 'RESERVED', label: 'RSV', bits: [36, 36], group: 'memory' },
+            { name: 'ADACT', label: 'ACT', bits: [35, 35], group: 'memory' },
+            { name: 'MEM_BITS20', label: 'MEM', bits: [34, 32], group: 'memory' },
+            { name: 'ABS_ADDR', label: 'ADDRESS', bits: [31, 16], group: 'address' },
+            { name: 'AA', label: 'AA', bits: [15, 13], group: 'address' },
+            { name: 'AB', label: 'AB', bits: [12, 9], group: 'address' },
+            { name: 'SCAL', label: 'SCL', bits: [8, 6], group: 'address' },
+            { name: 'ORCON', label: 'ORCON', bits: [5, 0], group: 'address' }
+        ];
+
+        function openRefModal() {
+            if (!microcodeDef) {
+                alert('Microcode definition not loaded');
+                return;
+            }
+            buildBitDiagram();
+            refSelectedField = null;
+            document.getElementById('refDetail').innerHTML = '<div class="ref-no-selection">Click a field in the diagram above to view details</div>';
+            document.getElementById('refSearchInput').value = '';
+            refSearchTerm = '';
+            document.getElementById('refModal').classList.add('active');
+        }
+
+        function closeRefModal() {
+            document.getElementById('refModal').classList.remove('active');
+        }
+
+        function buildBitDiagram() {
+            const container = document.getElementById('bitDiagram');
+            let html = '<div class="bit-diagram-inner">';
+
+            for (const field of REF_FIELD_LAYOUT) {
+                const width = field.bits[0] - field.bits[1] + 1;
+                const pxWidth = Math.max(width * 8, 30);
+                html += `
+                    <div class="bit-field fg-${field.group}" data-field="${field.name}" onclick="selectRefField('${field.name}')" style="width: ${pxWidth}px;">
+                        <div class="bit-field-bar">${field.label}</div>
+                        <div class="bit-field-bits">${field.bits[0]}${field.bits[0] !== field.bits[1] ? '-' + field.bits[1] : ''}</div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function selectRefField(fieldName) {
+            // Update selection visuals
+            document.querySelectorAll('.bit-field').forEach(el => el.classList.remove('selected'));
+            const fieldEl = document.querySelector(`.bit-field[data-field="${fieldName}"]`);
+            if (fieldEl) fieldEl.classList.add('selected');
+
+            refSelectedField = fieldName;
+            renderRefDetail(fieldName);
+        }
+
+        function renderRefDetail(fieldName) {
+            const detail = document.getElementById('refDetail');
+
+            // Find field info in microcodeDef
+            let fieldDef = null;
+            let groupName = '';
+
+            for (const [gn, g] of Object.entries(microcodeDef.fieldGroups)) {
+                if (g.fields?.[fieldName]) {
+                    fieldDef = g.fields[fieldName];
+                    groupName = gn;
+                    break;
+                }
+            }
+
+            if (!fieldDef) {
+                detail.innerHTML = `<div class="ref-no-selection">Field "${fieldName}" not found in definition</div>`;
+                return;
+            }
+
+            const layoutField = REF_FIELD_LAYOUT.find(f => f.name === fieldName);
+            const bits = layoutField ? layoutField.bits : [fieldDef.highBit, fieldDef.lowBit];
+
+            let html = `
+                <div class="ref-detail-header">
+                    <h3>${fieldName}</h3>
+                    <div class="field-info">
+                        Bits ${bits[0]}-${bits[1]} (${bits[0] - bits[1] + 1} bits) | Group: ${groupName} | ${fieldDef.description || ''}
+                    </div>
+                </div>
+                <div class="ref-detail-body">
+            `;
+
+            // Check if field has subfields
+            if (fieldDef.subfields) {
+                for (const [sfName, sf] of Object.entries(fieldDef.subfields)) {
+                    html += renderSubfield(sfName, sf);
+                }
+            }
+
+            // Check if field has direct values
+            if (fieldDef.values) {
+                html += renderValues(fieldDef.values, fieldName);
+            }
+
+            // If no values or subfields
+            if (!fieldDef.values && !fieldDef.subfields) {
+                html += '<div class="ref-simple-values" style="color: var(--text-muted); font-style: italic;">No enumerated values for this field</div>';
+            }
+
+            html += '</div>';
+            detail.innerHTML = html;
+
+            // Apply search highlight if active
+            if (refSearchTerm) {
+                highlightSearchResults();
+            }
+        }
+
+        function renderSubfield(name, sf) {
+            if (!sf.values) return '';
+
+            const values = Object.entries(sf.values);
+            let html = `
+                <div class="ref-group">
+                    <div class="ref-group-header" onclick="toggleRefGroup(this)">
+                        <span class="ref-group-toggle"></span>
+                        <span class="ref-group-name">${name}</span>
+                        <span class="ref-group-count">${values.length} values | bits ${sf.highBit || '?'}-${sf.lowBit || '?'}</span>
+                    </div>
+                    <div class="ref-group-values">
+            `;
+
+            for (const [val, info] of values) {
+                const isUndoc = info.description?.includes('[UNDOCUMENTED');
+                html += `
+                    <div class="ref-value ${isUndoc ? 'undocumented' : ''}">
+                        <span class="ref-value-num">${val}</span>
+                        <span class="ref-value-mnem">${info.mnemonic || '-'}</span>
+                        <span class="ref-value-desc">${info.description || ''}</span>
+                    </div>
+                `;
+            }
+
+            html += '</div></div>';
+            return html;
+        }
+
+        function renderValues(values, fieldName = '') {
+            const entries = Object.entries(values);
+
+            // Group values by hardware group for large value sets (like A_OP, DEST)
+            if (entries.length > 20) {
+                return renderGroupedValues(entries, fieldName);
+            }
+
+            // Simple list for small value sets
+            let html = '<div class="ref-simple-values">';
+            for (const [val, info] of entries) {
+                const isUndoc = info.description?.includes('[UNDOCUMENTED');
+                html += `
+                    <div class="ref-value ${isUndoc ? 'undocumented' : ''}">
+                        <span class="ref-value-num">${val}</span>
+                        <span class="ref-value-mnem">${info.mnemonic || '-'}</span>
+                        <span class="ref-value-desc">${info.description || ''}</span>
+                    </div>
+                `;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        // Hardware group definitions for A_OP and DEST fields
+        const A_OP_GROUP_NAMES = {
+            0: 'BMG - Bit Mask Group',
+            1: 'ALU - Working Register File',
+            2: 'MMS - Memory Management (DMM)',
+            3: 'SPEC - Special Registers',
+            4: 'MIC - Microcode Control',
+            5: 'IDU - Instruction Decode Unit',
+            6: 'IAC - Instruction Address Control',
+            7: 'DAC - Data Address Control'
+        };
+
+        const DEST_GROUP_NAMES = {
+            0: 'ALU - Working Register File',
+            1: 'SPEC - Special Registers',
+            2: 'MMS - Memory Management (DMM)',
+            3: 'MMS - Memory Management (IMM/MM)',
+            4: 'MIC - Microcode Control',
+            5: 'IDU - Instruction Decode Unit',
+            6: 'IAC - Instruction Address Control',
+            7: 'DAC - Data Address Control'
+        };
+
+        function renderGroupedValues(entries, fieldName) {
+            // Group by hardware group (bits 7-5 of the value = group number)
+            const groups = {};
+            const groupNames = (fieldName === 'A_OP') ? A_OP_GROUP_NAMES : DEST_GROUP_NAMES;
+
+            for (const [val, info] of entries) {
+                const numVal = parseInt(val);
+                const groupNum = (numVal >> 5) & 7;  // Extract bits 7-5
+                const groupKey = groupNum;
+
+                if (!groups[groupKey]) groups[groupKey] = [];
+                groups[groupKey].push({ val, info, groupNum });
+            }
+
+            // Sort groups by group number (0-7)
+            const sortedGroups = Object.entries(groups).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+
+            let html = '';
+            for (const [groupNum, values] of sortedGroups) {
+                const groupLabel = groupNames[groupNum] || `Group ${groupNum}`;
+                html += `
+                    <div class="ref-group">
+                        <div class="ref-group-header" onclick="toggleRefGroup(this)">
+                            <span class="ref-group-toggle"></span>
+                            <span class="ref-group-name">${groupLabel}</span>
+                            <span class="ref-group-count">${values.length} values (${groupNum * 32}-${groupNum * 32 + 31})</span>
+                        </div>
+                        <div class="ref-group-values">
+                `;
+
+                // Sort values by numeric key
+                values.sort((a, b) => parseInt(a.val) - parseInt(b.val));
+
+                for (const { val, info } of values) {
+                    const isUndoc = info.description?.includes('[UNDOCUMENTED');
+                    html += `
+                        <div class="ref-value ${isUndoc ? 'undocumented' : ''}">
+                            <span class="ref-value-num">${val}</span>
+                            <span class="ref-value-mnem">${info.mnemonic || '-'}</span>
+                            <span class="ref-value-desc">${info.description || ''}</span>
+                        </div>
+                    `;
+                }
+
+                html += '</div></div>';
+            }
+
+            return html;
+        }
+
+        function toggleRefGroup(header) {
+            header.parentElement.classList.toggle('expanded');
+        }
+
+        function searchRefModal(term) {
+            refSearchTerm = term.toLowerCase().trim();
+
+            // Clear all highlights
+            document.querySelectorAll('.ref-value.highlight').forEach(el => el.classList.remove('highlight'));
+            document.querySelectorAll('.bit-field.search-match').forEach(el => el.classList.remove('search-match'));
+            document.querySelectorAll('.bit-field.search-dim').forEach(el => el.classList.remove('search-dim'));
+
+            if (!refSearchTerm) return;
+
+            // Search all fields in the bit diagram
+            highlightMatchingFields();
+
+            // Also highlight in current detail view
+            highlightSearchResults();
+        }
+
+        function fieldContainsSearchTerm(fieldName, fieldDef) {
+            const term = refSearchTerm;
+
+            // Check field name
+            if (fieldName.toLowerCase().includes(term)) return true;
+
+            // Check description
+            if (fieldDef.description && fieldDef.description.toLowerCase().includes(term)) return true;
+
+            // Check values
+            if (fieldDef.values) {
+                for (const [k, v] of Object.entries(fieldDef.values)) {
+                    if (v.mnemonic && v.mnemonic.toLowerCase().includes(term)) return true;
+                    if (v.description && v.description.toLowerCase().includes(term)) return true;
+                }
+            }
+
+            // Check subfields
+            if (fieldDef.subfields) {
+                for (const [subName, subDef] of Object.entries(fieldDef.subfields)) {
+                    if (fieldContainsSearchTerm(subName, subDef)) return true;
+                }
+            }
+
+            return false;
+        }
+
+        function highlightMatchingFields() {
+            if (!microcodeDef?.fieldGroups || !refSearchTerm) return;
+
+            const matchingFields = new Set();
+
+            // Search through all field groups
+            for (const [groupName, groupDef] of Object.entries(microcodeDef.fieldGroups)) {
+                if (groupDef.fields) {
+                    for (const [fieldName, fieldDef] of Object.entries(groupDef.fields)) {
+                        if (fieldContainsSearchTerm(fieldName, fieldDef)) {
+                            matchingFields.add(fieldName);
+                        }
+                    }
+                }
+            }
+
+            // Apply highlights to bit diagram
+            const hasMatches = matchingFields.size > 0;
+            document.querySelectorAll('.bit-field').forEach(el => {
+                const fieldName = el.dataset.field;
+                if (matchingFields.has(fieldName)) {
+                    el.classList.add('search-match');
+                } else if (hasMatches) {
+                    el.classList.add('search-dim');
+                }
+            });
+        }
+
+        function highlightSearchResults() {
+            if (!refSearchTerm) return;
+
+            // Expand groups with matches and highlight
+            document.querySelectorAll('.ref-group').forEach(group => {
+                let hasMatch = false;
+                group.querySelectorAll('.ref-value').forEach(val => {
+                    const text = val.textContent.toLowerCase();
+                    if (text.includes(refSearchTerm)) {
+                        val.classList.add('highlight');
+                        hasMatch = true;
+                    }
+                });
+                if (hasMatch) {
+                    group.classList.add('expanded');
+                }
+            });
+
+            // Also check simple values
+            document.querySelectorAll('.ref-simple-values .ref-value').forEach(val => {
+                const text = val.textContent.toLowerCase();
+                if (text.includes(refSearchTerm)) {
+                    val.classList.add('highlight');
+                }
+            });
+        }
+
+        // ============================================
+        // Image Modal Functions (Microcode Definition Diagram)
+        // ============================================
+
+        let imgZoomLevel = 1;
+        let imgPanX = 0;
+        let imgPanY = 0;
+        let imgDragging = false;
+        let imgDragStartX = 0;
+        let imgDragStartY = 0;
+        let imgPanStartX = 0;
+        let imgPanStartY = 0;
+        const IMG_ZOOM_MIN = 0.5;
+        const IMG_ZOOM_MAX = 10;
+        const IMG_ZOOM_STEP = 0.25;
+
+        function openImgModal() {
+            imgZoomLevel = 1;
+            imgPanX = 0;
+            imgPanY = 0;
+            imgDragging = false;
+            updateImgTransform();
+            document.getElementById('imgModal').classList.add('active');
+        }
+
+        function closeImgModal() {
+            document.getElementById('imgModal').classList.remove('active');
+            document.getElementById('imgModalBody').classList.remove('dragging');
+            imgDragging = false;
+        }
+
+        function updateImgTransform() {
+            const img = document.getElementById('mcDefImg');
+            img.style.transform = `translate(${imgPanX}px, ${imgPanY}px) scale(${imgZoomLevel})`;
+            document.getElementById('zoomInfo').textContent = `${Math.round(imgZoomLevel * 100)}%`;
+        }
+
+        function imgZoomIn() {
+            imgZoomLevel = Math.min(IMG_ZOOM_MAX, imgZoomLevel + IMG_ZOOM_STEP);
+            updateImgTransform();
+        }
+
+        function imgZoomOut() {
+            imgZoomLevel = Math.max(IMG_ZOOM_MIN, imgZoomLevel - IMG_ZOOM_STEP);
+            if (imgZoomLevel <= 1) {
+                imgPanX = 0;
+                imgPanY = 0;
+            }
+            updateImgTransform();
+        }
+
+        function imgResetZoom() {
+            imgZoomLevel = 1;
+            imgPanX = 0;
+            imgPanY = 0;
+            updateImgTransform();
+        }
+
+        function handleImgZoom(e) {
+            e.preventDefault();
+
+            const delta = e.deltaY > 0 ? -IMG_ZOOM_STEP : IMG_ZOOM_STEP;
+            const newZoom = Math.max(IMG_ZOOM_MIN, Math.min(IMG_ZOOM_MAX, imgZoomLevel + delta));
+
+            if (newZoom !== imgZoomLevel) {
+                imgZoomLevel = newZoom;
+                // Reset pan when zooming back to 1x or below
+                if (imgZoomLevel <= 1) {
+                    imgPanX = 0;
+                    imgPanY = 0;
+                }
+                updateImgTransform();
+            }
+        }
+
+        function handleImgDragStart(e) {
+            // Only drag with left mouse button and when zoomed in
+            if (e.button !== 0) return;
+            if (imgZoomLevel <= 1) return;
+
+            imgDragging = true;
+            imgDragStartX = e.clientX;
+            imgDragStartY = e.clientY;
+            imgPanStartX = imgPanX;
+            imgPanStartY = imgPanY;
+            document.getElementById('imgModalBody').classList.add('dragging');
+            e.preventDefault();
+        }
+
+        function handleImgDragMove(e) {
+            if (!imgDragging) return;
+
+            imgPanX = imgPanStartX + (e.clientX - imgDragStartX);
+            imgPanY = imgPanStartY + (e.clientY - imgDragStartY);
+            updateImgTransform();
+        }
+
+        function handleImgDragEnd() {
+            if (imgDragging) {
+                imgDragging = false;
+                document.getElementById('imgModalBody').classList.remove('dragging');
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Binary files - prevent line ending conversion
+*.LABE binary
+*.DATA binary
+*.TEXT binary
+*.img binary

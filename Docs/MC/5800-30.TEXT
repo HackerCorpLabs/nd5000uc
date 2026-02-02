@@ -1,0 +1,156 @@
+^vp=6;^pl=65;^ph=1;^tb=0;^bb=2;^hp=10;^pw=82;^lb=7;^ob=4;^font=2;
+^tl,ooo   ND Norsk Data   ooo;
+^ns=-1;
+^eof-str/^<^rd,lastpn,^$pn;;^>;
+^md/fyymmd/^<^$fyr;.^$fmm;.^$fdd;^>;
+^md/JUST/^<^FM,C;^tb=09;^jm=l;^bl;^>;
+^d-h1,^<^FORM-HEAD;^>;
+^MD/FORM-HEAD/^<
+70000000000000000000000000000000000000000000000000000000000000000000009
+.                                                                     .
+. Date ^fyymmd;             Norsk Data  A.S          Page ^#rpn^$pn;,2; of ^#lastpn,2;    .^rd,rpn^$pn;,^$pn;;
+.                         PROGRAM DESCRIPTION                         .
+40000000000080000000000000000000000000000000000800000000008000000000006
+. Product   . Name                             . Reg. no. . Category  .
+.           .                                  .          .           .
+.           . ND-5800 Microprogram             . 211276D  .   SPEC    .
+10000000000020000000000000000000000000000000000200000000002000000000003^>;
+.           .                                                         .
+. Reason    .   New product               x Error Correction          .
+.           . x Change/Addition             Different Environment     .
+.           .   Other:                                                .
+40000000000050000000000000000000000000000000000000000000000000000000006
+. Documen-  . Title                                         ND-no.    .
+. tation    . ND-500 Reference Manual                       05.009.04 .
+.           . ND-500 Single Precision Array Processing                .
+.           . Functions.                                    05.013.03 .
+.           . ND-500 Double Precision Array Processing                .
+.           . Functions.                                    05.018.01 .
+.           .                                                         .
+40000000000050000000000000000000000000000000000000000000000000000000006^cp,5;
+. Purpose   . Implement the ND-5000 instruction set including         .
+.           . ax-extension.                                           .
+40000000000050000000000000000000000000000000000000000000000000000000006^cp,5;
+. Prerequi- . Computer  Type  Floating format   Op. system Version    .
+. sites     .                                                         .
+.           . ND-5800   CX    32 and 64 bits.  SIN III VSX K WM406 or .
+.           .                                                newer    .^cp,5;
+.           40000000000000000000000000000000000000000000000000000000006
+.           . Eco level                                               .
+.           . 5000-36   All ECOes up to and including this ECO must   .
+.           .           be done.                                      .
+.           40000000000000000000000000000000000000000000000000000000006
+.           . ND-no.     Product name.                                .
+.           . 211305B    ND-500/5000 System Package for               .
+.           .            SINTRAN III/VSX, version L      Rev >=B01    .
+.           .            (MONITOR for ND-5000 CPU systems.)           .
+.           40000000000000000000000000000000000000000000000000000000006^cp,6;
+.           . Minimum permanent mass storage resources                .
+.           . User             Userspace       Number of files        .
+.           .                                                         .
+.           . SYSTEM              128 pages on   1 file               .
+.           . SYSTEM                9 pages on   1 file               .
+.           . SYSTEM                3 pages on   1 file               .
+.           . SYSTEM                1 pages on   1 file               .
+40000000000050000000000000000000000000000000000800000000000000000000006^cp,9;
+.           .                                  .  ND-no. for Source   .
+.           .                                  .  250291D             .
+40000000000020000000000000000000000000000000000200000000000000000000006^cp,8;
+.     File Name               Type            Containing              .
+.                                                                     .
+.     MICRO-5800-A30          DATA            ND-5800 Microprogram.   .
+.     MICRO-5800-B30          DATA            ND-5800 Microprogram.   .
+.     ND-5000-AF-LIB-B        NRF             ND-5800 SAX library.    .
+.     ND-5000-AD-LIB-A        NRF             ND-5800 DAX library.    .
+.     ND-500-RTC-LIB-A        NRF             Real Time Clock library..
+10000000000000000000000000000000000000000000000000000000000000000000003^just;
+^fm,c;^jm,s;
+^pg;
+^ch/INSTALLATION PROCEDURE;
+Insert the floppy disk, log in on the system as user SYSTEM
+and copy the microprogram file to the file CONTROL-STORE:DATA.
+^bl,1;
+The A version of the microprogram is to be used on a ND-5800 system
+with SINTRAN III VSX K and work mode 406 (single CPU configurations).
+^bl,;
+The B version of the microprogram is to be used on a ND-5800 with
+SINTRAN III VSX K and work mode 500 (single CPU configurations).
+^bl,;
+The SINTRAN III command : LIST-TITLE may be used to verify the work
+mode revision on your system.
+^bl,1;^nf;^jm,l;^fm,n;
+ENTER SYSTEM
+PASSWORD:<password>
+@OK
+@ENTER-DIRECTORY,211276D,FLOPPY-DISK-<drive-no.>,<floppy-unit>:
+@LIST-TITLE:
+SINTRAN III VSX/500 K
+
+STANDARD CONFIGURATION:
+GENERATION (WORK MODE NO):   xxx
+REVISION (PATRCH FILE NO.):
+CPU TYPE:
+CPU NUMBER:
+GENERATED:  nn.nn.nn     nn  month 1988
+
+If GENERATION (WORK MODE NO.) : xxx=^b=406; then copy the A version
+@COPY-FILE CONTROL-STORE:DATA,(211276D:SYSTEM)MICRO-5800-A30:DATA:
+
+If GENERATION (WORK MODE NO.) : xxx=^b=500; then copy the B version
+@COPY-FILE CONTROL-STORE:DATA,(211276D:SYSTEM)MICRO-5800-B30:DATA:
+
+@COPY-FILE ND-5000-AF-LIB-B:NRF,(211276D:SYSTEM)ND-5000-AF-LIB-B:NRF:
+@COPY-FILE ND-5000-AD-LIB-A:NRF,(211276D:SYSTEM)ND-5000-AD-LIB-A:NRF:
+@COPY-FILE ND-500-RTC-LIB:NRF,(211276D:SYSTEM)ND-500-RTC-LIB-A:NRF:
+@RELEASE-DIRECTORY 211276D:
+^of;
+^bl,1;^fm,c;
+The microprogram is loaded to the ND-5800 writeable control store by
+the ND-500-MONITOR using the command :
+^bl,1;
+LOAD-CONTROL-STORE CONTROL-STORE:DATA,0,40000:
+^bl,1;
+Default parameters may be used in the command LOAD-CONTROL-STORE,
+causing the entire microprogram to be loaded from the file
+CONTROL-STORE:DATA.
+^bl,1;
+The command LOAD-CONTROL-STORE is only necessary when the micro^-program
+is changed. Later restarts of the system will cause the micro^-program
+to be loaded automatically.
+^pg;
+^ch/THE RTC LIBRARY;
+^nf;^jm,l;^fm,n;
+The ND-5000 has a built in Real Time Clock. This may be handled by
+the ND-500-RTC-LIB. Note that when the entry CLRCLK is called, the 
+domain must be privileged. If not, Illegal Instruction Code is
+generated.
+
+The entries in the library with function are :
+^sip,,2;
+^np;CLINT  : Generate external interupt. No parameters in the CALL.
+^np;CLRCLK : Reset RTC. No parameters in the CALL.
+^np;RDCLK  : Read RTC. Value returned is 32 bits integer.
+^eip;
+^of;
+^pg;
+^ch/Additions, changes and corrections;
+^sip,,2;
+^np;Corrected accuracy for cos(+/- delta) and sin(+/- delta+Pi/2).
+^np;Added code to handle ALT prefix in all the string instructions
+and in the instruction tn BMOVE (note that hardware modifications must
+be done also to utilize this).
+^np;Error correction for the instruction Lregbl <mask>,<address>.
+^sip,,2;
+^np;When changing the CED register, either PV-trap occured or wrong
+data was loaded to the rest of the register block when included in the
+mask.
+^np;When changing the PS register, this was not done in hardware.
+^eip;
+^np;Changes according to changed specifications in Nksend. Also
+corrected error code for kicklock timeout.
+^np;Changes in Nkmove, both for writing data from user data -> nucleus
+buffer and error code given when called with function = 4 (illegal
+function).
+^np;Correction in INIT-5000 routine to reset the clock counter.
+
+^eip;
