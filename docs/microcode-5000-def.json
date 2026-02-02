@@ -2875,6 +2875,33 @@
           "width": 16,
           "description": "Absolute microprogram jump address (also overlaps with long/short argument)"
         },
+        "LARG": {
+          "highBit": 31,
+          "lowBit": 0,
+          "width": 32,
+          "description": "Long Argument (32-bit)",
+          "triggerField": "A_OP",
+          "triggerMnemonic": "A,LARG",
+          "displayFormat": "octal"
+        },
+        "SARG": {
+          "highBit": 15,
+          "lowBit": 0,
+          "width": 16,
+          "description": "Short Argument (16-bit, sign extended)",
+          "triggerField": "A_OP",
+          "triggerMnemonic": "A,SARG",
+          "displayFormat": "octal"
+        },
+        "MARG": {
+          "highBit": 7,
+          "lowBit": 0,
+          "width": 8,
+          "description": "Mini Argument (8-bit)",
+          "triggerField": "A_OP",
+          "triggerMnemonic": "A,MARG",
+          "displayFormat": "octal"
+        },
         "AA": {
           "highBit": 15,
           "lowBit": 13,

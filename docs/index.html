@@ -263,14 +263,6 @@
             margin-bottom: 8px;
         }
 
-        .bit-fields-grid {
-            display: grid;
-            grid-template-rows: repeat(12, auto);
-            grid-auto-flow: column;
-            gap: 4px 15px;
-            margin-top: 10px;
-        }
-
         .bit-field-row {
             display: flex;
             align-items: center;
@@ -278,12 +270,17 @@
             font-size: 11px;
             font-family: 'Courier New', monospace;
             padding: 3px 0;
-            border-bottom: 1px solid var(--border);
+            cursor: help;
+        }
+
+        .bit-field-row:hover {
+            background: var(--hover-bg);
         }
 
         .bit-field-row-label {
             min-width: 70px;
-            color: var(--text-secondary);
+            color: var(--text-primary);
+            font-weight: 600;
         }
 
         .bit-field-row-bits {
@@ -295,6 +292,55 @@
             color: var(--text-muted);
             font-size: 10px;
             margin-left: 4px;
+        }
+
+        .bit-field-row.subfield {
+            padding-left: 12px;
+            opacity: 0.9;
+        }
+
+        .bit-field-row.subfield .bit-field-row-label {
+            min-width: 58px;
+            color: var(--text-secondary);
+            font-weight: normal;
+        }
+
+        .bit-field-row.subfield .bit-field-row-label::before {
+            content: '└ ';
+            color: var(--text-muted);
+        }
+
+        .bit-field-row-mnem {
+            color: var(--primary);
+            font-size: 10px;
+            margin-left: 4px;
+            font-weight: 500;
+        }
+
+        .bit-fields-grid {
+            display: grid;
+            grid-template-rows: repeat(12, auto);
+            grid-auto-flow: column;
+            gap: 4px 0;
+            margin-top: 10px;
+        }
+
+        .bit-fields-grid > * {
+            padding-right: 15px;
+            margin-left: 15px;
+            padding-left: 10px;
+            border-left: 1px solid var(--border);
+        }
+
+        .bit-fields-grid > *:nth-child(-n+12) {
+            border-left: none;
+            margin-left: 0;
+            padding-left: 0;
+        }
+
+        .bit-field-group-wrap {
+            display: flex;
+            flex-direction: column;
         }
 
         .bit-row-label {
@@ -488,7 +534,20 @@
             font-size: 12px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            gap: 20px;
             flex-shrink: 0;
+        }
+
+        .github-link {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            margin-left: auto;
+        }
+
+        .github-link:hover {
+            color: white;
+            text-decoration: underline;
         }
 
         .loading {
@@ -1046,6 +1105,7 @@
     <div class="status-bar">
         <span id="statusLeft">Loading...</span>
         <span id="statusRight"></span>
+        <a href="https://github.com/HackerCorpLabs/nd5000uc/" target="_blank" class="github-link">📁 View on GitHub</a>
     </div>
 
     <div class="tooltip" id="tooltip" style="display: none;"></div>
@@ -1311,8 +1371,20 @@
             if (aap) m.push({text:aap,field:'AAP_CTRL'});
             if (TIMING_OPS[f.TIMING]) m.push({text:TIMING_OPS[f.TIMING],field:'TIMING'});
             if (f.DATATYPE !== 0) m.push({text:DATATYPE_OPS[f.DATATYPE]||`TYP?${f.DATATYPE}`,field:'DATATYPE'});
-            if (A_OP_TABLE[f.A_OP]) {
-                m.push({text:A_OP_TABLE[f.A_OP],field:'A_OP'});
+            const aopMnem = A_OP_TABLE[f.A_OP];
+            if (aopMnem) {
+                m.push({text:aopMnem,field:'A_OP'});
+                // Check for argument fields triggered by A_OP
+                if (aopMnem === 'A,LARG') {
+                    const larg = Number(bigInt & 0xFFFFFFFFn);
+                    m.push({text:`LARG=${larg.toString(8).padStart(11,'0')}`,field:'LARG'});
+                } else if (aopMnem === 'A,SARG') {
+                    const sarg = Number(bigInt & 0xFFFFn);
+                    m.push({text:`SARG=${sarg.toString(8).padStart(6,'0')}`,field:'SARG'});
+                } else if (aopMnem === 'A,MARG') {
+                    const marg = Number(bigInt & 0xFFn);
+                    m.push({text:`MARG=${marg.toString(8).padStart(3,'0')}`,field:'MARG'});
+                }
             } else {
                 const undef = decodeUndefAop(f.A_OP);
                 m.push({text:undef.text,field:'A_OP',isUndefined:true,undefInfo:undef});
@@ -1714,20 +1786,110 @@
             for (const f of allFields) {
                 const [h, l] = FIELDS[f.name] || [f.high, f.low];
                 const fv = inst.fields[f.name] || 0;
-                bh += `<div class="bit-field-row">`;
+                const fieldDef = getFieldDef(f.name);
+                const hasSubfields = fieldDef?.subfields && Object.keys(fieldDef.subfields).length > 0;
+
+                // Wrap fields with subfields in a container to keep them together
+                if (hasSubfields) bh += `<div class="bit-field-group-wrap">`;
+
+                // Look up mnemonic for parent field
+                let fieldMnem = '';
+                if (fieldDef?.values?.[fv]) {
+                    fieldMnem = fieldDef.values[fv].mnemonic || '';
+                }
+
+                bh += `<div class="bit-field-row" data-field="${f.name}" data-value="${fv}">`;
                 bh += `<span class="bit-field-row-label">${f.name}</span>`;
                 bh += `<span class="bit-field-row-bits">`;
                 for (let b = h; b >= l; b--) bh += `<div class="bit-box ${(fv>>(b-l))&1?'on':'off'}">${(fv>>(b-l))&1}</div>`;
                 bh += `</span>`;
                 bh += `<span class="bit-field-row-val">=${fv}</span>`;
+                if (fieldMnem) bh += `<span class="bit-field-row-mnem">${fieldMnem}</span>`;
+                bh += `</div>`;
+
+                // Render subfields if present
+                if (hasSubfields) {
+                    for (const [sfName, sfDef] of Object.entries(fieldDef.subfields)) {
+                        const sfHigh = sfDef.highBit;
+                        const sfLow = sfDef.lowBit;
+                        const sfWidth = sfHigh - sfLow + 1;
+                        const sfVal = Number((inst.bigIntValue >> BigInt(sfLow)) & ((1n << BigInt(sfWidth)) - 1n));
+                        let sfMnem = '';
+                        if (sfDef.values && sfDef.values[sfVal]) {
+                            sfMnem = sfDef.values[sfVal].mnemonic || '';
+                            if (sfMnem.startsWith('ALU,')) sfMnem = sfMnem.substring(4);
+                            if (sfMnem.startsWith('ALUF,')) sfMnem = sfMnem.substring(5);
+                            if (sfMnem === '(zero)') sfMnem = '0';
+                        } else if (!sfDef.values && sfName === 'REGISTER' && fieldMnem) {
+                            // REGISTER has no values - derive from parent mnemonic
+                            // Parent mnemonic like "A,BM00" or "D,ALU,R5" - extract last part after prefix
+                            const parts = fieldMnem.split(',');
+                            if (parts.length >= 2) {
+                                sfMnem = parts.slice(1).join(','); // "BM00" or "ALU,R5"
+                            }
+                        } else if (!sfDef.values) {
+                            // No values defined - show octal for other fields
+                            sfMnem = sfVal.toString(8).padStart(2, '0');
+                        }
+                        bh += `<div class="bit-field-row subfield" data-field="${f.name}" data-subfield="${sfName}" data-value="${sfVal}">`;
+                        bh += `<span class="bit-field-row-label">${sfName}</span>`;
+                        bh += `<span class="bit-field-row-bits">`;
+                        for (let b = sfHigh; b >= sfLow; b--) {
+                            const bitVal = Number((inst.bigIntValue >> BigInt(b)) & 1n);
+                            bh += `<div class="bit-box ${bitVal?'on':'off'}">${bitVal}</div>`;
+                        }
+                        bh += `</span>`;
+                        bh += `<span class="bit-field-row-val">=${sfVal}</span>`;
+                        if (sfMnem) bh += `<span class="bit-field-row-mnem">${sfMnem}</span>`;
+                        bh += `</div>`;
+                    }
+                    bh += `</div>`; // close bit-field-group-wrap
+                }
+            }
+
+            // Add conditional argument fields based on A_OP
+            const aopMnem = A_OP_TABLE[inst.fields.A_OP];
+            if (aopMnem === 'A,LARG') {
+                const larg = Number(inst.bigIntValue & 0xFFFFFFFFn);
+                bh += `<div class="bit-field-row" data-field="LARG" data-value="${larg}">`;
+                bh += `<span class="bit-field-row-label">LARG</span>`;
+                bh += `<span class="bit-field-row-bits">`;
+                for (let b = 31; b >= 0; b--) bh += `<div class="bit-box ${(larg>>b)&1?'on':'off'}">${(larg>>b)&1}</div>`;
+                bh += `</span>`;
+                bh += `<span class="bit-field-row-val">=${larg.toString(8).padStart(11,'0')}</span>`;
+                bh += `</div>`;
+            } else if (aopMnem === 'A,SARG') {
+                const sarg = Number(inst.bigIntValue & 0xFFFFn);
+                bh += `<div class="bit-field-row" data-field="SARG" data-value="${sarg}">`;
+                bh += `<span class="bit-field-row-label">SARG</span>`;
+                bh += `<span class="bit-field-row-bits">`;
+                for (let b = 15; b >= 0; b--) bh += `<div class="bit-box ${(sarg>>b)&1?'on':'off'}">${(sarg>>b)&1}</div>`;
+                bh += `</span>`;
+                bh += `<span class="bit-field-row-val">=${sarg.toString(8).padStart(6,'0')}</span>`;
+                bh += `</div>`;
+            } else if (aopMnem === 'A,MARG') {
+                const marg = Number(inst.bigIntValue & 0xFFn);
+                bh += `<div class="bit-field-row" data-field="MARG" data-value="${marg}">`;
+                bh += `<span class="bit-field-row-label">MARG</span>`;
+                bh += `<span class="bit-field-row-bits">`;
+                for (let b = 7; b >= 0; b--) bh += `<div class="bit-box ${(marg>>b)&1?'on':'off'}">${(marg>>b)&1}</div>`;
+                bh += `</span>`;
+                bh += `<span class="bit-field-row-val">=${marg.toString(8).padStart(3,'0')}</span>`;
                 bh += `</div>`;
             }
+
             bh += '</div>';
             document.getElementById('bitDisplay').innerHTML = bh;
 
             // Add hover handlers for 128-bit display
             document.querySelectorAll('#bitDisplay .bit-box[data-bit]').forEach(el => {
                 el.addEventListener('mouseenter', showBitTooltip);
+                el.addEventListener('mouseleave', hideTooltip);
+            });
+
+            // Add hover handlers for field rows
+            document.querySelectorAll('#bitDisplay .bit-field-row').forEach(el => {
+                el.addEventListener('mouseenter', showFieldRowTooltip);
                 el.addEventListener('mouseleave', hideTooltip);
             });
 
@@ -1741,6 +1903,61 @@
                 }
             }
             return { name: 'UNKNOWN', high: bit, low: bit, position: 0 };
+        }
+
+        function getFieldDef(fieldName) {
+            if (!microcodeDef?.fieldGroups) return null;
+            for (const g of Object.values(microcodeDef.fieldGroups)) {
+                if (g.fields?.[fieldName]) {
+                    return g.fields[fieldName];
+                }
+            }
+            return null;
+        }
+
+        function showFieldRowTooltip(ev) {
+            const row = ev.currentTarget;
+            const fieldName = row.dataset.field;
+            const subfieldName = row.dataset.subfield;
+            const value = parseInt(row.dataset.value);
+
+            const fieldDef = getFieldDef(fieldName);
+            if (!fieldDef) return;
+
+            const tt = document.getElementById('tooltip');
+            let title = '', mnem = '', desc = '', bits = '';
+
+            if (subfieldName && fieldDef.subfields?.[subfieldName]) {
+                // Subfield tooltip
+                const sfDef = fieldDef.subfields[subfieldName];
+                title = `${fieldName} > ${subfieldName}`;
+                bits = `Bits ${sfDef.highBit}-${sfDef.lowBit}`;
+                if (sfDef.values?.[value]) {
+                    mnem = sfDef.values[value].mnemonic || '';
+                    desc = sfDef.values[value].description || '';
+                }
+            } else {
+                // Parent field tooltip
+                title = fieldName;
+                bits = `Bits ${fieldDef.highBit}-${fieldDef.lowBit}`;
+                desc = fieldDef.description || '';
+                if (fieldDef.values?.[value]) {
+                    mnem = fieldDef.values[value].mnemonic || '';
+                    desc = fieldDef.values[value].description || desc;
+                }
+            }
+
+            tt.innerHTML = `
+                <div class="tooltip-title">${title}</div>
+                ${mnem ? `<div class="tooltip-desc"><strong>${mnem}</strong></div>` : ''}
+                ${desc ? `<div class="tooltip-desc">${desc}</div>` : ''}
+                <div class="tooltip-field">${bits} | Value: ${value}</div>
+            `;
+
+            const r = row.getBoundingClientRect();
+            tt.style.left = `${Math.min(r.left, window.innerWidth - 350)}px`;
+            tt.style.top = `${r.bottom + 5}px`;
+            tt.style.display = 'block';
         }
 
         function showBitTooltip(ev) {
