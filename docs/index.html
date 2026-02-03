@@ -2130,8 +2130,11 @@
                 });
                 document.getElementById('showBitsCheckbox').addEventListener('change', e => {
                     const dp = document.getElementById('detailPanel');
-                    if (e.target.checked && selectedAddr !== null) {
+                    if (e.target.checked) {
                         dp.classList.add('visible');
+                        if (selectedAddr === null) {
+                            document.getElementById('bitDisplay').innerHTML = '<div style="padding: 15px; color: var(--text-secondary);">Select an instruction to see field breakdown</div>';
+                        }
                     } else {
                         dp.classList.remove('visible');
                     }
@@ -2169,6 +2172,12 @@
                         if (e.key === 'r' || e.key === 'R') { imgResetZoom(); e.preventDefault(); }
                     }
                 });
+                // Show detail panel on init if checkbox is checked
+                if (document.getElementById('showBitsCheckbox').checked) {
+                    document.getElementById('detailPanel').classList.add('visible');
+                    document.getElementById('bitDisplay').innerHTML = '<div style="padding: 15px; color: var(--text-secondary);">Select an instruction to see field breakdown</div>';
+                }
+
             } catch (err) {
                 document.getElementById('listing').innerHTML = `<div class="error">Error: ${err.message}<br><br>Run via web server (start.bat)</div>`;
             }
