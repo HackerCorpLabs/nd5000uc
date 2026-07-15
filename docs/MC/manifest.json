@@ -4,6 +4,7 @@
     {"path": "MC/MICRO-5800-A30", "name": "5800-A30 (WM406)", "model": "5800", "hasLabels": true},
     {"path": "MC/MICRO-5800-B29", "name": "5800-B29 (WM500)", "model": "5800", "hasLabels": true},
     {"path": "MC/MICRO-5800-A29", "name": "5800-A29 (WM406)", "model": "5800", "hasLabels": true},
+    {"path": "MC/CONTROL-STORE", "name": "5800 CONTROL-STORE:DATA (~A30 rev)", "model": "5800", "hasLabels": false},
 
     {"path": "MC/MICRO-5800-M27", "name": "5800-M27 (WM406)", "model": "5800", "labelFile": "MC/MICRO-5800-A27", "hasLabels": true},
     {"path": "MC/MIC-5800-90-500", "name": "5800-500 (WM500)", "model": "5800", "labelFile": "MC/MICRO-5800-B27", "hasLabels": true},
