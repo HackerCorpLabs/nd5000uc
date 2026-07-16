@@ -1251,7 +1251,6 @@
             // STATUS group
             if (fg.STATUS?.fields) {
                 STATUS_OPS = extractValues(fg.STATUS.fields.STATUS);
-                EA_SAVE_OPS = extractValues(fg.STATUS.fields.EA_SAVE);
             }
 
             // SEQUENCER group
@@ -1271,9 +1270,10 @@
                 SCAL_OPS = extractValues(fg.ADDRESS.fields.SCAL);
             }
 
-            // MEMORY group
+            // MEMORY group (the JSON field is named MEMORY; EA_SAVE also lives here)
             if (fg.MEMORY?.fields) {
-                MEM_OPS = extractValues(fg.MEMORY.fields.MEM_CTRL);
+                MEM_OPS = extractValues(fg.MEMORY.fields.MEMORY);
+                EA_SAVE_OPS = extractValues(fg.MEMORY.fields.EA_SAVE);
             }
 
             // Q_REGISTER group
@@ -1281,9 +1281,9 @@
                 Q_REG_OPS = extractValues(fg.Q_REGISTER.fields.Q_REG);
             }
 
-            // TIMING group
+            // TIMING group (the JSON field is named TIMING, not CYCLE)
             if (fg.TIMING?.fields) {
-                TIMING_OPS = extractValues(fg.TIMING.fields.CYCLE);
+                TIMING_OPS = extractValues(fg.TIMING.fields.TIMING);
             }
 
             // DATATYPE group
