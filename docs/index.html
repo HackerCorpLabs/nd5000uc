@@ -1175,7 +1175,7 @@
             'SEQ_TRUE': [68, 65], 'SEQ_FALSE': [64, 61], 'INVSEQ': [60, 60],
             'CSAVE': [59, 59], 'TESTOBJ': [58, 53], 'ABR': [52, 51], 'TBC': [50, 48],
             'GET': [47, 44], 'STOP': [43, 43], 'AAPSYNC': [42, 42], 'MEM_BIT3': [41, 41],
-            'AD_ARTI': [40, 40], 'EA_SAVE': [39, 38], 'MEMOT': [37, 37], 'ADACT': [35, 35],
+            'AD_ARTI': [40, 40], 'EA_SAVE': [39, 38], 'MEMOT': [37, 37], 'RESERVED_36': [36, 36], 'ADACT': [35, 35],
             'MEM_BITS20': [34, 32], 'ABS_ADDR': [31, 16], 'AA': [15, 13], 'AB': [12, 9],
             'SCAL': [8, 6], 'ORCON': [5, 0]
         };
@@ -1334,11 +1334,15 @@
         }
 
         function decodeAap(v) {
+            if (!v) return null;
             const s = (v >> 5) & 7, op = v & 0x1F, n = AAP_SELECT[s];
-            if (!n) return null;
-            if (n === 'AAP1') return AAP1_OPS[op] ? `AAP1,${AAP1_OPS[op]}` : null;
-            if (n === 'AAP2') return AAP2_OPS[op] ? `AAP2,${AAP2_OPS[op]}` : null;
-            return n;
+            // Lossless fixes: the JSON values already carry the "AAP1,"/"AAP2," prefix,
+            // so do NOT re-add it (the old code rendered AAP1,AAP1,CLEAR - 506 words).
+            // Unknown selector/op combinations were silently dropped: raw octal instead.
+            if (n === 'AAP1' && AAP1_OPS[op]) return AAP1_OPS[op];
+            if (n === 'AAP2' && AAP2_OPS[op]) return AAP2_OPS[op];
+            if (n === 'EXPISO' && op === 0) return 'EXPISO';
+            return `AAP_CTRL=${v.toString(8)}`;
         }
 
         function decodeSeq(v, p) {
@@ -1380,6 +1384,16 @@
                 m.push({text: decodeAluFalse(f.ALU_FALSE), field:'ALU_FALSE'});
             } else {
                 m.push({text: decodeAlu(f.ALU_TRUE), field:'ALU_TRUE'});
+                // Lossless fix: a nonzero ALU false path WITHOUT C,ALU is real bit
+                // state (e.g. ALUF,ADRC on every ILLEG word - ~23% of all words)
+                // and was silently dropped before. Mirror ND5000Listing.cs:
+                // op nonzero -> ALUF token (+carry); op zero but carry set -> carry only.
+                const alufOp = (f.ALU_FALSE >> 2) & 0xF, alufCry = f.ALU_FALSE & 3;
+                if (alufOp !== 0) {
+                    m.push({text: decodeAluFalse(f.ALU_FALSE), field:'ALU_FALSE'});
+                } else if (alufCry !== 0) {
+                    m.push({text: CRYF_OPS[alufCry] || `CRYF=${alufCry.toString(8)}`, field:'ALU_FALSE'});
+                }
             }
 
             if (f.EXUC) m.push({text:'EXUC',field:'EXUC'});
@@ -1389,6 +1403,9 @@
             if (TIMING_OPS[f.TIMING]) m.push({text:TIMING_OPS[f.TIMING],field:'TIMING'});
             if (f.DATATYPE !== 0) m.push({text:DATATYPE_OPS[f.DATATYPE]||`TYP?${f.DATATYPE}`,field:'DATATYPE'});
             const aopMnem = A_OP_TABLE[f.A_OP];
+            // Argument overlays: LARG/SARG (and MARG for ORCON) reuse the low bits,
+            // so AA/AB/SCAL/ORCON raw prints are suppressed under them (lossless rule)
+            const isLarg = aopMnem === 'A,LARG', isSarg = aopMnem === 'A,SARG', isMarg = aopMnem === 'A,MARG';
             if (aopMnem) {
                 m.push({text:aopMnem,field:'A_OP'});
                 // Check for argument fields triggered by A_OP
@@ -1416,6 +1433,7 @@
                 }
             }
             if (STATUS_OPS[f.STATUS]) m.push({text:STATUS_OPS[f.STATUS],field:'STATUS'});
+            else if (f.STATUS !== 0) m.push({text:`STATUS=${f.STATUS.toString(8)}`,field:'STATUS'});
             if (f.IXC_INCR) m.push({text:'IXADJ',field:'IXC_INCR'});
             if (f.LC_DECR) m.push({text:'LCDECR',field:'LC_DECR'});
 
@@ -1427,26 +1445,64 @@
             } else {
                 const t = decodeSeq(f.SEQ_TRUE,'T');
                 if (t) m.push({text:t,field:'SEQ_TRUE'});
+                if (f.SEQ_FALSE !== 0) {
+                    // Lossless fix: a nonzero SEQ false path without C,SEQ was dropped.
+                    // The type token is forced even when NEXT so absence stays
+                    // unambiguous (no F tokens without C,SEQ = SEQ_FALSE 0).
+                    const fj = (f.SEQ_FALSE >> 2) & 3, fh = f.SEQ_FALSE & 3;
+                    const jn = {0:'JMP',1:'JMPREL',2:'RETURN',3:'NEXT'};
+                    const hn = {0:'HOLD',1:'POP',2:'LOAD',3:'PUSH'};
+                    const parts = [`F,${jn[fj]}`];
+                    if (fh !== 0) parts.push(`F,${hn[fh]}`);
+                    m.push({text:parts.join(', '),field:'SEQ_FALSE'});
+                }
             }
 
             if (f.INVSEQ) m.push({text:'INVSEQ',field:'INVSEQ'});
             if (f.CSAVE) m.push({text:'CSAVE',field:'CSAVE'});
             if (TESTOBJ_TABLE[f.TESTOBJ]) m.push({text:TESTOBJ_TABLE[f.TESTOBJ],field:'TESTOBJ'});
+            else m.push({text:`TESTOBJ=${f.TESTOBJ.toString(8)}`,field:'TESTOBJ'});   // lossless: unnamed codes were dropped
             if (ABR_OPS[f.ABR]) m.push({text:ABR_OPS[f.ABR],field:'ABR'});
-            if (TBC_OPS[f.TBC] && f.TBC !== 7) m.push({text:TBC_OPS[f.TBC],field:'TBC'});
-            if (GET_OPS[f.GET]) m.push({text:GET_OPS[f.GET],field:'GET'});
+            if (f.TBC !== 7) {
+                if (TBC_OPS[f.TBC]) m.push({text:TBC_OPS[f.TBC],field:'TBC'});
+                else m.push({text:`TBC=${f.TBC.toString(8)}`,field:'TBC'});           // lossless: TBC=5 has no mnemonic
+            }
+            if (f.GET !== 0) {
+                if (GET_OPS[f.GET]) m.push({text:GET_OPS[f.GET],field:'GET'});
+                else m.push({text:`GET=${f.GET.toString(8)}`,field:'GET'});
+            }
             if (f.STOP) m.push({text:'STOP',field:'STOP'});
             if (f.AAPSYNC) m.push({text:'AAPSYNC',field:'AAPSYNC'});
             const mem = (f.MEM_BIT3 << 3) | f.MEM_BITS20;
-            if (MEM_OPS[mem]) m.push({text:MEM_OPS[mem],field:'MEM'});
+            if (mem !== 0) {
+                if (MEM_OPS[mem]) m.push({text:MEM_OPS[mem],field:'MEM'});
+                else {
+                    // lossless: unknown memory code - raw per split part
+                    if (f.MEM_BIT3) m.push({text:'MEM_BIT3=1',field:'MEM'});
+                    if (f.MEM_BITS20) m.push({text:`MEM_BITS20=${f.MEM_BITS20.toString(8)}`,field:'MEM'});
+                }
+            }
+            if (f.AD_ARTI) m.push({text:'AD_ARTI=1',field:'AD_ARTI'});               // lossless: was extracted, never shown
             if (EA_SAVE_OPS[f.EA_SAVE]) m.push({text:EA_SAVE_OPS[f.EA_SAVE],field:'EA_SAVE'});
+            if (f.MEMOT) m.push({text:'C,MEMOT',field:'MEMOT'});                     // lossless: was extracted, never shown
+            if (f.RESERVED_36) m.push({text:'RESERVED_36=1',field:'RESERVED_36'});
             if (f.ADACT) m.push({text:'ADACT',field:'ADACT'});
             if (f.ABS_ADDR !== 0) {
                 const lbl = labelsByAddr[f.ABS_ADDR];
                 m.push({text:`ADDR=${lbl||toOctal(f.ABS_ADDR)}`,field:'ABS_ADDR',isAddr:true,targetAddr:f.ABS_ADDR});
             }
-            if (SCAL_OPS[f.SCAL] && f.SCAL !== 0) m.push({text:SCAL_OPS[f.SCAL],field:'SCAL'});
+            // lossless: AA/AB address-arithmetic operand selects (octal), suppressed
+            // only when the bits are covered by a LARG/SARG immediate overlay
+            if (!isLarg && !isSarg) {
+                if (f.AA) m.push({text:`AA=${f.AA.toString(8)}`,field:'AA'});
+                if (f.AB) m.push({text:`AB=${f.AB.toString(8)}`,field:'AB'});
+            }
+            if (f.SCAL >= 1 && f.SCAL <= 5 && SCAL_OPS[f.SCAL]) m.push({text:SCAL_OPS[f.SCAL],field:'SCAL'});
+            else if (f.SCAL !== 0 && !isLarg && !isSarg) m.push({text:`SCAL=${f.SCAL.toString(8)}`,field:'SCAL'});
             if (f.OR_ENABLE) m.push({text:`ORCON=${f.ORCON.toString(16).toUpperCase().padStart(2,'0')}`,field:'ORCON'});
+            // lossless: ORCON bits without OR-enable (the 0x prefix marks the orphan
+            // form), suppressed when covered by a LARG/SARG/MARG immediate overlay
+            else if (f.ORCON !== 0 && !isLarg && !isSarg && !isMarg) m.push({text:`ORCON=0x${f.ORCON.toString(16).toUpperCase().padStart(2,'0')}`,field:'ORCON'});
 
             return {address:addr,bigIntValue:bigInt,hex:toHex32(bigInt),fields:f,mnemonics:m,label:labelsByAddr[addr]||''};
         }
