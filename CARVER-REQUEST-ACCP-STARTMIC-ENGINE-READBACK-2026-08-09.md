@@ -1,5 +1,19 @@
 # CARVER-REQUEST: run the microengine on ARM + expose its result to the ACCP link read-back
 
+> **⚠️ CORRECTION 2026-08-09 (same day, after doing the work myself — Ronny ruled the "other
+> session" is just me across time).** Need **A** below is WRONG: TESTOBJ 29/30/31 are documented
+> HOLES, not missing conditions. The engine throws because the firmware's `arm@0x3FF0` runs the
+> sequence-test word, which JUMPS TO ADDRESS 0, where the control-store **sample-test PATTERN**
+> lives (`0x564051AF…`) — a dense walking/random word being executed as microcode; its bits
+> decode to a `CondSeq` word asking for the hole value 29. There is no program to run; it is a
+> test pattern. So `word[6]==0x0100` is purely need **B** — a read-back STATUS the card's
+> engine-path presents after arm+stop — and producing it needs a HARDWARE fact (the engine-path
+> status-register contents) that is NOT in octo.bin, the manuals, or the B30 microcode. Do not
+> fabricate `0x0100`. The mechanism (`StartMicroprogram` → real engine, sink read-back) is
+> committed (`ed00a037c`); this request is now only need **B**, and it is blocked on a real-card
+> capture or the status-register spec, not on writable code.
+
+
 **Full path:** `E:\Dev\Ronny\ND5000UC\CARVER-REQUEST-ACCP-STARTMIC-ENGINE-READBACK-2026-08-09.md`
 **From:** octobus/ACCP-link session (task #11, P4.1)
 **To:** microword-CPU session (owns `CpuND5000` internals)
