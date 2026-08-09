@@ -11,6 +11,10 @@ check here BEFORE building a new instrument.
 | `ND500_FRAME_LOG=<file>` | ordered ENTS/RET frame log, same text as the C side | FIRST tool for any behaviour divergence vs nd500x — diff to first divergence (~100k lines/compile). Strip CRLF; use fi.StartAddress not PC; ~73 benign console-poll RET hunks expected |
 | `ND500_TRACE_FILE` + `ND500_TRACE_LO/HI` | full instruction trace, RANGE-GATED by PC | only around a found divergence — ungated reached 9 GB |
 | `ND500_KEEP_SCRATCH=1` | TestMON_CompilePath keeps its scratch tree | when the BYTES are wrong rather than the behaviour |
+| `ND500_MON_LOG=1` | TestMON_CompilePath: MON-call log to `%LocalAppData%\trace\file-trace.txt` (APPEND - delete first) | the C# twin of ND500X_MONLOG, captured at Device level (whole MON surface). Host-side MON writes are invisible to the instruction trace - this is the instrument that sees them. NOTE the C monlog prints numbers in OCTAL (SETBS 4000B=2048, WFILE 10000B=4096) |
+| `ND500_WATCH_ADDR=<hex>` | one-byte data watchpoint in CpuND500: logs every read (8/16-bit) and write (8/16/32) covering that byte, with value+PC, at Machine level | THE tool for mem-to-mem carry chains: when PC and register streams are identical but a memory cell differs, walk write-hops cell by cell. Needs ND500_MON_LOG=1 to capture. Found SMOVE, SLOCA, W HCONV and the write-back sharing bug (task #9) |
+| Pinned clocks | C: `ND500X_PIN_CLOCK=1`; C#: TestMON_CompilePath pins `SintranEmulation.DeterministicClock` = 1990-01-01 12:00 UTC | trace diffs REQUIRE both sides pinned or wall-clock digit formatting produces phantom hunks |
+| `_cpu.LastProtectionViolation` | printed by the link test | names the faulting EA + capability reason + operand addressing when the guest's OWN trap handler eats the PV (no CRASHED stop to inspect) |
 
 ## nd500x C (WSL `~/repos/nd500x`)
 
