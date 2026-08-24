@@ -34,7 +34,15 @@ check here BEFORE building a new instrument.
 | `ND5000_DIFF_FILE=<corpus basename>` | Sweep dumps one file's diverging cases |
 | `ND5000_TRACE_FILE` + `ND5000_TRACE_NAME` | Sweep traces one named vector |
 | `CpuND500.MpmActivityTrace` (in code) | MPM access ring buffer with PC + I/D space |
+| **`cpu.StateTrace = MicroStateTrace.ToFile(path, labePath)`** (in code) | **MICROWORD-BY-MICROWORD STATE-CHANGE LOG of the real B30.** One line per Tick, only when something changed: octal CS address + nearest `.LABE` label + short decode + every changed register. Diffs all 24 WRF (encoding order), P/L/B/NPC, DPA/EA0-3/DATA/Q/LC/IRL/MIB, both status sets, and SRF 0o2000-0o2077 (mailbox comm block). Flags `[STOP]` and `[EXUC sneak]`. **Off by default — one null test per Tick.** Pass the `.LABE` path or the log is unreadable octal. **Does NOT cover:** the other ~4000 SRF words, and guest MEMORY writes (use `MpmBackedMicroMemory.ReadObserver`/`WriteObserver` for bytes). See `Nuget\HackerCorpLabs.Emulation.CPU.ND5000\src\MicroStateTrace.cs` — its header lists the traps. |
+| `MicrocodeStartupStateProbeTests.Probe_ColdStartToIdle_DumpsFullStateDelta` | Full cold-start (CS 0 → IDLE, 62,851 ticks) register + memory + ACCP-conversation delta. **Check this before building a new startup instrument — it already exists.** |
 | Sweep gate baseline | match=22330 diverge=1638 — regression SCREAMS |
+
+**⚠️ READING A MICROWORD TRACE — a delta says WHEN state changed, not always WHICH word changed it.**
+Two mechanisms, both measured: the **EXUC sneak** runs a second body under the same Mpc; and
+**pipelined loads commit late** — a `D,LC` surfaces `Registers.LcLoadLatency` ticks afterwards, so
+`INIT_SAMSON`'s `D,LC` at t=2 appears on the t=5 line whose CS is an unrelated `000104`. Check EXUC
+and check for a pipelined register before attributing any write to a microword.
 
 ## ACCP 68000 machine (`Machines.Accp`, in-code instruments, off by default)
 
