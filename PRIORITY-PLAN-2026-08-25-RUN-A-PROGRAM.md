@@ -809,11 +809,42 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       executed. *If verifying by execution, watch the **writes**, not the pass — a save over an
       empty context block may be harmless and both polarities would go green.*
 
-- [ ] **1.24 NEXT BLOCKER: no page is ever copied in.** `RESIWR` total still **44**; cpu-stat still
-      does not print. With the reason path now healthy, the question is whether **idx 8**
-      ("connect/page-in a segment", reaches `RPHS`) or **idx 9** ("allocate+link") is ever
-      dispatched — idx 10 reaches no paging primitive at all. If not, what does SINTRAN require
-      before it will ask for one? NPL/pseg carve, no tree needed.
+- [ ] **1.24 NEXT BLOCKER — and the FRAMING IS WRONG. `RESIWR` cannot see a page-in.** `[V]`
+      `LSWPAGE` @136112 (labelled *"Disk I/O"*) — the handler the swapper actually calls — pages by
+      **DISC DMA**, not by a mailbox copy:
+      ```
+      136115  11=:L; SWMSG+"SWPINFO"=:D; T:="XSDUNIT"; *MOVPA  ; 11 params -> the 5swap param array
+      136125  A:=XSDUNIT; CALL LOGPH                           ; logical -> physical unit
+      136201  T:="QP100".QP5SW                                 ; 500 SWAPPER ELEMENT (disc access queue)
+      136215  *LDF I (XABSF; STF ABFUN,X                       ; function block (3 words)
+      136217  *LDD I (XABLO; STD ABPA2,X                       ; disc address
+      136221  *LDA I (XABLN; STA ABP31,X                       ; length
+      136223  CALL M5TRANS; GO BUSR                            ; START THE TRANSFER
+      ```
+      (non-optimised path: `136242 X:=SWMSG; CALL 5SWACTRT` — "Activate 5swap".)
+      The page is moved by the **disc driver** into memory named by parameters the **swapper
+      supplied**, straight into shared memory. **No `RESIWR`/`13B`/`14B` mailbox copy is involved,
+      so a perfectly healthy page-in leaves `RESIWR` at 44 forever.** "RESIWR unchanged" is
+      consistent with paging working AND with paging never happening — **it does not distinguish
+      them. Fifth scope-limited zero, and it has been the headline metric all day.**
+
+      **TRANSFERS DEMONSTRABLY COMPLETE.** The two measured `NUMPA:=0` answers were `5RDTRANSFER`
+      (*"Return after disc-transfer"*), both taking the `OKMONICO % Transfer ok` arm — **not** the
+      `A:=1055 % Error in transfer` arm. So at least two disc transfers ran to success: real paging
+      activity `RESIWR` cannot see.
+
+      **THE QUESTION CHANGES SHAPE:** not "why is no page copied in" but **"pages ARE being read —
+      do they land where the PST expects, and is the PST entry written afterwards?"** PST entry 11
+      staying zero (with six live entries at 0-15) is still unexplained; a page can arrive correctly
+      by DMA and be useless if nothing maps it.
+
+      **INSTRUMENTS THAT CAN ACTUALLY SEE IT:** count `5RDTRANSFER` arrivals and which arm each
+      takes (ok vs `swderr=1055`); watch writes to the **destination page** (address is in the
+      11-word block moved from `SWMSG+SWPINFO`); watch writes to **`PSTP + 11*entry`** — transfers
+      completing while the PST entry is never written puts the gap between "page present" and
+      "page mapped", a different handler entirely.
+      `[D]`: which of the 11 params carries the destination address — `LDF` pulls 3 words from
+      `XABSF` into `ABFUN`, conventionally function plus buffer, **word not pinned**.
 
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
