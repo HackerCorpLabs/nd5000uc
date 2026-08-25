@@ -1436,6 +1436,51 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       Precision on one axis, an unchecked assumption on the other — the same failure as the `AM#12`
       base walk, and the second time today after the ENTT/Table-5 generation caveat.
 
+- [ ] **1.49 SWEEP FINISHED — the four unchecked instructions, and a SECOND, WORSE fault class:
+      a faulted read returns `0`, and in several of these `0` already MEANS something.** Read
+      `Retk.cs`, `Retd.cs`, `Entd.cs`, `Chain.cs` to the closing brace. Two are clean; two are not,
+      and one of them was never on my list at all.
+
+      | instruction | memory reads | guard | verdict |
+      |---|---|---|---|
+      | `Retd` | none (`regs.P = regs.L`, that is the whole body) | n/a | **SAFE** |
+      | `Entd` | none (reads `PendingCall*`, CPU-side state) | n/a | **SAFE** |
+      | **`Retk`** | 2 (`B+0` PREVB, `B+4` RETA) | **0** | **UNSAFE** — 3 commits: P@92, L@93, B@94 |
+      | **`Chain`** | 1 **per level, in a loop** @114 | **0** | **UNSAFE** — commits + a spurious trap |
+
+      **`Retk` is the twin of `Ret`, and `Ret` IS ALREADY FIXED.** `Ret.cs:75` carries
+      `if (cpu.InstructionAborted) return;` with a comment naming the bug class and citing
+      *"nd500x CALL/Ret.c (commit c77a8fd), same bug class as Jumpg/Jumps and the LOOP family"*.
+      `Retk` differs from `Ret` **only in setting `K` instead of clearing it** — same two reads, same
+      three commits — and never got the guard. This is not a judgement call about whether the guard
+      belongs; the identical routine next to it already answers that. `[V]`.
+
+      **THE SECOND CLASS, and it is worse than committing garbage.** `Memory.cs:173` returns `0` on
+      an aborted read. In these routines `0` is not a neutral wrong number — it is a **reserved
+      sentinel with its own code path**, so a page fault does not merely corrupt state, it is
+      **silently reclassified as a different, wrong event**:
+      - **`Chain` @117**: a faulted link read gives `0`, which the manual defines as *end of chain* —
+        so the walk sets `K`, writes the register, and raises **ILLEGAL OPERAND VALUE** (§15.7). A
+        page fault is turned into an IOV trap. **This one matters here specifically:** `CHAIN` is the
+        Pascal static-link walker (its own doc comment says so), **CPU-STAT is a Pascal program**, and
+        the frames it walks are exactly the pages we have measured faulting.
+      - **`Retk` @84**: a faulted `PREVB` read gives `0` → **stack underflow** trap. A faulted `RETA`
+        read with `PREVB` intact gives `retAddr = 0` → commits **`P = L = 0`**, a jump to address 0.
+      - **`Retb` @73/96**: `logSize` is read from the frame and handed to `FreeHeapBlock`. A faulted
+        read frees the block at **order 0** instead of its real order — that is **buddy-heap
+        corruption caused by a page fault**, in the same heap whose allocator this session just fixed.
+
+      **So the guard is necessary but not sufficient wherever `0` is a sentinel.** Where the routine
+      already branches on `0`, the abort check must come **before that branch**, not merely before the
+      commits — otherwise the fault is consumed by the sentinel path and the guard never sees it.
+      `[V]` on all four bodies and on the `0`-sentinel semantics; `[OPEN]` on whether any has fired
+      live. `Chain` is the cheapest to test and the most likely of the set to be firing in CPU-STAT.
+
+      **Final tally for the whole family — 10 safe, 8 unsafe:**
+      SAFE = `Call`, `Callg`, `Ret`, `Ents`, `Entsn`, `Entb`, `Entf`, `Entfn` (guard present);
+      `Retd`, `Entd` (no memory access, nothing to guard).
+      UNSAFE = `Entt` (being fixed), `Rett`, `Retk`, `Retb`, `Retbk`, `Init`, `Entm`, `Chain`.
+
       **Lead for the ISE item, peer's, `[D]` and explicitly not measured:** `Entb.cs:169`'s comment —
       *"a fault there leaves L and the interlock untouched and the retried entry instruction still sees
       its CALL. **Without this the retry raises a FALSE ISE — the defect that killed vi through
