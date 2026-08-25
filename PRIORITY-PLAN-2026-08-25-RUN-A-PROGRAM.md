@@ -321,7 +321,38 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       **Every trap-record field we DO write is correct** (STOPR=2, MSWMC, TRAPN=0o46, LA, phys
       seg=11, MMS) — `AnswerTrapStop` covers `0o11..0o23` and never touches `0o7`/`0o10`.
 
-      **The classic microcode DOES write them, and it is the FIRST thing it writes.** Carved from
+      > **CORRECTED 2026-08-25 — the claim below that the microcode writes `0o7`/`0o10` is WRONG.
+      > The walk was off by two words because I never checked its BASE.** `AM#12` has exactly ONE
+      > writer in all 8192 words, `007624`, and its context anchors it:
+      > ```
+      > 007622  A+B SARG=0o2 B,AL#20 D,AL#20  JSR 007540  ; AL#20 += 2 ; MAR := AL#20
+      > 007623  ADIR SARG=0o2 D,AM#20        JSR 007550  ; halfword 2 -> that address
+      > 007624  ADIR A,AL#20 D,AM#12         JSR 007544  ; AM#12 := AL#20
+      > ```
+      > `007623` writing a literal `2` IS the independently documented unconditional
+      > `N5STA := WAITING(2)`, and `N5STA` is offset `2`. So **`AM#12` = message base + 2**, and
+      > `011271`'s `base + AM#12 + 7` is **base + `0o11` = STOPR**, not `0o7`.
+      >
+      > Re-walked from `0o11`, every write lands on a field the carve table already names:
+      > `0o11` STOPR=2 · `0o12-13` trapping P · `0o14-15` restart P · `0o16` TRAPN ·
+      > `0o17-20` fault LA · `0o21` phys seg. **Six independent hits**; a walk off by two would
+      > have collided with all six.
+      >
+      > **Consequences.** The trap writer's MAR STARTS at `0o11` and never touches `0o7`/`0o10` —
+      > exactly the range `AnswerTrapStop` already covers. **Our trap-stop path is CORRECT AND
+      > COMPLETE**, and "we never write N500A" is not a defect in it, because the real microcode
+      > does not write it either. The microword-lane DMA log is NOT worth a boot: it would only
+      > re-confirm `0o11..0o23`.
+      >
+      > The `[D]` on "one ND-100 word per strobe" SURVIVES and is upgraded — the six-offset
+      > agreement requires it.
+      >
+      > **My error, recorded because it is a repeat shape:** I checked SARG values against the raw
+      > 18-byte words (guarding the known rendered-listing trap) and then anchored the whole walk
+      > on an unverified base register. Precision on one axis masked an unchecked assumption on
+      > another. **A walk is only as good as its base — resolve the base register FIRST.**
+
+      **~~The classic microcode DOES write them, and it is the FIRST thing it writes.~~** Carved from
       `E:\Dev\Ronny\ND500UC\docs\MC\CONT-STORE-10611.DATA` (8192 × 18-byte words):
       ```
       011271  A+B SARG=0o7 B,AM#12 D,AL#20 JSR 007540  ; MAR := message base + 7
@@ -329,9 +360,10 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       011274  SARG=0o224 D,AM#25      JSR 011527       ; FETCH ND-500 mem [AM#23+0o224] -> AM#20
       011275  SARG=0o3 D,AL#25        JSR 007546       ; 32-bit write -> offset 0o10-0o11
       ```
-      So `0o7` gets a literal `2`, and **`0o10` gets a value FETCHED from ND-500 memory at
-      `AM#23 + 0o224`** — not a constant. Leaving it unwritten is why the swapper range-checks
-      stale memory (`0x0800`) as a segment number.
+      ~~So `0o7` gets a literal `2`, and `0o10` gets a value FETCHED from ND-500 memory at
+      `AM#23 + 0o224`.~~ **WRONG — see the correction box above.** With `AM#12` = base+2 these are
+      `0o11` (STOPR := 2) and `0o12-13` (trapping P, fetched). The fetch is real; the OFFSET was
+      off by two. Nothing here writes `0o7`/`0o10`.
 
       **The DMA convention, needed to read any microword-lane log** (`[V]` unless noted):
       `007540` = **set MAR** from `AL#20` (TAG `0o201` MOST + `0o001` LS — not a data write);
@@ -345,9 +377,43 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       SARG values spot-checked against the RAW 18-byte words per the project rule (`011271` CS0 low
       half = `0x0007`; `007540` carries no SARG).
 
-      **NEXT:** run the microword lane (it executes this exact writer) and log every DMA write with
-      offset+value. Prediction to falsify: first two writes are offset `0o7` (16-bit, value 2) then
-      `0o10` (32-bit, fetched). Then make `AnswerTrapStop` write the pair.
+      ~~**NEXT:** run the microword lane and log every DMA write.~~ **CANCELLED** — it would only
+      re-confirm `0o11..0o23`. Do not spend a boot on it.
+
+      **THE REAL REMAINING QUESTION.** Neither the microcode nor our trap path writes `0o7`/`0o10`,
+      yet the swapper range-checks `0o10` as a segment number on the page-fault path. **So who
+      puts the segment number there?** The one untouched lead is **`5RECE`** — item 1.6 established
+      that SINTRAN's `TRAPDECODER` 46B arm reads exactly two things, `TRAPN` and `5RECE`. Carve
+      what `5RECE` is and who consumes it on the swapper-decode path, specifically whether anything
+      derives the `0o7`/`0o10` pair from it or from the trap record's fault LA at `0o17-20`.
+      That is the last unknown between here and a fix. → item **1.9**.
+
+- [ ] **1.9 `5RECE` is a dead end — and `0o7`/`0o10` is `N500A`, a BLOCK-COPY parameter, not a
+      segment number.** `[V]` from symbols + NPL source.
+      - **`5RECE = 000004`** — message offset 4, the RECEIVER (`SENDE=3` is the sender; offset 4 is
+        what the other table calls `X5CPU`). `MP-P2-N500.NPL:437` writes both
+        (`5SWPROC; *SENDE@3 STATX; 5RECE@3 STATX`); `TRAPDECODER` @135354 reads it and compares
+        against `5SWPROC`. **Nothing derives `0o7`/`0o10` from it.**
+      - **`N500A = 000007`**, always `LDDTX`/`STDTX` (DOUBLE) — hence the `0o7`/`0o10` pair.
+        `MP-P2-N500.NPL:1705` names it: **`% ND-500 LOGICAL DATA ADDR`**, paired with `N100A`
+        (`% ND-100 PHYSICAL ADDR`) and `NRBYT`. It is the block-copy parameter triple.
+      - **SINTRAN writes it into the swapper's OWN message under a save/restore bracket.**
+        `LDATREADY` @136341 borrows `SWMSG` for a data-memory read: saves into `SWDD1/2/3`
+        (136364-136367), writes `N500A` @136404 ("Prepare data-memory read message"), `N100A`
+        @136406, `NRBYT := 0o400` @136411, `MICFU := 3RMED` @136422 — then `INLDATREADY` @136431
+        restores at 136461-136470 ("Rebuild swmsg message").
+
+      **So the message legitimately holds a leftover COPY ADDRESS at `0o7`/`0o10` during that
+      window.** `0x0800` has the shape of an address or length, not a segment id.
+
+      **HYPOTHESIS (not measured):** the swapper is reading the message inside the borrow window,
+      or after a restore that never ran. Two checks answerable from EXISTING logs, no boot needed:
+      (1) does a `3RMED` MICFU appear on `SWMSG` near the failure? (2) is `INLDATREADY` reached at
+      all — 136446 gates on `IF A=SWPPING`, and if that fails `SSWPFREE` is taken instead.
+
+      **Do NOT change the trap record.** Two independent supports now say it is correct and
+      complete: the corrected offset walk, and `N500A` being a copy parameter a trap answer has no
+      business writing.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
