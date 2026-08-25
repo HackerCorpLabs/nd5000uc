@@ -53,6 +53,31 @@ and check for a pipelined register before attributing any write to a microword.
 | `Nd5000ControlStoreLink` counters | MirLoads / MicrowordsWritten / CommitsFromLatch-Staging-Ring / StrobeCommands / PerformHalfwordCounts (NOTE: halfword discriminator currently mis-measures — task open) |
 | Firmware fixture | `Nd5000CsaFailureTraceTests.cs` — the ~20-second measured-not-decoded pattern |
 
+## ND-500 macro CPU (`CpuND500`, in-code counters, always on — cost is zero on the normal path)
+
+| Switch | What it does |
+|---|---|
+| `CpuND500.AbortGuardReport()` | **WHOLE-RUN** count, per instruction, of how often an abort guard stopped an instruction before it committed state. Companions: `AbortGuardTotal`, `AbortGuardHits(site)`, `ResetAbortGuardCounts()`. Sites are the `AbortGuardSite` enum (`Rett`/`Retk`/`Retb`/`Retbk`/`Entm`/`Chain`/`Init`/`Entt`/`Ret`). |
+
+**Why it is not gated behind a flag:** the increment only runs inside a guard whose condition is
+already `InstructionAborted`, i.e. on a path where a non-ignorable trap has been raised and the
+instruction is being abandoned. Nothing is counted during normal execution.
+
+**Why it is a plain array and NOT a ring:** every negative trusted on 2026-08-25 that came from a
+capped instrument was wrong — a 52-entry per-stage MICFU ring was read as a whole-run tally and
+"proved" an absence that was simply outside the window. A counter that cannot answer *"did this ever
+happen"* is worse than none, because it answers confidently.
+
+**HOW TO READ IT — the zero is the load-bearing result.** An abort guard is a *conditional early
+return*: it can only change behaviour where `InstructionAborted` is already true at that point. So
+`none` is not "probably did not matter", it is **proof that the guarded instructions behaved
+identically with and without their guards for that run** — which makes any behaviour change in the
+same run attributable to something else. That is what replaces bisecting two sessions' changes apart.
+A non-zero `Chain` count is the opposite kind of news: it means a page fault inside CHAIN's link walk
+was previously being reported as an ILLEGAL OPERAND VALUE trap (a faulted read returns 0, and 0 is
+CHAIN's documented end-of-chain sentinel, ND-500 Reference Manual 15.7) — i.e. an emulator fault
+that read as a bug in the guest program.
+
 ## Debug protocols
 
 - RetroCore DAP: TCP port 4711 (skill `retrocore-dap-mcp`); nd500x DAP: `--dap [port]`, default 4500.
