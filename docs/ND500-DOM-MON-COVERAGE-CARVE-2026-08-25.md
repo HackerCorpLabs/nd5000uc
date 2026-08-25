@@ -44,6 +44,38 @@ reference to this file.
 
 ---
 
+## 0b. THE ANSWER TO RONNY'S ACTUAL QUESTION — and it closes for the WHOLE remaining list
+
+Ronny's reframing retired the per-program MON tally: *"number of mon calls doesnt matter when we are
+talking to SINTRAN as SINTRAN is fucking answering all of them. what you need to find out is if cpu
+microcode is special handling some of the MON calls and implement that functionality."*
+
+**`[V]` THE COMPLETE ANSWER, CLASSIC LANE: `{504B, 511B, 512B}`. ALL THREE ARE IMPLEMENTED. NOTHING
+ELSE IN THIS CORPUS NEEDS ANYTHING FROM THE MICROCODE.**
+
+Three independent legs, each closed separately (detail in
+`CLASSIC-STORE-MON-SCREENING-CARVE-2026-08-25.md`):
+
+1. **The screening chain is CLOSED and SINGLE-ENTRY.** Counted every jump target in the store:
+   exactly **one** word reaches the chain head (`010507 → 010511`); `010660` and `010661` have
+   **zero** inbound jumps and are fall-through only; all three compares converge on `010662`. There
+   is no second way in, so no other MON number can be screened on this path.
+2. **The chain ENDS.** `010661` is a `POPRET` — structurally there is no fourth compare for a fourth
+   MON number to be absent from. (This is the strong form of the negative; enumerating compares
+   against `AL#35` is *not*, because `AL#35` is reused scratch.)
+3. **The other assist families are called by NO program.** `500B/501B/502B/600B`,
+   `270B/271B/333B/335B`, `201B` — **zero** users across all ten disassemblies, counted off raw
+   trampoline targets with a positive control (§5 of the classic carve).
+
+**Therefore CONVERT-DOM-A03 (26 new MON numbers), LINKER-B01 (30) and NC-A06 (6) introduce ZERO new
+microcode obligations.** Every one of those new numbers is an ordinary forwarded call that real
+SINTRAN answers. The 26/30/6 columns in §2 below measure *how much new SINTRAN surface each program
+exercises* — they do **not** measure work for us.
+
+**What this does NOT say.** It says nothing about non-MON microcode behaviour — the page-fault
+subtype selector was exactly such a case, and it stopped LED dead. "The microcode has no MON
+obligation for this program" and "this program will run" are different claims.
+
 ## 1. THE HEADLINE — the inline-copy family is NOT covered
 
 MON 504B needed us to copy the user buffer into the message ourselves (the `WSMC` arm of
