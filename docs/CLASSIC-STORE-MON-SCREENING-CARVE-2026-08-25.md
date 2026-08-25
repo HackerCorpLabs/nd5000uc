@@ -96,9 +96,49 @@ grep cannot distinguish a compare from a load, and a register-name grep only wor
 that is actually dedicated. Neither is exhaustive. The honest status is: **one screening family
 carved and verified; the rest not yet looked for with a method that could find them.**
 
-## 3. Next step for whoever continues this
+## 3. THE ENTRY SEQUENCE — carved, and it kills my own proposed method
 
-Find what holds the MON number *at the point of each other assist family*, rather than assuming it is
-`AL#35` again. The reliable route is the one that worked here: start from the monitor-call detection
-at `012253` (already located), read forward, and identify the register the number is placed in —
-then enumerate comparisons against **that** register. Do not start from the constants.
+Only **one** word reaches the screening chain (`010507`), so the entry path is unambiguous:
+
+```
+010501/ ALU,A+B A,XD,SARG B,AM#12 D,AL#20 NEXT SLOW2 74 ;        % AL#20 := AM#12 + 74
+010502/ ALU,A-B-1 A,XD,LC B,BM#4 COND,MSGN NEXT SET SLOW2 ;
+010503/ ALU,BDIR AD,PC B,AM#36 D,DP C,SEQ COND,LCZ ... PRF,CLEAR 2353,0 ;
+010504/ ALU,ADIR A,XD,LC D,AM#30 NEXT PRF,START SLOW2 ;
+010505/ ALU,BDIR B,AM#31 D,AL#35 TYP,HW NEXT PRF,PCONT ;         % AL#35 := AM#31  (HALFWORD)
+010506/ ALU,AND A,XD,PSTAT B,BM#1 COND,MZRO NEXT SET PRF,PCONT ; % test PSTAT bit 1
+010507/ CTRL143=1 C,SEQ NEXT F,JMP 10511,0 ;                     % -> the screening chain
+```
+
+**`010505` is the load: `AL#35 := AM#31`, `TYP,HW`.** So `AM#31` carries the monitor-call number and
+`AL#35` is the working copy the chain compares against. The halfword type matches the documented
+mechanism — *the MON number is the LOW HALFWORD of the segment-31 `CALLG` target*. `[V]`
+
+**`010506` gates the screening on `PSTAT` bit 1** (`BM#1`), one word before the branch. Given the
+`[OPEN]` condition-delay question, which branch that flag actually steers — `010507`'s or a later
+one — is **not settled here**. Flagged, not guessed.
+
+### The method I recommended in the previous revision of this file DOES NOT WORK — retracted
+
+The earlier "next step" said: find the register holding the MON number at each assist family, then
+enumerate comparisons against it. **That assumes a dedicated register exists. It does not.**
+
+- `AL#35` is reused as scratch — loaded from `S2` and masked at `011705`/`011706` (section 2).
+- **`AM#31` is worse: it is referenced right across the store** — floating-point work at `001763`,
+  external-function words at `001365`/`001404`, `ORB`/`ORT` operand plumbing at `001351`–`001402`,
+  and dozens more. It is an ordinary AM register that happens to hold the call number *at this point
+  in this path*.
+
+So there is **no cheap global enumeration** of monitor-call screening in the classic store, and any
+count produced by grepping a register name would be a confident wrong answer — the same shape as the
+constant-grep that returned only loads, and the `; MON 511B` comment-grep that returned an empty set
+in the companion DOM carve. **Three different greps, three false negatives, one day.**
+
+### What actually remains
+
+**Control-flow tracing from the monitor-call entry, and nothing cheaper.** The region above is that
+entry; its exits are `2353` (`010503`), `10511` (the screening), `10527`/`10522` (`010512`/`010513`),
+`7540`/`2352` (the operand loop at `010514`/`010515`), and `10741` (from the match arm `010662`).
+Whether the classic store has equivalents of the B30's cache-dump (`270B/271B/333B/335B/500B`),
+local-assist (`501B/502B/600B`) and wait (`117B/120B/144B/201B`) families is **`[OPEN]`** — they are
+not on this path, and "not on this path" is not "not in the store".
