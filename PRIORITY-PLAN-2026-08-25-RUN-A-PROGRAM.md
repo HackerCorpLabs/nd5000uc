@@ -1059,7 +1059,57 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         encoding. Corroborated only by the same literal appearing at `0x080040C8` (`d add2 b.0x1C`)
         where the context is also "step the order by one".
 
-      **Two candidates left, both visible in one run of the peer's heap log:**
+      **RESOLVED BY THE PEER'S HEAP LOG, then re-diagnosed from the microcode.** Four GETBs, ever:
+      `#1 pc=0x0800414C want=2^10 TOS=0x08000C94 MAXL=23 -> TRAP-STO no-free-block`, then
+      `#2..#4 want=2^10 TOS=0x08001A28 MAXL=0 -> TRAP-STO logSize>MAXL`. **TOS changes between the
+      trap and the retry.** GETB #1 runs with TOS where `tos := $0x8000C94` put it and finds a
+      well-formed descriptor — `MAXL = 23`, exactly the `0x17` the program's own list-build loop
+      counts up to at `0x0800408D`. After the STO trap, the grow, and the RETT, TOS comes back
+      `0x08001A28` — the domain's ordinary stack TOS, i.e. the value from BEFORE `tos :=`. At that
+      address MAXL reads 0, so every retry trips `logSize > MAXL`, the handler grows again, and that
+      is the whole fifteen minutes. **One clobbered register.**
+
+      This also confirms the I/D refutation from the other direction: the descriptor read returned
+      **23**, not `0xFFC7000C`.
+
+- [ ] **1.35 THE FIX DIRECTION: on the real machine ENTT/RETT never save or restore TOS at all.**
+      `[V]` from the RAW `MICRO-5800-B30.DATA` (extractor calibrated first against both documented
+      `.md` render-bug cases: 0o15075 → raw MARG `0x48` ✓, 0o326 → raw ORCON `0o41` ✓).
+
+      **TOS is not a CPU register — it is a PCB/DIT field.** `LOATOS` (`tos :=`) @`0o001020` →
+      `LOAD_TOS` @`0o012170`: `T,PUSH → CED_TO_DIT` (DPA := the domain's DIT base), then
+      `ADACT AA=2(DPA) AB=1 MARG=0x3C`, then `WR,PHYS`. So `tos := $0x08000C94` stores the value
+      **physically into the domain information table at DPA + 0x3C**. `LOAD_THA` @`0o012210` is the
+      same shape at **DPA + 0x36**. Corroborated independently by the NDIX real ND-500 Unix
+      `struct pcb` field list already in memory: **`+0x3C pcb_tos`**, `+0x3B pcb_ith`.
+
+      **`RETT` restores no TOS.** `RETT2` @`0o014357` is a walking cursor — every word `EA = EA3 + 4`
+      with `EA3SAVE`, one register per step: `SC3, SC4, SC5, SC6, LDRES, (skip), X1-X4, A1-A4,
+      E1-E4, SC13, SRF10`, then `RETT_NPLBR`: `SC3→P, SC5→L, SC6→DPA, SC3→CLKSP, SC4→P`. Sixteen
+      consecutive `+4` steps landing on X1-4/A1-4/E1-4 in order is not a coincidence.
+
+      **So the save/restore pair is machinery the real ND-500 does not have**, and it cannot be made
+      correct by fixing the frame base — it is the invented RESTORE that hands back the stale
+      `0x08001A28`. Removing it should leave TOS untouched and let GETB #2 see `MAXL = 23` exactly as
+      GETB #1 did. For the record, ENTT's real save block reads EA2 at displacements 84, 88, 92, 96,
+      **100**, 104 and writes EA3 at 4, 8, 12, 16, 20, 24 — so 100 exists as a SOURCE displacement,
+      never as a frame destination.
+
+      **Caveats, stated not buried:** (1) this is ND-5800 B30 microcode and the failing lane is the
+      functional `CpuND500` classic engine, for which we have no microcode — same family and a
+      shared PCB/DIT model, but a generation caveat, not proof about the classic engine. (2) The
+      restore LIST is claimed; where EA3 initially points on entry to RETT is not.
+
+      Open: `STORTOS` (`tos =:`) @`0o001133` should show the same DPA+0x3C on the read-back side —
+      a five-minute decode if a second confirmation is wanted before code changes.
+
+      **`want=2^10` stays open as a possible SECOND, separate defect** `[D]`. 1024 words = 4 KB, and
+      my arithmetic says the month array is 27 words = order 5 — but this is the FIRST allocation the
+      program makes and nobody has established what it is allocating. A 4 KB I/O buffer for `output`
+      before main is entirely ordinary. Do not treat order 10 as established; and even at order 10 a
+      128 KB heap should have satisfied it on the first retry, so it is not what kills the run.
+
+      **Earlier candidates, both dead:**
       1. The ORDER computation — three float instructions decide a small integer, and `d byconv`
          (double → byte) belongs on the suspect list next to `alog2` and `int`. The log prints
          `want=2^N`, and **N is the whole answer**: for the 108-byte month array n = 27 words, so the
