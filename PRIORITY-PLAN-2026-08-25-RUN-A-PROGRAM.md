@@ -632,6 +632,35 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       with zero pages copied. The stale id is what idx 0 reads because **idx 0 should never have
       been dispatched**. Fix the reason and the id stops mattering; fix the id and the handler is
       still wrong.
+- [ ] **1.12 POSSIBLY UPSTREAM OF ALL OF PHASE 1: the 12 "Memory not available" per run.**
+      `[V]` on the constant and the manual cause; **`[HYPOTHESIS]` on the consequence.**
+      Gate5R has failed its goal assertion (`Does.Contain("Sintran III")`) identically all day
+      (gate5r-35/36/37 byte-identical, **12 × "Memory not available" each**, pre-existing — nothing
+      in the swapper work has moved it).
+      - **`MEMNAVAILABLE = 2050`** (octal), `5P-P2-MON60.NPL:80`. **Defined but NEVER USED anywhere
+        in the NPL tree** — so, like `SWFUN` and `MICFU:=3SWMESS`, it is raised by the paged
+        **`S3SM5`** segment that is not in the repo. **Third instance of that same blind spot.**
+      - **The manual names a SHARING cause, not a size cause** (ND-60.136.04A, "MEMORY NOT
+        AVAILABLE FOR ND-500 SEGMENT"): *"the request could not be satisfied. This occurs when
+        segments are shared with ND-100 or RTCOMMON."*
+
+      **THE CHECK IS ALREADY IN THE EXISTING LOG — no new run.** Gate5R walks a descending ladder
+      (`Nd500UCSintranBootTests.cs:1842`): `1000B, 400B, 100B, 40B, 10B`, recording `giveAccepted`
+      / `acceptedPages`. The in-repo comment hypothesises the ask simply exceeds the ND-100's free
+      pool on a 2 MB machine. **That is falsifiable from the log:**
+      - some smaller size accepted → pool-size story holds, a tuning matter;
+      - **even `10B` (8 pages) refused → NOT pool size.** A machine that cannot spare 8 pages is not
+        short of memory — that is the manual's sharing condition, and **the ND-500 then owns zero
+        pages.**
+
+      **IF ZERO PAGES: nothing can be paged in, PST entries stay zero, the domain never becomes
+      resident — regardless of what the swapper does.** Under that reading the whole of 1.7–1.11
+      (reject code, reason byte, stale id, zero `SWPST`) is *downstream* of a machine that was
+      never given memory. **Marked hypothesis deliberately** — not repeating today's habit of
+      declaring a root cause from a mechanism that merely fits.
+      Also: 12 occurrences vs 5 ladder asks ⇒ the message comes from more than the ladder; find
+      which other commands emit it.
+
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
