@@ -981,8 +981,42 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       (b) the swapper genuinely reporting failure code 11.
       **Discriminator, a lookup not a run:** find the write that put `0x0B` into `0x420DB6` and
       compare its seq to `#8462`/`#8465` — before the transfer ⇒ (a), after ⇒ (b).
-      **Also check:** is `SWPST` **ever** written `0` by anyone on this lane? If not, the OK arm is
-      unreachable by construction and the domain could never be woken regardless of transfer success.
+      **BOTH READINGS REFUTED BY MEASUREMENT — the `0x0B` theory is DEAD.** The swapper writes
+      `SWPST := 0x0000` (T17) and **SINTRAN takes the OK arm routinely** — `SWPST` is written `0`
+      **60 times** in the ring. The `0x0B` was a one-off, followed by `0x00` before the next
+      `LNEWSWAP`. **The wake path at `MP-P2-N500.NPL:980-1006` executes exactly as carved:**
+      `#134338 requester MICFU := 0x0015 (3TRACO)` → `#134340 requester N5STA := 0x0001 (MSGN500)`.
+
+- [x] **1.31 The wrong-process resume fix: REAL, but NOT the blocker (peer's own withdrawal).**
+      The trap-continue fall-through started from `servicer.LastStartContextAddress` — the block of
+      whatever started **last**, not the message's process — and never switched context, so a
+      `3TRACO` for `X5CPU=1` while `0` was loaded resumed nothing. Now calls
+      `SwitchToProcessIfNeeded` first. Cross-process `0→1` switches **5 → 1040** across 1038 faults,
+      suite 0/2184. **But 5-of-1038 could never have been the blocker** — the rest were in-place
+      resumes that already worked, and both runs stop identically. Worth keeping on its merits
+      (resuming from the last-started block is wrong regardless); "correct but not the blocker" is a
+      fine outcome.
+
+- [x] **1.32 The `PLINK` spin at the end is NORMAL IDLE — SINTRAN is content, not stuck.** `[V]`
+      `PLINK = 0o147` is the **backward link of the ND-500 Execution/Time queue** (`LINK` forward,
+      `PLINK` back). `CC-P2-N500.NPL` @022606-022655 is `ITO500XQ`, the priority insert (fixes the
+      previous element's back link @022633, then the inserted element's @022643); its sibling header
+      @022664 is *"`Ifm500xq`: Remove message from ND-500 Time queue"*. So an **alternating** `PLINK`
+      at one address is a message being removed and re-inserted repeatedly.
+      The thing doing that is the watchdog — `5TMR3`, `RP-P2-N500.NPL:384-387`:
+      `3RMICV; X:=WATCHDOG; *MICFU@3 STATX` … `MSGN500; CALL WN5STATUS` … **`CALL ITO500XQ; X=:TMRXQ`**
+      (re-arms itself on the time queue). The measured `0x2098` = byte `0x424130` **is** that
+      WATCHDOG block. Per the message reference, *a burst of `3RMICV` means TIME PASSED, nothing
+      more* — and it explicitly warns against reading it as a livelock.
+      **⇒ The ND-100 side is out of the search. No timeout is pending; SINTRAN is not blocked on the
+      ND-500.**
+
+- [ ] **1.33 THE LIVE QUESTION: what is the ND-500 executing after the last resume?** Both runs stop
+      identically — fault 1038 at `0x08004BD1` (psn 11, segment 1 = cpu-stat's own code), page-in
+      completes, domain resumed at `P=0x0800473A` on the faulting instruction — and then **no further
+      faults and no further MON calls for ~15 minutes**. Only the instruction-trace ring can see it;
+      no carve helps until there is a PC. (If it spins on a specific address, carve what that address
+      is on the SINTRAN/segment side.)
 
 - [x] **1.29 The `0x203` question answered — benign.** cpu-stat probes memory by **doubling** its
       `GSWSP` request: `0x20801`, `0x40801`, `0x80801`, `0x100801` all succeed (segments 2,3,4,5);
