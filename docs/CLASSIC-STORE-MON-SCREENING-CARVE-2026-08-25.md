@@ -57,9 +57,23 @@ alike will be wrong on the ND-5000 side"*). It is now confirmed a second time, f
 store, by a different method. `513B` is the family's heaviest user in the DOM corpus — 14 sites in
 CONVERT-DOM, 14 in LINKER, 9 in LED — so this is the most expensive place to be wrong.
 
-**Delay note.** The B30 has a documented one-word condition delay (a word's `COND` tests the
-previous word's ALU flags). **Whether the classic engine does the same is `[OPEN]`** and I have not
-established it. It matters only for which word performs which compare — if the delay applies, each
+**Delay note. `[V]` — RESOLVED 2026-08-25, the classic engine HAS the delay, and it is documented.**
+`ND-05.012.01 Micro Program Guide` p.834, on `C,SEQ`: *"Result of a condition set in a PRECEDING
+micro instruction … determines true or false sequence when C,SEQ is used. When delayed sequence
+(C,SEQD) is used, the test condition may be set in CURRENT or a preceding micro instruction."* So a
+plain `C,SEQ` word tests the PREVIOUS word's flags **by definition of the classic ISA**, and the
+guide distinguishes `C,SEQ` from `C,SEQD` precisely on that point. This was carried as `[OPEN]` in
+two files all day; it was answered in the classic machine's own manual.
+
+**Where it bites, measured the same day:** the page-fault subtype selector at `011126`-`011137` reads
+completely differently under the two pairings. Naively, data code `6` comes from `DCINHLL` bit 27;
+correctly, it comes from **`DSTS0` bit 4**, and `011126`/`011133` stop being dead words whose flags
+nobody consumes. A servicer shipped the naive mapping, sent data-side "nothing mapped" faults down
+the wrong arm, and LED refaulted the same page forever. **The original `[OPEN]` note below is kept
+because its reasoning — that the delay does not affect the `{504,511,512}` chain — is still true and
+shows exactly when the question is safe to defer.**
+
+The B30 has the same one-word condition delay. It matters only for which word performs which compare — if the delay applies, each
 test lands one word later than it reads. **It does not affect anything above**: the constant set
 `{504, 511, 512}` and the common target `010662` are delay-independent, because all three words sit
 in one contiguous chain that converges on the same arm either way.
@@ -170,6 +184,50 @@ slot — it does not branch on it.
    **SINTRAN's work on the ordinary answer write-back, not a microcode obligation** — on the classic
    engine. **This does NOT close the question for the B30**: `CALL_5_MATCH 013667B` is a different
    routine in a different store and has not been walked. Do not carry this verdict across.
+
+## 4b. THE FAULT-STATUS REGISTERS ARE HARDWARE INPUTS — THE STORE NEVER WRITES THEM
+
+Swept all 8192 words for each register, **separating the DESTINATION field from the SOURCE field**:
+
+| register | total refs | as DEST | as SOURCE |
+|---|---|---|---|
+| `DSTS0` | 2 | **0** | 2 |
+| `ISTS0` | 2 | **0** | 2 |
+| `DCINHLL` | 9 | **0** | 9 |
+| `ICINHLL` | 6 | **0** | 6 |
+| `TRAPINF` | 14 | **0** | 14 |
+
+**`[V]` NOT ONE OF THEM IS EVER A DESTINATION.** Every reference is a read. The microcode never sets
+`DSTS0` bit 4 or the `CINHLL` bits — it only consumes them, so **they are hardware-supplied inputs
+composed by the memory-management hardware** and presented at fault time. "What sets them" is not
+answerable from this store, because the answer is not in it.
+
+Same shape as the ACCP `AFLAG` bits 7/8, which turned out to be the IMM/DMM memory-management trap
+inputs set by MMS hardware, with the 68000 disassembly being the wrong artifact to search. **Searching
+the wrong machine returns a clean empty result and looks like an answer.**
+
+The two `DSTS0` sites are consistent with a fault-status register — it is both tested to classify and
+reported in the record:
+
+```
+011126/ ALU,AND  A,XD,DSTS0 B,BM#4          % the classifier test that selects code 6
+011172/ ALU,ADIR A,XD,DSTS0 D,AL#30 TYP,HW  % read into AL#30 in the 011170 full-report arm
+```
+
+> **METHOD — the pattern nearly gave the opposite answer.** The first sweep used `D,DSTS0` and
+> returned **2 hits**, one keystroke from being read as "two writers". Both were the SOURCE field
+> `A,XD,DSTS0`; the pattern had matched the tail of `XD,DSTS0`. **The right answer (zero writers) and
+> the wrong one (two writers) differ only in whether the pattern is anchored to the field.** Fourth
+> false negative of the day, and the first where the un-anchored pattern produced a plausible
+> non-zero count rather than an empty set.
+
+**Consequence for the emulator:** since the microcode only reads these, our engine must COMPOSE them
+the way it composes MMS status. With nothing composing them at fault time there is no input from
+which a correct subtype could be derived, so any subtype emitted is invented — which is exactly the
+defect found live (a servicer's adjacency-guessed data-side code `6` sent "nothing mapped" faults
+down the `011170` full-report arm instead of the `011146` demand-page arm; LED refaulted one page
+forever). The durable fix is composing the bits and letting classification fall out, not hardcoding
+a subtype.
 
 ## 5. HOW MUCH THE REMAINING `[OPEN]` ACTUALLY BLOCKS — measured, and it is almost nothing
 
