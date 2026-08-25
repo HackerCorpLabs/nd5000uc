@@ -444,8 +444,51 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       trap-answer message, it is `N500A` holding a stale copy parameter. Pin the message identity
       before acting on either.
 
-      **If it is the `SWMSG` reading:** the question becomes why `S3SM5`'s builder at
-      `140771..141001` never executes — a bytes-only carve needing the disassembly, not a grep.
+      **RESOLVED — it is the TRAP-ANSWER message, so 1.10 is REAL BUT OFF-PATH.** Proven at
+      content level, not just address: the work block's header reads `X5CPU/5RECE = 0001` (the
+      DOMAIN, cpu-stat; the swapper's own is `X5CPU=0` at `0x00420D30`), `MICFU=0015` (3TRACO),
+      and `hw12/13 = 0800/0004` = the trapping P **our** `AnswerTrapStop` wrote. So it is the
+      `N500A` arm. `S3SM5`'s MSWIN builder is NOT the missing sender here — **do not spend a
+      disassembly on `140771..141001`.** The MICFU=5 zero stays as a valid measurement about a
+      different message.
+
+- [ ] **1.11 SINTRAN NEVER CHOOSES fn 0 — fn 0 is what a MISSING `TRAPN` PACK LOOKS LIKE.** `[V]`
+      `5ACTSWAPPER` (`MP-P2-N500.NPL:2875-2883`) computes the swapper's work reason:
+      ```
+      145040  IF 3SWMESS=D THEN *SWFUN@3 LDATX     ; swapper-message arm -> SWFUN (0o7)
+      145044  ELSE
+      145045     *AAX TRAPN; LDATX                 ; TRAP arm -> TRAPN (0o16)
+      145047     A=:D/\377; *STATX                 ; TRAPN := LOW BYTE ONLY
+      145052     A:=D SHZ -10                      ; A := packed >> 8  = THE MSW CODE
+      145054  FI ; X:=SWMSG; *AAX SWPST; STATX     ; SWMSG.SWPST := A
+      ```
+      **`SWPST` = high byte of `TRAPN`**, and `MSWFI = 000000` is precisely a zero high byte. The
+      measured `SWPST=0x0000` is an ABSENCE, not a selection.
+      **Every legitimate caller packs it first** — two independent instances of one idiom:
+      `TRAPDECODER` @135361 `MSWPFAULT SHZ 10 + D`, and `SWMC` @141753
+      `MSM510 SHZ 10 =: D; A/\377 + D`.
+
+      **A GATE IN `TRAPDECODER` MISSING FROM ITEM 1.6's SUMMARY** (`MP-P2-N500.NPL:871-874`):
+      `IF 5INITFLAG BIT BRESPLACE OR SYSINITFLAG NBIT BSWSTARTED THEN CALL 5RRTWT; GO NXTMSG` —
+      restarts the ND-100 process and leaves, **no pack and no `5ACTSWAPPER`**. `BRESPLACE` is
+      cleared in `RELCPU` (`5P-P2-MON60.NPL:727`).
+
+      **The MSW code is CONSUMED DESTRUCTIVELY** (145047 writes back the low byte only), so a
+      message served twice yields fn 0 on the second activation. The strip sits inside the
+      `IF A=PSWWAIT` (swapper free) branch, so the swap-wait-FIFO path does NOT strip — the design
+      is self-consistent; this is a re-activation hazard, not a SINTRAN defect.
+
+      **THREE CANDIDATES, all predicting `SWPST=0` — settle by measurement, not plausibility:**
+      (a) the 135342 early-out fired → **dump `BRESPLACE` and `BSWSTARTED` at the fault**;
+      (b) the message reached `5ACTSWAPPER` twice → **count activations of that message**;
+      (c) something on our side activates without packing (call sites: 510, 879, 1052, 2050 —
+      only 879 and 2050 pack; 1052 relies on the pack surviving the queue).
+
+      **THIS RETIRES THE STALE-`0o10` QUESTION AS PRIMARY.** With the reason packed correctly the
+      swapper runs idx 10, which reaches no paging primitive and no MON 377B anyway — consistent
+      with zero pages copied. The stale id is what idx 0 reads because **idx 0 should never have
+      been dispatched**. Fix the reason and the id stops mattering; fix the id and the handler is
+      still wrong.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
