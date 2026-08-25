@@ -675,6 +675,39 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       OUT fn cell `0x240B0` / message address `0x240B4` would make **`MCCO`** the writer of the fn
       cell. **`MCCO` is NOT carved** — next target if this thread is pulled.
 
+- [ ] **1.16 THE STRONGEST LEAD OF THE DAY — and it is the project's central question.**
+      `[V]` on the mechanism; `[HYPOTHESIS]` on our involvement.
+      - **`NUMPA` is the MONITOR-CALL WRITE-BACK MASK** — named so in four independent places
+        (`MP-P2-N500.NPL:1901,1904,3706`, `XC-P2-N500.NPL:18`). A **bitmask, not a count**. So
+        `NUMPA:=6` = bits 1|2 = write back params **#2 and #3**, matching 5ACTSWAPPER's comment
+        *"Par #2 & par #3 will be written into"* and the measured OUT cells (fn code `@0x240B0`,
+        message address `@0x240B4`).
+      - **The two answer paths set OPPOSITE masks:** `5ACTSWAPPER` @145057 `A:=6` → params written;
+        `MONICO` @023020 `STZTX` → **`NUMPA:=0`, nothing written**. (`OKMONICO`/`EMONICO` both fall
+        into `MONICO`. `MCCO` itself only stamps `H500A:=140300`, `N5STA:=MSGN500`, and marks the
+        ND-100 process active — **it delivers no parameters**.)
+      - **Neither `FUNCV` nor `KFLIP` discriminates** — both paths leave `FUNCV=0`, `KFLIP=0`. **The
+        ONLY difference between "here is work" and "no work" is whether the fn cell was written.**
+      - **The empty-queue path DOES NOT ANSWER AT ALL.** `LNEWSWAP`'s drain falls out of `OD`
+        (136047) into `EMPTY` (136050): zero `X5SWO`, zero `HSWPI`/`SWPIN`, `SUNLOCK`, `GO NXTMSG`.
+        **No `MONICO`, no `OKMONICO`, no `MCCO`.** The swapper's `LNEWSWAP` is left **unanswered**
+        and blocks until `5ACTSWAPPER` serves it with real work.
+
+      **CONSEQUENCE:** a swapper that *receives an answer* to `LNEWSWAP` without a fn write-back
+      acts on **whatever its fn cell already held**. That is exactly the observed failure — one
+      dispatch (idx 10), then later cycles with no fresh fn code.
+      **⇒ WHO ANSWERED THAT LAST MON 377B?** If real SINTRAN took the `EMPTY` path it did not
+      answer, so any completion the swapper saw came from our side — **the project's top rule,
+      hit head-on.** Checkable in the existing trail: an answer with **no preceding T16 write of
+      `NUMPA`/fn**, or an `N5STA:=MSGN500` / `3MONCO` stamp no T16 code produced.
+
+- [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
+      **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
+      4=LALLOPAGE, 5=LDATREADY, 6=LCLTSB). The measured `0x0002,0x0002,0x0001,0x0001` is the
+      swapper making two page requests and two next-work requests while servicing the single
+      dispatched fault — calls **TO** SINTRAN, not work items **FROM** it. 4:1 is expected.
+      Also struck: my predicted serves-vs-SWPD4 gap — measured **1:1**, signature absent.
+
 - [x] **1.12 REFUTED — "Memory not available" is a SIZE limit, not the sharing condition.**
       The ladder result (already in the log): `1000B` and `400B` refused, **`100B` ACCEPTED** —
       `Number of pages available for ND-500(0) processes: 7216B` = **3726 decimal pages, not zero**.
