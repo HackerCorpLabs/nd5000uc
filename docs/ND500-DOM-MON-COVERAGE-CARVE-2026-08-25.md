@@ -367,6 +367,30 @@ pass on one program.
 With both encodings the byte scan reproduces this file's tables **exactly** on five programs
 (LED 35/20, CONVERT 43/26, NC 34/6, AUTOMAKE 13/2, CODE-COVERAGE 15/1).
 
+> ### ❌ THE TWO PARAGRAPHS BELOW ARE REFUTED (2026-08-26). Kept so the wrong version is not re-adopted.
+>
+> **The PLANC `65B`/`336B`×4 hits are REAL MON CALL SITES, not a data table.** They were decoded:
+> `08000559: C3 F8 00 00 DE 04 46 47 49 48  call $0xF80000DE,$0x4,…` followed by the standard
+> `ifkgo` error check, with well-formed instructions on both sides. `0xDE` = `336B`.
+>
+> The archived disassembly does not show them because **it starts at the entry point**, and PLANC's
+> header says `Entry Point: 0x0800065C` — everything below that address was never disassembled at
+> all. LED's entry point is `0x08000004`, which is why LED's listing is complete and PLANC's is not.
+> **`analysis\*.asm` files are entry-point-down listings, not full coverage. Check the
+> `Entry Point:` line before trusting one.**
+>
+> **The clustering rule is not a verdict.** Five hits in 250 bytes is a reason to go and decode
+> those 250 bytes — which took under a minute. Here the cluster was a tight run of initialisation
+> calls.
+>
+> **`CAT-CAT5-B06`'s census was RIGHT and is now `[V]`** — 45 call sites, **31 distinct**, zero
+> callg, no `511B`/`512B`/`513B`/`514B` — confirmed address-for-address by a full-segment
+> disassembly cross-checked against a raw scan. The `[D]` below was applied to a correct answer
+> because of a wrong story about a different program.
+>
+> Full carve, method and tools:
+> **`E:\Dev\Ronny\ND5000UC\docs\ND500-DOM-MON-CENSUS-DISASSEMBLED-2026-08-26.md`**
+
 **BUT IT ALSO PRODUCES FALSE POSITIVES, so it is `[D]`, not `[V]`, wherever no disassembly exists to
 check it against.** On **PLANC-500-G00** it reports two MONs the disassembly does not contain
 (`65B`×1, `336B`×4). All five of those hits sit in a **~250-byte cluster at file offsets
