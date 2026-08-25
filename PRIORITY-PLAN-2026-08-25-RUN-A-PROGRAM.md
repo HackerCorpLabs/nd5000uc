@@ -541,6 +541,36 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       leave a stale FIFO slot. If the trace shows the failing activation with **no** second
       `SWPWAIT` stamp, the drain is NOT the route and the step-3 reading is wrong.
 
+      **MEASURED 2026-08-25 — STATE CONSTANTS PINNED, AND TWO OF MY CLAIMS CORRECTED.**
+      - **`SWPWA(SWPWAIT) = 5`, `SWPPI(SWPPING) = 6`, `PSWWA(PSWWAIT) = 7`, `PSW1W = 0o15`,
+        `SWACT(SWACTIVE) = 0`.** (ND symbols truncate to 5 chars — full spellings miss in greps.)
+      - **The `LSWPWAIT=4` / `5ERANSWER=4` overlay collision is NOT REAL.**
+        `LIDLE/LSWPWAIT/LSWPPING/...` (`MP-P2-N500.NPL:211-216`) are `SYMBOL`s **local to
+        `500HIST`**, a Level-2 histogram routine — performance-sampling bucket indices (all even),
+        **not** `N5STA` values. SWPWAIT is **5**; the mailbox arm tops out at 4, so 5/6/7 collide
+        with nothing. `swapper-k01-handlers.md` already warns against this exact conflation.
+      - **`PSWWAIT=7` is the most informative number in the trace.** It is written in ONE place —
+        `135747 SWPD4: ... % Mark swapper free` — and SWPD4 is **immediately followed by the drain
+        loop**. So the swapper message flipping `0002 → 0007` at the failure is **direct evidence
+        the drain loop ran**, which had only been inferred.
+      - **BUT STEP 3 DOES NOT SURVIVE.** At the failure our block reads `N5STA=0002`, not
+        `SWPWA=5`, so the `136027 IF A=SWPWAIT` guard would **skip** it. The drain ran; it did not
+        activate *our* block. Not reshaping the story to fit.
+      - **CORRECTION TO "SWPST HAS EXACTLY ONE WRITER":** true **of the NPL tree only** — I should
+        have stated the scope (same shape as the July doc's scope-limited negative). `LNEWSWAP`
+        @135544 reads it as *"Error-answer from swapper?"*, so **the ND-500 swapper writes `SWPST`
+        too**. The cell is **bidirectional**: SINTRAN writes the activation reason, the swapper
+        writes back a status. So `SWPST=0000` at the failure has two readings — a zero reason, or
+        the swapper writing `0 = no error` alongside its `SWPFU=0001` request for work. **Given
+        `SWPFU=1` is the swapper asking for work, the second is at least as likely**, and it would
+        mean `SWPST=0` is not evidence of a missing pack at all.
+
+      **NEXT INSTRUMENT: a WRITE-WATCH, not a sample.** A read-based sample at ND-500 call
+      boundaries cannot see the pack→strip transition (both happen inside one ND-100 activation
+      with no ND-500 call between), and cannot tell which side wrote a cell. Record ND-100 **writes**
+      to `TRAPN`, `N5STA` **and `SWPST`** with the writing PC — `SWPST` needs it as much as the
+      others, because the reason/status duality is invisible to any read.
+
       **ALSO CAPTURE: the queued message's RAW, UNMASKED `N5STA`.** Two guards disagree about the
       high bits — `136015` refuses to serve if any of `0o160000` is set (and does **not** advance
       the pointer, so that entry blocks the queue head indefinitely), while `135575` in `LNEWSWAP`
