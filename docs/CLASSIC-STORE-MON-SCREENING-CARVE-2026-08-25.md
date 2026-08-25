@@ -273,16 +273,50 @@ clearing the trap and resuming, with no report marshalled and nothing sent to th
 path. It also checks `S2` bit 0, `TE`, `S1` and bit 31 first, and can leave early via `011071`/
 `011075` (note `011075` tests **`AM#37`**, the CALL-in-flight interlock).
 
-**So the subtype does not select a message FORMAT — it selects WHICH ENGINE HANDLES THE FAULT.**
-Sending a demand-page fault down the `6` arm asks for a full status report to be built for a
-condition that arm has no resolution path for; the fault is described and never fixed, which is
-exactly "the same page refaults forever". `[D]` on the precise resolution semantics of `011146`'s
-local paths — read from branch structure, not executed — but `[V]` that `TRAPCLR` is reachable from
-this arm and not from `011170`.
+**So the subtype does select which ROUTINE runs, and the two routines differ in kind:** one only
+marshals a report, the other can additionally resolve locally via `TRAPCLR`. `[V]` that `TRAPCLR` is
+reachable from `011146`'s arm and not from `011170`. `[D]` for the precise resolution semantics of
+the local paths — read from branch structure, not executed.
 
-**Consequence:** the durable fix is to compose the hardware fault-status bits (§4b) and let the
-subtype fall out of the microcode's own selector, rather than mapping our `MMWHERE` nibble onto
-classic codes. A hardcoded subtype is a guess about which engine should run.
+> ## ⚠️ THE EXPLANATION THIS SECTION ORIGINALLY GAVE FOR LED WAS WRONG — RETRACTED 2026-08-25
+>
+> It said: sending a demand-page fault down the `6` arm "asks for a report to be built for a
+> condition that arm has no resolution path for; the fault is described and never fixed, which is
+> exactly the same page refaults forever."
+>
+> **Two things are wrong with that, and the second is mine alone.**
+>
+> 1. **The behavioural premise was withdrawn by the session that supplied it.** "Data-side `6` is the
+>    only subtype in the corpus that never gets serviced" came from a `head -30` of a *sorted* fault
+>    summary. The code-`D` rows occur exactly ONCE each, so they sorted below the cut. A full census
+>    of the PASSING cpu-stat run shows data-side code `D` on psn 12, 13 and 14 — **each serviced, each
+>    followed by code-`F` faults on the same segment, which can only happen if the PST entry now
+>    exists.** Subtype `6` was sent, was serviced, and the segment worked. Three times.
+>
+> 2. **"That arm has no resolution path" is wrong on its own terms, and I should have caught it from
+>    the listing alone.** Marshalling a fault report and handing it to the ND-100 **IS** the resolution
+>    path — that is exactly how demand paging is supposed to work. SINTRAN maps the page and the
+>    instruction retries. `TRAPCLR` is the *exception*: a fault the microcode can retire without
+>    troubling the ND-100. I read "only builds a report" as "does nothing useful", which inverts the
+>    normal case. No measurement was needed to see that; I inferred a defect from an arm doing its job.
+>
+> **What survives:** the microword reading (§ above) — `011170` marshals, `011146` can reach
+> `TRAPCLR`, `TRAPCLR` is not reachable from `011170`. That is read from bytes and is untouched.
+>
+> **What does NOT survive:** any claim that the `6` arm explains LED's loop, and any use of "never
+> serviced" as corroboration. The `6`→`10B` change is **MEASURED to unblock LED** (frozen at
+> `pc=0x08000004` with 17 refaults → 36 serviced faults, execution across ~0x40000, reaching its
+> first `MON 50B OPEN`) and the **MECHANISM IS UNEXPLAINED**. It may mask the defect rather than fix
+> it. Recorded in code as an empirical unblock, not a carved fix.
+>
+> **THE REAL OPEN QUESTION:** cpu-stat takes a data-side code-`D` fault on psn 12 and it is serviced
+> once. LED takes a data-side code-`D` fault on psn 12 and it loops forever. **Same code, same side,
+> same segment number, opposite outcome — so the discriminator is NOT the subtype.** It is state
+> around the fault that nobody has found yet.
+
+**Still worth doing regardless of the above:** compose the hardware fault-status bits (§4b) instead
+of mapping our `MMWHERE` nibble onto classic codes. That is right because the bits are the
+microcode's real input, not because of any claim about which arm resolves what.
 
 ## 5. HOW MUCH THE REMAINING `[OPEN]` ACTUALLY BLOCKS — measured, and it is almost nothing
 
