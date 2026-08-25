@@ -1193,6 +1193,73 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       observed.** Fix shape is the same as 1.38: hoist the `regs.TOS` assignment to after the
       argument loop, beside the `regs.B`/`regs.L` commit.
 
+- [x] **1.42 THE FIX IS VERIFIED AT THE RUN LEVEL — CPU-STAT REACHES MAIN, PRINTS, AND EXITS
+      CLEANLY.** `[V]` (peer's before/after on the same boot). After: ENTT attempts 1 and 2 are
+      **identical** (`savedTOS=0x08000C94`, `savedB=0x000001A4`) — restartable. RETT hands back the
+      truth, and GETB returns `0x10000000` from a real buddy free list
+      (`FLOG 10=0x10001000 11=0x10002000 12=0x10004000 13=0x10008000 14=0x10010000`,
+      `STAH=0x10000000 ENDH=0x1001FFFF`, `MAXL=23`). **One** MON 422B grow instead of six. Whole-run
+      MON traffic: `1×11B, 1×114B, 2×143B, 1×262B` (GetSystemInfo — the first line of the Pascal
+      program), `1×122B`, **39×504B** (output, payloads decoding as `"CPU "`, `" (ND"`, `0x0D0A0A`
+      = `'CPU number       : '` and `' (ND-100 …'` straight out of `cpu-stat.pasc`), then
+      **`1× MON 0B` at `ret=0x080003C1`** — the single MON site in MAIN on the 1.33b band map,
+      i.e. normal termination. 900-second spin → **93 seconds ending in MON 0B LEAVE**.
+      **`want=2^10` is confirmed correct by this run** (a 4 KB double buffer out of a 128 KB heap,
+      FLOG[14] intact), which retro-validates withdrawing the float suspicion.
+
+      **NOT the milestone yet, and not to be reported as one:** only Gate5R has run, not the
+      regression suite, and a change to ENTT touches every trap test. The run also used `-v q`, so
+      there is MON-level proof of the text but no rendered report; a detailed re-run is capturing the
+      actual printed page. **And the CLAUDE.md gate is unanswered in writing: WHO ANSWERED THE MON
+      CALLS?** If our C# `SintranEmulation` answered any of those 46, the run does not count toward
+      the goal. Get that on the record before anyone calls this "a real program running".
+
+- [x] **1.39 `savedB = 0x000001A4` — resolved to explained-enough by the discriminator in the plan.**
+      Both ENTT attempts now agree on it, so by the stated test the capture point is fine and B
+      genuinely was `0x1A4` at trap time — not a corrupted snapshot. Two further arguments: RETT
+      restores `0x1A4` and the program then runs correctly through the allocator, GetSystemInfo, 39
+      output calls and a clean exit, which a bad B would not survive; and `#757 CONTEXT SWITCH` shows
+      `B=0x0000003C`, another small segment-less value, so this program legitimately runs with tiny
+      B values in that region. Where `0x1A4` comes from is still untraced — recorded as
+      explained-enough, **not closed**.
+
+- [ ] **1.43 THE FULL NON-RESTARTABILITY SWEEP — and the test is sharper than "mutate before the
+      write".** `[V]` on shapes, `[OPEN]` on firing. Extending 1.41 with INIT, the RET family and the
+      heap allocator.
+
+      **The generalised test, which is the real deliverable:** an instruction is unsafe if, on a
+      restart, it **re-reads anything through a register it has already mutated**. Three ways that
+      happens, in increasing subtlety:
+      1. it saves a live register that it has itself already overwritten (**ENTT** — fixed; **ENTM**);
+      2. it leaves a partial multi-word structure whose earlier writes are not repeatable
+         (**the buddy split**, below);
+      3. **it re-evaluates its own OPERAND through the mutated register.** This is the one nothing in
+         the codebase currently guards, and it is invisible to a "writes last" review.
+
+      **`INIT` (`Instructions\CONTROL\Init.cs`) — has the shape, low practical risk, worth ordering
+      anyway.** `regs.B` @110, `regs.TOS` @113 and `regs.L = 0` @118 all land before the writes at
+      116/117/121/126 and the argument loop at 131 — and those writes address through `regs.B`, so
+      the instruction *relies* on its own mutation. It is nevertheless idempotent **as long as
+      operand 0 is not B-relative**: `bottomOfStack` is an operand (line 83), INIT saves nothing (it
+      writes zero sentinels), so a restart recomputes every value. **But `ReadOperandValue` on the
+      restart runs with the NEW `B`** — form (3). In practice INIT is a domain's first instruction
+      and its operand is the stack bottom, so B is not yet meaningful; the risk is structural, not
+      live. Order it anyway: the cost is moving three lines.
+
+      **The RET family is CLEAN.** `Ret`, `Retb`, `Retbk`, `Retk` read the frame first and assign
+      `B`/`L` last. `Rett` assigns `L`/`R` @165-166, `TOS` @194, `B` @213 — every frame read before
+      `B` is committed uses the OLD `B`, which the instruction has not touched, so a fault re-reads
+      the same unchanged frame. Correct by construction.
+
+      **`SplitHeapBlock` / `AllocateHeapBlock` — form (2), and arguably worse than ENTT because it
+      corrupts a shared structure rather than one register.** `AllocateHeapBlock` **unlinks** the
+      block (`WriteHeapFreeListHead`) and only then splits; `SplitHeapBlock` then writes a buddy next-
+      pointer and a FLOG head per halving step. A fault anywhere in that loop leaves the free lists
+      **half-rebuilt with the original block already popped**, and the GETB restart re-runs from the
+      top against the mutated lists. Not measured firing — and CPU-STAT would not have exposed it,
+      since its heap is resident by the time the split runs. `[OPEN]`, and worth a targeted test
+      rather than a code change on suspicion.
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
