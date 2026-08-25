@@ -879,6 +879,38 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       `FUNCS-nameseg-process.ASM` — *table* operations rather than transfers. Carve `SSGTE` next,
       unless the live PST write-watch catches the writer first (a trace beats a carve here).
 
+      **LIVE CATCH (peer, gate5r-41): 40 PST writes, ALL thread T17 (ND-500 side), T16 wrote NONE.**
+      So the entry is written from the ND-500 side — consistent with **no dedicated PST-writer
+      FUNCS at all**, the swapper writing entries as ordinary content through the `PHYSWR` path.
+      **Cheap confirmation:** if any 31B `PHYSWR` carries an `addrB` inside `0x455000`-`0x4551FF`,
+      that is the PST written as content and **`SSGTE` is a dead end** — hold the assembly until the
+      operand dump says otherwise.
+
+- [ ] **1.27 PST ENTRY FORMAT — entries are FOUR BYTES, so the entry indexing in use is 2× off.**
+      `[V]` `ND-05.020.01 ND-5000 Hardware Description`, "PHYSICAL SEGMENT TABLE" (§5318 ff):
+      *"The PST contains **four-byte entries** … The **13-bit** physical segment number … points to
+      one of the **8192** elements … **Bits 30 and 31** hold information about the access mode."*
+      ```
+      | 31        |            0 |
+      | 2 bits    |      30 bits |
+      | access    | physical page number |
+      Access = 0 Direct · 1 Single indexing · 2 Double indexing
+      ```
+      Confirmed by NDIX `kernel\MASTER\machine\pte.h:74-76`: `PS_AZI 0` (direct), `PS_ASI 1`
+      (single index), `PS_ADI 2` (double index).
+      - **Entry N is at `PSTP + 4N`, NOT `+2N`.** The watch used `+N*2`, so its "entries 11-17" are
+        **halfwords** — `0x455016` is byte offset 22, the **low** half of entry **5**; the seven
+        addresses span ≈ entries **5-8**. **The original "PST entry 11 is zero" was reading the low
+        halfword of entry 5** — recompute before anything rests on it.
+      - **The observed `0x4000` is the ACCESS FIELD, not a commit flag.** Bits 31-30 of the entry are
+        bits 15-14 of its **high** halfword, so `0x4000` = **access = 1 = Single indexing**. Matches
+        the earlier healthy-neighbourhood reading `0x40xx = PS_ASI`, `0x016C = PS_AZI`. The
+        "initial → set bit 14 → decrement" shape is therefore likely **low half then high half of
+        one entry**, not three writes to one cell.
+      `[OPEN]` — that manual is **ND-5000**; the **classic ND-500** PST entry width is unverified and
+      there is no classic microcode oracle. Write *granularity* is halfword either way; it is the
+      **entry stride** that is in question.
+
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
       4=LALLOPAGE, 5=LDATREADY, 6=LCLTSB). The measured `0x0002,0x0002,0x0001,0x0001` is the
