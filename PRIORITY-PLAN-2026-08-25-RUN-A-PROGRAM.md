@@ -484,6 +484,43 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       (c) something on our side activates without packing (call sites: 510, 879, 1052, 2050 —
       only 879 and 2050 pack; 1052 relies on the pack surviving the queue).
 
+      **CANDIDATE (a) REFUTED BY MEASUREMENT 2026-08-25.** The run-phase `SWPST` sequence shows
+      `0x000A` at #15 — a value only producible by a `TRAPN` whose high byte held `10 = MSWPFAULT`.
+      So the pack DID happen and `TRAPDECODER` did NOT take the 135342 early-out. **`BRESPLACE` and
+      `BSWSTARTED` are innocent — do not spend a run on them.** (`TRAPN=0x0026` at the fault is
+      consistent with BOTH "never packed" and "packed then stripped", so `TRAPN` alone cannot
+      separate them; `SWPST` is what does.)
+
+      **TWO CARVE FACTS THAT CLOSE MOST OF THE REST:**
+      1. **`SWPST` has EXACTLY ONE WRITER in the whole NPL tree** — `MP-P2-N500.NPL:2883` (145054)
+         in `5ACTSWAPPER`; one reader, `:952` (135544) in `LNEWSWAP`. **Nothing zeroes it.** So the
+         failing `SWPST=0x0000` was *written* by a real `5ACTSWAPPER` call that computed zero — not
+         a clear, not a leftover.
+      2. **The swap-wait FIFO drain at 136037 is INSIDE `LNEWSWAP`** (135470..136472, no
+         intervening `SUBR`) and **does not pack** — it advances the fetch pointer (`X5SWH`,
+         `NHENT`) and calls `5ACTSWAPPER` on the dequeued message. The queue is filled by
+         `5ACTSWAPPER`'s own ELSE branch (145111-145144) when the swapper is busy. **The failing
+         line carries `SWPFU=0001` = `LNEWSWAP`** — the arm holding the only unpacked call site.
+
+      **"THE REASON COMES BACK" IS NOT RE-PACKING — IT IS DIFFERENT MESSAGES.** `SWPST` lives in
+      **`SWMSG`** (one shared cell); `TRAPN` lives in each **requester's** message. The `SWPST`
+      column is a sequence of *different requesters* through one slot, which is why `0x0A` appears
+      at #15 and again at #23. Independent confirmation that `SWPST` is the reason channel: the
+      `SWPST` column **leads** `DISP` by one line throughout (#17→#18, #21→#22, #23→#24).
+
+      **THE READING THAT FITS EVERYTHING:** fault → `TRAPDECODER` packs `TRAPN = 0x0A26` → served
+      (#15 `SWPST=0x0A`) → 145047 strips `TRAPN` to `0x0026` → block re-activated via the
+      **unpacked** drain at 136037 → trap arm reads high byte 0 → `SWPST := 0` → idx 0 (`MSWFI`)
+      dispatched → reads the stale `0o10` → `0o2067`.
+
+      **THE REMAINING GAP, STATED PLAINLY:** why is an already-*served* block sitting on the
+      swap-wait FIFO at all? The queue fills only when the swapper was busy at activation time.
+      **One countable check:** how many times does that block reach `5ACTSWAPPER`, and does it ever
+      pass through 145111-145144 (the FIFO insert) *after* being served? If so, that is the defect
+      and it is upstream of everything else.
+      **Do NOT "fix" 145047 to stop stripping, nor make the drain re-pack** — both paper over the
+      step without explaining the queueing, and one changes real SINTRAN behaviour.
+
       **THIS RETIRES THE STALE-`0o10` QUESTION AS PRIMARY.** With the reason packed correctly the
       swapper runs idx 10, which reaches no paging primitive and no MON 377B anyway — consistent
       with zero pages copied. The stale id is what idx 0 reads because **idx 0 should never have
