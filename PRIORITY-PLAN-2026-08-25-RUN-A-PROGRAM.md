@@ -846,6 +846,39 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       `[D]`: which of the 11 params carries the destination address — `LDF` pulls 3 words from
       `XABSF` into `ABFUN`, conventionally function plus buffer, **word not pinned**.
 
+- [x] **1.25 THE PAGING CHAIN, CLOSED AND BYTE-VERIFIED AT EVERY HOP.** `[V]`
+      **`S3SM5` IS DISASSEMBLED** — `030-S3SM5.dis` (1.53 MB) + routine map + `FUNCS-BODIES\`
+      (*"ALL FUNCS ROUTINE BODIES DONE (2026-07-15) … ~60 routines, byte-verified, base `40000B`,
+      ~11,000 lines"*). **Stop parking questions as "that lives in S3SM5, we can't see it"** — done
+      3× today (`MEMNAVAILABLE`, the `SWFUN`/`3SWMESS` stamp, the PST writer).
+      - **`073 RPHSG`** @166537 "read from a physical segment" · **`110 WPHSG`** @167550 "write into
+        a physical segment" (`FUNCS-dispatch-table.md`; bodies at
+        `FUNCS-nameseg-process.ASM:544` / `:1079`).
+      - **`WPHSG`'s tail builds the copy-family parameter block, matching the reference's `[V]`
+        geometry on all four fields including the PHYS-only 4th word:**
+        ```
+        167617 LDD ,X 43 → 167621 STD ,X 7   ; msg word 7    := param 43  = addrA (ND-500 side)
+        167622 LDD ,B -65→ 167623 STD ,X 11  ; msg word 0o11 := B-65      = addrB (buffer/phys)
+        167625 LDA ,X 41 → 167627 STA ,X 14  ; msg word 0o14 := param 41  = PHS segment select
+        167631 LDA ,X 47 → 167633 STA ,X 13  ; msg word 0o13 := param 47  = nrbyt
+        ```
+      **⇒ chain: swapper `RPHS` → MON 60 `RPHSG`(073)/`WPHSG`(110) → MICFU 30B/31B
+      (`3PHSR`/`3PHSW`) → `MSG_PHYSRD 0o015561`/`MSG_PHYSWR 0o015600` copy engine.**
+      Operand dumps can now be mapped back to the *caller parameter* that was wrong: `nrbyt` ←
+      param 47, PHS ← param 41, addrA ← param 43.
+      Also explains the reference's "near-1:1 PHYSWR/PHYSRD with small `nrbyt` = write-then-read-back
+      **verify**" — both halves are the same FUNCS pair.
+
+- [ ] **1.26 STILL OPEN: who writes the PST ENTRY. `WPHSG` does NOT.** `[V]` withdrawal of my own
+      `[D]`: *"write into a physical segment"* means writing **content into** a segment — a memory
+      path with a selector, **not** a page-table update. The body validates the address
+      (167566-167615, three error exits) then issues the copy; nothing touches a table entry.
+      **Third time today a NAME led somewhere the bytes did not** (`LADDR`/"LADDER" and `SWRST` were
+      the others).
+      Candidates by shape, not asserted: **`SSGTE`/`GSGTE`** (set/get segment table entry) in
+      `FUNCS-nameseg-process.ASM` — *table* operations rather than transfers. Carve `SSGTE` next,
+      unless the live PST write-watch catches the writer first (a trace beats a carve here).
+
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
       4=LALLOPAGE, 5=LDATREADY, 6=LCLTSB). The measured `0x0002,0x0002,0x0001,0x0001` is the
