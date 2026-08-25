@@ -84,6 +84,35 @@ then read/write that SRF cell. All addresses below are [V] from the `ADR_*` bodi
 - `SRF11` — tested with `COND,MSGN` (sign) all over the message loop; `MSG_KILL_P` sets its
   sign bit (`SRF11 |= BM37`) right before SET_IDLE [V]. Reads as **"current-process word;
   sign bit = no runnable process"** [D].
+
+  > ⚠️ **CONTRADICTION — DO NOT IMPLEMENT THE `CNTXTSAVE` GATE FROM THIS DOC (flagged
+  > 2026-08-25).** This `[D]` reading and the gate polarity rendered below cannot both be right:
+  > ```
+  > 017422-23  if ((int32)srf[SRF11] < 0) CNTXTSAVE();
+  > 024724-25  if ((int32)srf[SRF11] < 0)   // "sign of SRF11 = no current process"
+  >                CNTXTSAVE();             // "save macro context if one was running"
+  > ```
+  > Those two comments sit on the same conditional: *"sign = **no** current process"* then
+  > *"save the context if one **was** running"*. Either the flag reading is inverted or the
+  > condition polarity is. **Only the `MSG_KILL_P` write is `[V]`; the meaning is `[D]`.**
+  >
+  > **Why it matters:** if the real machine saves when `SRF11 >= 0` (a process IS current) and an
+  > emulator implements `< 0`, it skips the park **exactly when a process is running** — an
+  > unparked process whose message fields all still read correct.
+  >
+  > **The two gates are ONE question.** Raw B30, 16 bytes each — byte-identical except bytes
+  > 12-13 (the jump target):
+  > ```
+  > 0o17422  40 00 00 01 32 01 50 00 00 00 00 00 1f 13 00 00
+  > 0o24724  40 00 00 01 32 01 50 00 00 00 00 00 29 d5 00 00
+  > ```
+  > **Likely source of an inversion:** this CPU's **one-word condition delay** — a word's `COND,*`
+  > tests the flags left by the PREVIOUS word. A rendering that ignores it comes out shifted by one
+  > and still looks plausible (the same trap that got `SCAN_ACCP` bit 5 backwards).
+  >
+  > **Settle it by EXECUTING, not reasoning:** set `SRF11` positive, run `MSG_END` from `017412` on
+  > the microword CPU, observe whether `CNTXTSAVE` runs; repeat negative. Third site worth
+  > comparing: `MSG_IDLE` (MICFU 47, `015324`), "CNTXTSAVE if needed".
 - `SRF14`, `SRF15` — context/domain values consumed by MSG_UNIX5RE and MSG_HISTOG [?]
 - `SRF17` — saved SC-state in MSG_CLEAR / context code [?]
 
@@ -295,6 +324,30 @@ ports); subsequent RF1/RF2 ops hit that srf cell. Full name map now [V]:
 2007=MODINIT, 2011=ASTBAD, 2012=MOD, 2013=PROC0, 2014=MODMASK, 2015=CPUPAR,
 2016=CPUAVA, 2017=#CPUDF, 2020=EXQUE, 2021=MSGME, 2022=CPUFLG, 2024=ATRAP, 2025=5SIB.
 
+> **2026-07-20 — `START_MESS` and `SAMSON_CPU` are PATCHED, not fixed** (from the octobus/ACCP
+> track's carve; see `NDInsight\SINTRAN\ND500\OPEN-QUESTIONS-REGISTER-2026-07-20.md` §2.6).
+> `ND-05.017.01 HARDWARE MAINTENANCE:3961` [READ]: *"load **the first page of CONTROL-STORE:DATA**
+> into the transmission buffer. **Some system parameters are patched into this first page.** Then
+> this page is read by the ACCP and loaded into the ND-5000 control store memory."* CS words
+> `000020`-`000027` are in that page, and `START_MESS` (`026`) + `SAMSON_CPU` (`025`) are precisely
+> the two constants that cannot be static — `SAMSON_CPU` is per-CPU and every CPU loads the same
+> file. **The `LARG=00000020000` (0x2000) and `0` seen in the A30/B30 disassemblies are shipped
+> placeholders, not live values.**
+>
+> `0x2000` is a **5MPM/MFbus window-relative BYTE address** (offset 0 = ADRZERO), the same space as
+> the LPARP pointer observed on the wire as `0x18000`; ADRZERO is operator-set via
+> `DEFINE-MEMORY-CONFIGURATION` (`5P-P2-MON60.NPL:587`). No ACCP command carries a mailbox address —
+> LPARP (021B) is the CS-transfer buffer, LSYSPAR (16B) is *"where to send octobus error messages"*
+> (`ND-05.020.01:4276-4290`). **[NOT FOUND]**: any evidence that CS `OFFSET` (word `000020`),
+> `MM,PSTP`/`MM,PUWP`, or an MPM port BASE register is added to `START_MESS`.
+>
+> **Consequence for any emulator, including `CpuND5000`:** take `START_MESS`/`SAMSON_CPU` from the
+> *loaded* control store, not from the on-disk image and not from a literal. `MailboxIdleTests`
+> hardcoding `HeaderBase = 0x2000` is fine for a synthetic fixture but must not be read as "0x2000
+> is a constant". **[INFER, strong]** that `START_MESS` specifically is among the patched words —
+> the ND-100 patcher itself is uncarved (register **Q-OCT-22**; not in `NPL-SOURCE/NPL/*.NPL`, not
+> in `MON-DEBUG:PROG`).
+
 **Who writes srf[2017] (#CPUDF): `INIT_ADRP` @025646** [V]:
 ```c
 cpu   = SAMSON_CPU();                 // 025647: patch-panel CPU number constant
@@ -481,10 +534,35 @@ void ACCP_WRITE(uint16 word) {
 void SCAN_ACCP(void) {
     uint32 f = SPEC_AFLAG;                        // 016554
     if (f & BM13 && f & BM14) TRAP_PWF();         // 016555-57: power-fail [D bit roles]
-    if (f & BM05) TRAP_OCBAK();                   // 016560-61: OCB acknowledge pending
-    if (f & BM06) TRAP_OCBA();                    // 016562-63: OCB message pending
+    if (f & BM05) TRAP_OCBA();                    // 016560-61: [V] see correction below
+    if (f & BM06) /* falls through to 016565 */;   // 016562-63: [V] NOT TRAP_OCBA
     ...                                           // 016564-65: other -> TRAP_OTRP
 }
+
+// ---------------------------------------------------------------------------
+// CORRECTION 2026-08-02 — the BM05/BM06 destinations above were WRONG, both of
+// them. They were tagged [D] (deduced from labels); the real B30 microcode was
+// then executed one bit at a time and disagreed on both halves:
+//
+//   AFLAG bit 5 (BM05) -> TRAP_OCBA @ 0o16550     (NOT TRAP_OCBAK)
+//   AFLAG bit 6 (BM06) -> falls through to 0o16565 (NOT TRAP_OCBA)
+//
+// 0o16565 is the "other" path, which matches ACCP-COMPLETE-REFERENCE.md calling
+// bit 6 the OTHER-trap input. So of the two documents that disagreed, that one
+// was right and this one was wrong.
+//
+// The label-derived reading put TRAP_OCBAK on bit 5 purely because OCBAK sits
+// adjacent to OCBA in the label file. Adjacency is not dispatch.
+//
+// Measured by: ScanAccpBitDispatchTests in
+// RetroCore\Nuget\HackerCorpLabs.Emulation.CPU.ND5000\tests\
+// The test carries an anti-vacuous control - it fails if both bits reach the
+// same destination, because that would prove nothing about either.
+//
+// STILL OPEN: this settles the DESTINATION (where the microcode jumps), not the
+// CAUSE (what hardware condition sets each bit). The cause needs the ACCP to
+// assert FATAL without ATRAP.
+// ---------------------------------------------------------------------------
 
 // OCB_DECODE (016417) — a received OCB halfword (SC5) from the ND-100 side
 void OCB_DECODE(uint16 cmd) {
@@ -577,8 +655,12 @@ void MSG_VERSRD(void) {
 // MICFU 26 — MSG_CONWR (015703): 3WMONCO variant: same fetch, then a block copy of
 //   answer data into process memory (MSG_CONWR_1/_2/_W/_B, 015752-016004) before EXECUTE
 
-// MICFU 42 — MSG_PRT (016005): process/context probe: GET_CNTXT + reads two context
-//   words, ORs into SC11 -> answer via MSG_KILL_P [D]
+// MICFU 42 — MSG_PRT (016005): **PROGRAMMED TRAP** [V vendor], not a "process probe".
+//   CORRECTED 2026-07-20: the vendor function-value table (ND-05.012.01 ND-500 Micro
+//   Program Guide §13, lines 1090-1400) lists 42 = "programmed trap". The earlier
+//   reading here — "process/context probe [D]" — was a guess from the mnemonic; PRT =
+//   Programmed TRap. Body as decoded: GET_CNTXT + reads two context words, ORs into
+//   SC11 -> answer via MSG_KILL_P.
 // MICFU 44 — MSG_HISTOG (015626): reads P register + SRF11/SRF14 into the message
 //   (histogram/sampling support) [D] -> MSG_END
 // MICFU 47 — MSG_IDLE (015324): CNTXTSAVE if needed; SRF11 := SC14-1 ( -1 = nothing
@@ -691,7 +773,18 @@ void CALL_END(uint16 mcno) {
                                                   // then CALL_END9
         case 0o501:                >> CALL_STAP;  // start-process local assist
         case 0o502:                >> CALL_STOP;  // stop-process local assist
-        case 0o600:                >> CALL_SWIP;  // swapper-related [D]
+        case 0o600:                >> CALL_SWIP;  // **OMC other-machine call** — CORRECTED
+                                                  // 2026-07-20. Was "swapper-related [D]",
+                                                  // a guess from the mnemonic. The NDIX
+                                                  // kernel's fecall() is
+                                                  // `callg $0xf8000180,$4,…` = segment 31,
+                                                  // offset 0x180 = **600 octal**, through a
+                                                  // PC_IND|PC_OMC capability. So SWIP is
+                                                  // almost certainly SWItch-Processor, not
+                                                  // SWaPper. (CALL_MON @003757-61 already
+                                                  // annotated 600 as the NDIX special —
+                                                  // this line contradicted it.) [V from the
+                                                  // NDIX source; classic ND-500 generation]
         default: if (ndix_case()) >> CALL_NDIX;   // 013631: async fast path — answers
                                                   // (writes 3 + GIVEINT) and CONTINUES
                                                   // EXECUTING (025401-025415) [V flow]
