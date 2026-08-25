@@ -742,7 +742,51 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       **our servicer does drive**.
       **FREE CHECK (no new window):** in the span #390→#452, is SINTRAN's *only* action the
       `PSWWAIT` at #428? If so, whatever set `N5STA:=ANSWER` at #416 was not SINTRAN.
-      `[HYPOTHESIS]` that #416 is our servicer — the servicer's `N5STA` path is **not yet read**.
+      ~~`[HYPOTHESIS]` that #416 is our servicer~~ — **REFUTED.** `#416` is the ND-500 **posting its
+      own call** (`N5STA:=ANSWER` is the ND-500→ND-100 direction, "I stopped, here is my record")
+      and it *precedes* SINTRAN's processing at #418. Also refuted: `OnMonitorCallRestart` — it
+      requires a 3MONCO **and** `(stopMode & WAIT) != 0`, so it ran exactly the three times SINTRAN
+      stamped and cannot account for cycle 4.
+
+      **THE SPAN, MEASURED, CONFIRMS THE `EMPTY` CARVE INSTRUCTION-FOR-INSTRUCTION:**
+      `#428/429` SWMSG status := `0x0007` (PSWWAIT — `SWPD4`), then `#430-#433` **SWMSG `HSWPI:=0`,
+      `SWPIN:=0`** — the `STZTX` pair at 136057-136062, and **nothing else in the tree writes that
+      pair**. SINTRAN took `EMPTY` and did **not** answer. No `MSGN500`, no `3MONCO`, no `3START`
+      anywhere after `#372`.
+      **Tally: 3 SINTRAN restart stamps vs 4 swapper run cycles.**
+
+- [ ] **1.21 THE MICROCODE PARK CONTRACT — what cycle 4 violated.** `[V]` from the decoded B30
+      (`microcode\MAILBOX-MICROCODE-PSEUDOCODE.md`). Every handler ends at **`MSG_END` @017412**:
+      ```
+      017417-20  mem_hw[msg+0] = answer          ; N5STA := 3 (ANSWER)
+      017421     GIVEINT(0o100401)               ; notify the ND-100
+      017422-23  if ((int32)srf[SRF11] < 0) CNTXTSAVE();   <- THE PARK, AND IT IS CONDITIONAL
+      017425-26  srf[ADR_MSGME] = 0              ; "message no longer in progress"
+      017430-32  if (srf[ADR_PROC0] == 0)
+      017433-35     ... IDLE()                   ; nothing runnable -> back to idle
+      017436-43  else MSG_NEXTL()                ; service the NEXT CHAINED message
+      ```
+      **After a MON-call stop the microcode goes IDLE or moves to a DIFFERENT chained message — it
+      NEVER continues the stopped process.** The only route back is a fresh activation carrying
+      **3MONCO** (`MSG_CONMC`), delivering `FUNCV→X1` (015721) and `KFLIP→K` (015727/015731).
+      **So 3 stamps vs 4 cycles is a direct contract violation, not an interpretation.**
+
+      **CHECK THIS FIRST — the one conditional in the whole sequence:** `CNTXTSAVE()` fires **only
+      if `srf[SRF11] < 0`** (signed); everything else in `MSG_END` is unconditional. A mismodelled
+      `SRF11`, or a skipped gate, yields exactly "the swapper was never parked" **while every
+      message field still reads correct** — which matches the symptom set better than anything else
+      examined today.
+      Two cheaper unconditional probes: `srf[ADR_MSGME] := 0` (017425-26), and the
+      `IDLE()`-vs-`MSG_NEXTL()` fork on `srf[ADR_PROC0]` (017430-32) — taking `MSG_NEXTL` where the
+      real machine would `IDLE` keeps the CPU executing, i.e. an unparked swapper by another route.
+
+      **OVERLAY CORRECTION (second time this bit us):** offset `0o7`/`0o10` is **TRIPLE**-overloaded
+      — `N500A` on a copy, `SWFUN`/`SWRST` on the swapper arm, **and the SAVED P on a MON-call stop**
+      (written at 004006; message-offset table line 990). Establish the arm before reading those two
+      words.
+
+      `[HYPOTHESIS]` (peer's, adopted): the CPU was never parked on the 4th MON 377B — the only
+      remaining actor. Park site and `stopMode` across cycles **not yet measured**.
 
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
