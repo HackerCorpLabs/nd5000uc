@@ -1011,12 +1011,55 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       **⇒ The ND-100 side is out of the search. No timeout is pending; SINTRAN is not blocked on the
       ND-500.**
 
-- [ ] **1.33 THE LIVE QUESTION: what is the ND-500 executing after the last resume?** Both runs stop
-      identically — fault 1038 at `0x08004BD1` (psn 11, segment 1 = cpu-stat's own code), page-in
-      completes, domain resumed at `P=0x0800473A` on the faulting instruction — and then **no further
-      faults and no further MON calls for ~15 minutes**. Only the instruction-trace ring can see it;
-      no carve helps until there is a PC. (If it spins on a specific address, carve what that address
-      is on the SINTRAN/segment side.)
+- [x] **1.33 ANSWERED — the domain is not idle, it is spinning in the Pascal runtime's
+      non-local-exit unwinder, and the ND-100 side is fully cleared.** `[V]` (peer's instruction ring
+      + my independent decode of the same binary; every address agrees). After the resume at
+      `P=0x0800473A` it retires ~61 instructions per cycle, 65 cycles in a 4000-entry ring, over four
+      stack frames. Loop body `0x080049F1..0x08004C00`, entered from `0x08004722`. It reaches
+      `0x08004B82` (MON 32B MSG) and `0x08004B8D` (MON 0B LEAVE) — **the exit it never takes**.
+      Nine MON calls in the domain's whole life; **it never reached its own main and never made a
+      single output call.**
+
+- [ ] **1.34 THE REAL DEFECT: the heap grows forever because GETB is never satisfied.** Six
+      `MON 422B GSWSP` calls double the heap 128 KB → 2 MB (`0x00020801` … `0x00200801`), the last
+      refused with `K=1 FUNCV=0x203`, `K=1` falls through at `0x08003F73` into the runtime-error path,
+      and the unwinder starts spinning. Shape: `GETB traps STO → the ENTT handler at 0x0800415A grows
+      the heap → RETT → retry → traps again`. **The 1000+ page faults were correct behaviour all
+      along** — fault PC `0x08004022` is `w bmove $0xF0F0F0F0,@b.0x14,r1`, the grower poisoning each
+      newly granted segment, one fault per 2 KB. Not a symptom.
+
+      Three constraints on the search, from the source and the allocator (`[V]` unless marked):
+      - **The program cannot legitimately want 2 MB.** `cpu-stat.pasc` is 104 lines; its entire
+        dynamic footprint is a ~20-byte record and `month : array[1..12] of packed array[1..9] of
+        char` = 108 bytes, filled in an `initprocedure` that runs before main. So the size being
+        ASKED FOR is wrong — check the request before the free lists.
+      - **`w1 getb r1` @`0x08004149` takes a buddy ORDER, not a byte count.** The allocator
+        @`0x080040F1` computes `n = (size+3)>>2` (words, rounded up; the `shl $0x3E` is a 6-bit
+        signed −2, i.e. `>>2`), then `dconv → d4 alog2 → d1 int → d4 comp → +1.0 if inexact →
+        d byconv`, and passes that byte to GETB. If our GETB reads the operand as a size, it hunts a
+        bucket that can never be satisfied and the heap grows forever.
+      - **That order is decided in FLOATING POINT, in a family with a live defect.** One ulp in
+        `alog2`/`int` gives an order one too small. EXP's final `2^k` scale is still one power of two
+        short (`FWRITE_X` @027451, SC2 @025703) and `INTRF_U`'s rounding was fixed only 2026-08-04.
+        **Feeding n = 27 words through this by hand and checking it yields order 5 is a five-minute
+        test that does not need the live boot** — do that before touching the buddy lists.
+      - `[D]` The `0x4040000000000000` addend read as `1.0`: not verified against the ND-500 double
+        encoding. Corroborated only by the same literal appearing at `0x080040C8` (`d add2 b.0x1C`)
+        where the context is also "step the order by one".
+
+      Peer holds the live lane (a per-GETB trace of TOS/MAXL/STAH/ENDH plus every non-empty FLOG
+      entry). Open for me only if the program's own free-list build at `0x08004050..0x08004091`
+      disagrees with the manual's buddy layout — then read ND-500 Reference §4.1.5 / §3.3 on FLOG
+      stride as a second reader.
+
+- [x] **1.33b The PC → routine → MON lookup table for CPU-STAT.** `[V]`
+      `E:\Dev\Ronny\ND5000UC\docs\CPU-STAT-PC-ADDRESS-MAP-2026-08-25.md` (commit `5b16f7f`). All 78
+      internal call targets land exactly on a decoded instruction boundary (0 misses), so the
+      address→instruction map holds across all 5117 instructions. 43 segment-31 MON call sites,
+      28 distinct numbers; five of them (412B, 73B, 262B, 123B, 503B) are named independently
+      elsewhere in the tree and agree, which MEASURES the "low halfword of the segment-31 target is
+      the MON number" rule instead of citing it. Program text ends at `0x0800532A` — a PC at or
+      above `0x0800532B` is not CPU-STAT code at all.
 
 - [x] **1.29 The `0x203` question answered — benign.** cpu-stat probes memory by **doubling** its
       `GSWSP` request: `0x20801`, `0x40801`, `0x80801`, `0x100801` all succeed (segments 2,3,4,5);
