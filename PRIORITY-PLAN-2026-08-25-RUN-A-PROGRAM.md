@@ -632,7 +632,55 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       with zero pages copied. The stale id is what idx 0 reads because **idx 0 should never have
       been dispatched**. Fix the reason and the id stops mattering; fix the id and the handler is
       still wrong.
-- [ ] **1.12 POSSIBLY UPSTREAM OF ALL OF PHASE 1: the 12 "Memory not available" per run.**
+- [x] **1.13 STRUCK: the missing-pack / zero-reason line (1.11 and its predecessors) is DEAD.**
+      `[V]` by write-trail with thread attribution, 606 writes, nothing lost from the ring.
+      ```
+      TRAPN @0x420E4C  #138/139 [T17] -> 0x0026   our AnswerTrapStop
+                       #150/151 [T16] -> 0x0A26   THE PACK, observed directly
+                       #164/165 [T16] -> 0x0026   THE STRIP (145047)
+      SWPST @0x420DB6  #166/167 [T16] -> 0x000A   SINTRAN writes MSWPFAULT. CORRECT.
+                       #398/399 [T17] -> 0x0000   THE ZERO — T17 = THE SWAPPER
+      ```
+      **SINTRAN packs correctly, strips correctly, and dispatches correctly.** The zero is the
+      swapper writing "no error", exactly as `LNEWSWAP` @135550 reads it. **My benign reading was
+      right and the missing-pack reading — which I wrote into this plan — is struck, not softened.**
+      Bonus: strip (#164/165) precedes reason-store (#166/167), confirming 145047-before-145054
+      **instruction-for-instruction by independent measurement.**
+
+- [x] **1.14 STRUCK: `LNEWSWAP` does NOT turn `SWPST` into a work item.** `[V]`
+      135544 reads it, then 135550 branches: nonzero → `D=:A % Swpstat, error code` →
+      `EMONICO` / `SWPD1`→`SWPD2` (@135717 `A=:SSTAT ... SSTAT; CALL WN5STATUS % Restart nd-100
+      proc with error code`); zero → the "Ok answer from the swapper" branch. **Consumed only as a
+      status/error code — it never becomes a function code and never reaches the sub-fn-1 OUT
+      cell.**
+
+- [ ] **1.15 THE REAL ANOMALY: SINTRAN WROTE `SWPST` EXACTLY ONCE IN 606 WRITES.** `[V]`
+      The reason IS delivered through `SWPST` (5ACTSWAPPER @145054) but **only inside the
+      `IF A=PSWWAIT` (swapper-free) branch** — the ELSE queues and writes nothing. By thread, the
+      column is `#166 [T16] 0x0A` and then **T17 for everything after**. So at the failing
+      activation there was never a fresh reason: the cell still held the **swapper's own stale
+      `0`** from #398, and `0 = MSWFI = idx 0`. The two directions collide in one cell — but the
+      cause is **SINTRAN never writing a second reason**, not `LNEWSWAP` feeding one back.
+
+      **EXACT, COUNTABLE NEXT CHECK (both blocks already in the window):**
+      - count T16 writes of `SWACTIVE=0` to `SWPFU` (145011) — one per **serve**; should pair 1:1
+        with `SWPST` reason writes;
+      - count T16 writes of `PSWWAIT=7` to SWMSG status — one per `SWPD4`, i.e. per completed
+        service cycle + drain;
+      - **serves = 1 but SWPD4s > 1 ⇒ the swapper completed work it was never freshly dispatched
+        for, and that gap is the defect.**
+
+      `[D]` **not** `[V]`: 145057-145062 set `NUMPA:=6`, `FUNCV:=0` with the comment *"Par #2 &
+      par #3 will be written into"*, then `MICFU:=3MONCO; CALL MCCO`. Reading "par #2/#3" as the
+      OUT fn cell `0x240B0` / message address `0x240B4` would make **`MCCO`** the writer of the fn
+      cell. **`MCCO` is NOT carved** — next target if this thread is pulled.
+
+- [x] **1.12 REFUTED — "Memory not available" is a SIZE limit, not the sharing condition.**
+      The ladder result (already in the log): `1000B` and `400B` refused, **`100B` ACCEPTED** —
+      `Number of pages available for ND-500(0) processes: 7216B` = **3726 decimal pages, not zero**.
+      A smaller rung IS accepted, so the refusal is not categorical, the manual's sharing condition
+      does not apply, and the in-repo pool-size hypothesis holds. **Nothing here is upstream of the
+      swapper path.** Falsified by the exact test the hypothesis named.
       `[V]` on the constant and the manual cause; **`[HYPOTHESIS]` on the consequence.**
       Gate5R has failed its goal assertion (`Does.Contain("Sintran III")`) identically all day
       (gate5r-35/36/37 byte-identical, **12 × "Memory not available" each**, pre-existing — nothing
