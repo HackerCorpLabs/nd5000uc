@@ -264,9 +264,27 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       the Table A entry at `0x08038000 + id*100` (decimal 100) and read the halfword at `+0o14`
       (+12 decimal) and byte `+5` bit `0x40`. Cheapest first: the request record's `+0o14` — if it
       equals `0o31` the whole check passes regardless, ruling the path out in one word.
-      **Who WRITES those Table-A fields is `[OPEN]`** — hosting them in the swapper's domain data
-      says nothing about the writer, so do NOT touch the segment state until that is carved
-      (guessing here is how the `0xD → 6` mistake was manufactured).
+      **WHO WRITES THE FIELDS — ANSWERED 2026-08-25, and it INVERTS the hypothesis.** `[V]` by
+      sweeping every reference in the PSEG:
+      - **`+0o14` is the swapper's own "linked" marker**, written by exactly one routine
+        (`1000006650`), and only after a `call $1000026217` succeeds — an `ifkret` on that call
+        returns early and leaves `+0o14` **zero**. That routine has three callers:
+        **idx 9 (allocate+link, worker `1000046242`)**, idx 0 (free/finish), idx 15.
+      - **`+5` is never written in this PSEG at all** — all 20 references are reads. Whoever
+        builds the Table-A entry owns that flag byte, and it is outside the swapper domain.
+
+      **So `0o2067` means: the slot was marked in use by someone OUTSIDE the swapper, while the
+      swapper's own allocate-and-link (idx 9) never completed for it.** idx 10 is CORRECT to
+      refuse — it is being asked to book a fault against a segment that was never linked, and it
+      cannot bootstrap the field it tests.
+
+      **This flips the question again.** It is not "why is a page-in never REQUESTED after the
+      notification" — it is **"why did idx 9 never run for cpu-stat's segment BEFORE the fault"**.
+      The missing step is upstream of the page fault entirely. Stop instrumenting the post-fault
+      path; find out whether idx 9 is ever dispatched for this segment, and if not, what should
+      have asked for it at PLACE/start time.
+      Still `[OPEN]`: who sets `+5` bit `0x40` (the "in use" claim the swapper trusts but never
+      writes). That is the other half of the mismatch and is worth carving on the ND-100 side.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
