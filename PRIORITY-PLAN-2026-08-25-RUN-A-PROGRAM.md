@@ -1118,7 +1118,65 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       writes EA3 at 4, 8, 12, 16, 20, 24. (2) The RETT restore LIST is claimed; where EA3 initially
       points on entry to RETT is not.
 
-- [ ] **1.36 WHERE IT ACTUALLY POINTS: does TOS survive a page fault taken INSIDE ENTT?** The MON
+- [x] **1.38 ROOT CAUSE, PEER'S: `ENTT` is not restartable in our engine.** `[V]` The probe settled it
+      in four lines. ENTT executes **twice** and the second execution snapshots the state the first
+      one created: attempt 1 `savedTOS=0x08000C94` (the truth), attempt 2 `savedTOS=0x08001A28` —
+      which is not another register but **arithmetic**: `frame 0x08001728 + demand 0x300 = 0x08001A28`,
+      i.e. ENTT's own Step 5, `TOS := B + total trap handler stack demand` (Figure 41). `savedB` says
+      the same: `0x000001A4`, then `0x08001728` — the frame base attempt 1 wrote into B. ENTT mutates
+      B/L/TOS **before** its ~220-byte frame write completes, that write page-faults on a non-resident
+      trap data field, the page fault is a During-class trap so the instruction re-executes from the
+      top, and the retry captures its own leftovers. **RETT was innocent, and so was the context
+      block.** Fix (peer's, building clean, NOT yet regression-verified): capture `PreTrapB/PreTrapL/
+      PreTrapTOS` in `InvokeTrapHandler` beside `TrappingPC`/`ResumePC` and have ENTT write those into
+      arg3/arg4/arg21 instead of reading live registers. Justified by the trace itself —
+      `trappingPC` is identical across both attempts while the registers are not, so
+      `InvokeTrapHandler` runs once per trap and the restart re-enters only the instruction.
+
+      **Peer's own retraction, recorded:** "`0x08001A28` is the domain's ordinary stack top, the value
+      in every REGS dump" was a real observation with the wrong inference — it is the *trap handler's*
+      stack top, and the resemblance cost two rounds of hunting the context block. **A resemblance is
+      not a measurement.** Same shape as my own errors today.
+
+- [x] **1.37 `want=2^10` EXPLAINED — my order-5 arithmetic was aimed at the wrong allocation. No
+      second defect.** `[V]` The first allocation is not the month array. `0x08002E2C` computes:
+      ```
+      08002E47  w1 := b.0x14 ; incr        ; recsize = (arg+1)>>1   (shl $0x3F = 6-bit -1)
+      08002E55  w1 + $0x3FF                ; +1023
+      08002E59  w1 / b.0x50 ; * b.0x50     ; -> smallest multiple of recsize >= 1024
+      08002E63  w1 * $0x2                  ; DOUBLE it
+      08002E65  call allocator(...)
+      ```
+      That is a **text-file I/O double buffer**: 1024 rounded up to a whole number of records, times
+      two. ~2048 bytes → `n = 512` words → `log2 = 9` exactly → order 9; and **whenever recsize does
+      not divide 1024 the round-up exceeds 2048, `log2` is inexact, the `+1.0` arm fires and the
+      answer is order 10.** So `2^10` is the CORRECT output of that chain, not evidence of a float
+      bug. **My "possible second defect in `dconv/alog2/int/comp/byconv`" is withdrawn** — the number
+      it rested on is fully accounted for. (The `shl` negative-count reading is corroborated: `$0x3E`
+      = −2 here and `$0x3F` = −1 there, two independent uses both yielding sane sizes.)
+      The other three allocator callers are tiny by construction — `0x08004168` is a string-constant
+      builder called four times with lengths `0xD, 0x18, 0x8, 0xA`, orders 0-3.
+
+- [ ] **1.39 `savedB = 0x000001A4` on ENTT attempt 1 — UNEXPLAINED, do not hand-wave it.** A frame
+      pointer with no segment bits, while the program had been running correctly through many
+      routines, so B cannot simply have been garbage. One cheap discriminator settles where to look:
+      **compare it against the `B` printed in CONTEXT SAVE `#758`.** If `#758` shows a proper
+      `0x0800xxxx` frame pointer while ENTT attempt 1 captured `0x1A4`, the capture POINT is wrong and
+      the new `PreTrapB` inherits the same defect; if both say `0x1A4`, B really was that value and the
+      question moves upstream to `ENTS`. Until that is run this stays `[OPEN]` — a fix that writes
+      `PreTrapB` into arg4 is only as good as `PreTrapB`.
+
+- [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
+      dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
+      would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
+      mid-instruction cannot lose TOS. The classic engine has to get instruction restartability right
+      by hand, and did not. Generalise before writing: **1.38 is unlikely to be the only
+      non-restartable instruction** — any instruction that mutates architectural state before a long
+      memory write can fault the same way. `ENTS`/`ENTSN`/`ENTB` are the obvious neighbours.
+
+- [ ] **1.36 WHERE IT ACTUALLY POINTS: does TOS survive a page fault taken INSIDE ENTT?** ANSWERED by
+      1.38 — neither of the two options I named; the re-snapshot is self-inflicted. Kept for the
+      reasoning trail. The MON
       trail shows `0x0800415A` — the ENTT instruction itself — taking **four** context saves before
       completing (`#758/#761/#763/#765`, all `P=0x0800415A`), then `#776 CONTEXT SWITCH X5CPU=0→1`
       with `B=0x08001728`, the pre-ENTT B, proving it had not completed. Unsurprising: ENTT writes
