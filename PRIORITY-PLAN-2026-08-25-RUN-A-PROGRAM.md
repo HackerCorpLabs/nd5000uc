@@ -1166,6 +1166,33 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       question moves upstream to `ENTS`. Until that is run this stays `[OPEN]` — a fix that writes
       `PreTrapB` into arg4 is only as good as `PreTrapB`.
 
+- [ ] **1.41 THE RESTARTABILITY AUDIT — done, and it is a two-instruction problem, not a systemic
+      one.** `[V]` on the code shape; `[OPEN]` on whether the second one ever fires. Swept every
+      entry/call instruction in `Emulated.HW\ND\CPU\ND500\Instructions\CALL\` for the 1.38 pattern
+      ("does it mutate architectural state BEFORE its frame writes finish").
+
+      **Correct — every write first, register commit LAST (so a fault leaves the retry recomputing
+      from unchanged state): `ENTS`, `ENTSN`, `ENTB`, `ENTF`, `ENTFN`.** All five end with
+      `regs.B = newB; regs.L = returnAddr` after the argument loop. `ENTD`/`CALL`/`CALLG` set only
+      `L` with no faultable write after it. So the correct pattern is already the majority — good
+      news, and it means 1.38 is a defect, not a house style.
+
+      **`ENTT` — the known one (1.38): `regs.B = trapFrameBase` at `Entt.cs:139`, BEFORE the ~24
+      frame writes at 143+.**
+
+      **`ENTM` — a SECOND, previously unrecorded instance of the same class.** `Entm.cs:146` does
+      `regs.TOS = bottomOfStack + totalStackDemand` **in the middle of the frame writes** — after
+      `OFFSET_SP`/`OFFSET_AUX` at 142/143, but BEFORE `OFFSET_N` at 150 and the argument loop at
+      152-156, both of which can fault on a non-resident frame page. On the restart,
+      `uint oldTOS = regs.TOS` at line 126 re-reads the **already-advanced** TOS and line 134 writes
+      that wrong value to `oldSP`. `bottomOfStack` is an operand (line 97), not derived from TOS, so
+      `newB` recomputes correctly — **the corruption is confined to the saved old TOS**, which is
+      narrower than the ENTT case but the same mechanism. ENTM is the main-program entry, it runs at
+      program start, and its argument loop writes into a fresh frame — exactly the residency
+      conditions that made ENTT fault. **Not measured firing; found by structure. Do not report it as
+      observed.** Fix shape is the same as 1.38: hoist the `regs.TOS` assignment to after the
+      argument loop, beside the `regs.B`/`regs.L` commit.
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
