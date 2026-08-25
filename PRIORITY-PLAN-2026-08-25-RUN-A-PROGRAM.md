@@ -1337,6 +1337,54 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       all**, the test goes green unchanged, and the same shape fixes ENTM where `PreTrapB` cannot
       reach. Peer's before/after harness proves equivalence in one run.
 
+- [ ] **1.47 WHY IT PRINTS GARBAGE: `DMEMRD` (MICFU 10B = `3RMED`) IS NOT IMPLEMENTED ON THE CLASSIC
+      LANE. Our own code says so.** `[V]` `Nd500MicrocodeServicer.cs` ~1088, the `else` arm of the
+      `DataMemoryRead`/`PhysicalRead` case:
+      ```
+      else
+      {
+          understood = false;   // DMEMRD classic still unmodelled
+      }
+      ```
+      The octobus arm is gated on `Generation != Classic`; the classic arm handles **only**
+      `PhysicalRead`. Gate5R runs **Classic** (3022/5015). So when SINTRAN issues `3RMED` to fetch
+      cpu-stat's output buffer, we never fill it and SINTRAN prints whatever was already at `ABUFA` —
+      **real bytes, wrong bytes**, exactly the symptom. Prediction for the pending uncapped tally:
+      **MICFU 8 WILL appear**, and every occurrence is an unserviced message.
+
+      **My own near-miss, third of the day, recorded:** I reported this handler as "implemented,
+      `Nd500MicrocodeServicer.cs:1029`" one message earlier because the enum had `DataMemoryRead = 8`
+      and a `case` label existed. **A case label is not an implementation.** Read to the closing brace.
+
+      **The parameters are fully carved from SINTRAN's own code** (`MP-P2-N500.NPL:140661-140701`),
+      so this is not a guess:
+      ```
+      140661   3RMED; *STATX XMICF                              % MIC.FUNC=READ DATA MEMORY
+      140664   A:=D; *AAX NRBYT; STATX                          % NUMBER OF BYTES TO READ
+      140667   *AAX 5DITN-NRBYT; STZTX                          % 5DITN := 0
+      140671   *AAX OSTRA-5DITN; LDDTX; AAX N500A-OSTRA; STDTX  % ND-500 LOGICAL DATA ADDR
+      140675   *AAX ABUFA-N500A; LDDTX; AAX N100A-ABUFA; STDTX  % ND-100 PHYSICAL ADDR
+      140701   "STTDRIV"; *AAX SPFLA-N100A; STATX               % continuation routine in SPFLAG
+      ```
+      Slots (`N500-SYMBOLS.SYMB`): `N500A=7`, `N100A=11B`, `NRBYT=13B`, `5DITN=14B`, `ABUFA=140B`,
+      `SPFLA=143B`, `OSTRA=44B`. **This answers the virtual-vs-physical question outright: the SOURCE
+      is an ND-500 LOGICAL address and the DESTINATION is an ND-100 PHYSICAL address — SINTRAN's own
+      comments — so the translation obligation is on OUR side, not SINTRAN's.**
+
+      **DMEMRD differs from the already-working classic PHYSRD in exactly two ways** (the slot triple
+      is shared, since `STOPR`/`NUMPA` = `N100A` 32-bit and `MCNO` = `NRBYT`):
+      1. the source is a **logical** address in `N500A` needing MMU translation, **not** a
+         `(MSWMC segment, N500A offset)` pair resolved by the PST walk;
+      2. slot `14B` carries **`5DITN = 0`** instead of the physical segment select.
+      So the implementation is close to a copy of the PHYSRD arm with the address resolution swapped.
+      **Do NOT reuse PHYSRD's field mapping wholesale** — the code's own comment warns about the
+      mirror-image mistake ("NOT the 13B/14B raw-physical copy").
+      `[D]` on what `5DITN = 0` selects: the name is ND-500 DIT number and DIT==PCB==domain, so this
+      reads as "translate in domain 0", but that is inferred from the symbol name plus the DIT model,
+      not verified. **Worth pinning before implementing** — if our handler translates through the
+      current process's tables and SINTRAN means domain 0, that alone reproduces "real bytes, wrong
+      bytes".
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
