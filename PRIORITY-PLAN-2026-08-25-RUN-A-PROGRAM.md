@@ -273,18 +273,42 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       - **`+5` is never written in this PSEG at all** — all 20 references are reads. Whoever
         builds the Table-A entry owns that flag byte, and it is outside the swapper domain.
 
-      **So `0o2067` means: the slot was marked in use by someone OUTSIDE the swapper, while the
-      swapper's own allocate-and-link (idx 9) never completed for it.** idx 10 is CORRECT to
-      refuse — it is being asked to book a fault against a segment that was never linked, and it
-      cannot bootstrap the field it tests.
+      **RETRACTED — the "idx 9 never ran" conclusion was WRONG, killed by a full-run census.**
+      `DISP=0x09` IS dispatched (4x), and `+0o14 = 0001` on entries 10/11/12 straight afterwards,
+      so `1000006750` and `1000026217` are working. The field-ownership carve above stands; the
+      diagnosis built on it does not. Equally retracted: the `0o2067`-comes-from-idx-10 reading —
+      at `DISP=0x0A` every entry reads `+0o14 = 0001` and the fault's entry reads `+5 = 0x80`, so
+      **both** conditions of site `1000042275` are false and it cannot be the emitter. The
+      `+0o14 = 0000` samples that suggested otherwise are all at `DISP=0x18` and recover on the
+      next sample — a construction transient.
 
-      **This flips the question again.** It is not "why is a page-in never REQUESTED after the
-      notification" — it is **"why did idx 9 never run for cpu-stat's segment BEFORE the fault"**.
-      The missing step is upstream of the page fault entirely. Stop instrumenting the post-fault
-      path; find out whether idx 9 is ever dispatched for this segment, and if not, what should
-      have asked for it at PLACE/start time.
-      Still `[OPEN]`: who sets `+5` bit `0x40` (the "in use" claim the swapper trusts but never
-      writes). That is the other half of the mismatch and is worth carving on the ND-100 side.
+      **THE REAL NARROWING — 8 remaining sites down to 4, and 3 of those share one guard.**
+      Seven of the eight are the SAME id-range test (low `$7`, high `[$1000224124]`), differing
+      only in where the id comes from. Mapped to handlers and intersected with the dispatch codes
+      the run actually issues (`0x00`, `0x03`, `0x05`, `0x09`, `0x0A`, `0x18`):
+
+      | site | handler | reachable in this run? | guard |
+      |---|---|---|---|
+      | `1000006170` | **idx 24** (`0x18`) create/define a segment descriptor | **YES** | id from request `+0o20`, range |
+      | `1000006231` | **idx 24** (`0x18`) | **YES** | **distinct**: Table-A `+0o136 == 0` AND `+0o142 != 0` |
+      | `1000053747` | **idx 0** (`0x00`) free/finish a segment slot | **YES** | id from `r.20`, range |
+      | `1000052151` | **idx 1**, also a sub-call of idx 0's worker | **YES via idx 0** | id from `r.20`, range |
+      | `1000035103` | idx 19 (`0x13`) | no | range |
+      | `1000064576` | idx 21 (`0x15`) | no | range |
+      | `1000065010` | idx 14 (`0x0E`) | no | range |
+      | `1000065065` | idx 15 (`0x0F`) | no | range |
+
+      **The error line itself reads `DISP=0x00`, which is idx 0's code** — though `0x00` is also
+      what a cleared cell reads, so that is a pointer, not proof, and must not be treated as
+      attribution (the same overreach as reading `0x0A` off the preceding restart).
+
+      **NEXT MEASUREMENT — one log line settles three of the four:** record the id being passed
+      and the bound `[$1000224124]`. In range ⇒ all three range guards are out and the only
+      survivor is idx 24's `+0o136`/`+0o142` pair, which is then the thing to dump. Out of range ⇒
+      the bug is whoever computed the segment id, and the fault path is entirely innocent.
+      Still `[OPEN]`: who sets `+5` (never written in the swapper PSEG). Measured values differ per
+      entry — `10:0x40, 11:0x80, 12:0x00` — so whoever writes it distinguishes these three
+      segments, and our fault is against the `0x80` one. That is an ND-100-side carve.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
