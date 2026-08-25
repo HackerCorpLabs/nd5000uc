@@ -171,6 +171,37 @@ slot — it does not branch on it.
    engine. **This does NOT close the question for the B30**: `CALL_5_MATCH 013667B` is a different
    routine in a different store and has not been walked. Do not carry this verdict across.
 
+## 5. HOW MUCH THE REMAINING `[OPEN]` ACTUALLY BLOCKS — measured, and it is almost nothing
+
+§2 leaves open whether the classic store has the B30's other assist families. That is still open as
+a fact about the store, but the question that matters is **do the programs we are about to run ever
+call those MONs?** Counted off the RAW trampoline targets across all ten disassemblies (never the
+disassembler's comment — see the companion DOM carve §0):
+
+| MON | target | programs using it |
+|---|---|---|
+| `500B` `501B` `502B` `600B` (local assists) | `F8000140/41/42`, `F8000180` | **0** |
+| `270B` `271B` `333B` `335B` (cache dump) | `F80000B8/B9/DB/DD` | **0** |
+| `201B` | `F8000081` | **0** |
+| `144B` | `F8000064` | 3 |
+| **`117B` RFILE** | `F800004F` | **10 — all of them** |
+| **`120B` WFILE** | `F8000050` | **10 — all of them** |
+
+**POSITIVE CONTROL RUN FIRST, because eight of those rows are zeros and a zero from a grep is
+evidence about the pattern.** The same method returns **7** programs for `504B` (`F8000144`) and
+**3** for `513B` (`F800014B`), matching the counts §1 of the DOM carve derived independently. The
+instrument finds what is there, so the zeros are the corpus and not the search.
+
+**So the cache-dump and local-assist families block NOTHING in this corpus** — no program calls
+them. That `[OPEN]` stays open as a statement about the store, and drops to the bottom of the queue.
+
+**The two that survive are the interesting ones**: `117B` RFILE and `120B` WFILE are in **every one
+of the ten programs**, and the earlier B30 catalog listed `117B/120B` among possible "wait variant"
+assists. **Live evidence that they need nothing from us today:** CPU-STAT uses both, and it runs end
+to end on the classic lane with correct output. That is not proof every path through them is right —
+one program's usage is not the contract — but it does mean this is not a blocker for LED, CONVERT
+or LINKER, and it is the first thing to re-examine if one of those stops inside a file read or write.
+
 **`010741` loads `174B` and sets `K,ONE`.** `EC174` is exactly the oversize error the NPL raises for
 this family (`140645: A:=EC174; CALL EMONICO`), and `K` is the error flag the restart path consumes.
 The microword contents are `[V]`; reading the word as *the oversize exit* is `[D]` — the
