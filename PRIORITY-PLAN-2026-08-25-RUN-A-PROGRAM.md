@@ -565,6 +565,35 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         `SWPFU=1` is the swapper asking for work, the second is at least as likely**, and it would
         mean `SWPST=0` is not evidence of a missing pack at all.
 
+      **WHAT SINTRAN CAN EVEN WRITE INTO `SWPST` — EXACTLY TWO VALUES.** `[V]` The whole NPL tree
+      contains **three** `MSW*` uses and only **one** is a pack: `:431 IF A=MSWSTART` (test),
+      `:464 IF A=MSWSWAIT` (test), `:877 MSWPFAULT SHZ 10+D` (**the only pack**), plus `SWMC`
+      @141753 packing `MSM510`. So on the trap arm — the only live arm — SINTRAN can produce
+      **`0x0A` (`MSWPF=0o12`) or `0x17` (`MSM51=0o27`)**, and nothing else.
+      (Unpacked constants for reference: `MSWFI=0`, `MSWST=0o7`, `MSWIN=0o5`, `MSWSW=0o24`,
+      `MSWDO=0o34`.)
+
+      **MEASURED COLUMN vs THAT CONSTRAINT — three of six values have NO SINTRAN producer:**
+      `0x0A` ✓ possible · **`0x18`(0o30) ✗** · **`0x09`(0o11) ✗** · **`0x0B`(0o13) ✗** ·
+      `0x00` ✗ except as a missing pack. **So the swapper demonstrably writes `SWPST`** — the
+      bidirectionality is settled by the values alone, without needing the thread id, and my
+      earlier "one writer" was wrong more broadly than first admitted: most of that column is not
+      SINTRAN at all.
+
+      **THE FORK IS STILL OPEN AND THE VALUES CANNOT CLOSE IT** — both sides can legitimately
+      produce zero:
+      - swapper-authored `0` = "no error" (`LNEWSWAP` @135550: `IF A><0 THEN % Error-answer from
+        swapper?`) → **benign, and the missing-pack theory dies**;
+      - SINTRAN-authored `0` → **can only be a missing pack**, since `MSWFI` is never deliberately
+        packed.
+      **The thread id on that single write is the whole answer.** SINTRAN's thread ⇒ real defect.
+      Swapper's thread ⇒ **items 1.11 onward collapse and should be struck.**
+
+      *Caveat on my own claim:* "MICFU=3SWMESS never occurs" rests on a census sampled at MON 377B
+      calls; a transient 3SWMESS between calls would let that arm write `SWFUN` values like
+      `0o30`/`0o11`/`0o13` and weaken the "not producible" list. MICFU (offset 6) is inside the
+      watch window, so this is checkable in the same run rather than assumed.
+
       **THE WRITE-WATCH ALREADY EXISTS — DO NOT BUILD ONE.** `MpmAccessTrace` + `TracingRam` are
       hooked at the single backing store, so they see ND-100 CPU writes and our servicer's writes
       alike, recording per entry: seq, R/W, physical byte address, value, width, **PC**, **thread
