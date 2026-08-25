@@ -142,3 +142,38 @@ entry; its exits are `2353` (`010503`), `10511` (the screening), `10527`/`10522`
 Whether the classic store has equivalents of the B30's cache-dump (`270B/271B/333B/335B/500B`),
 local-assist (`501B/502B/600B`) and wait (`117B/120B/144B/201B`) families is **`[OPEN]`** — they are
 not on this path, and "not on this path" is not "not in the store".
+
+## 4. AFTER THE MATCH — the three numbers are never told apart again
+
+Followed the match arm forward, word by word, instead of stopping at `010662`:
+
+```
+010662/ ... ALU,A+B A,XD,SARG B,AM#12 D,AL#20 ... JMP F,NEXT ... LCDECR 10741,74 ;
+010741/ ALU,ADIR A,XD,SARG D,X#0 JMP K,ONE SLOW2 10735,174 ;   % X#0 := 174B, K := 1
+010735/ ALU,ADIR A,AL#35 D,AL#20 COND,LCZ NEXT SET ;           % AL#20 := AL#35 (the MON number)
+010736/ C,SEQ JMP F,NEXT LCDECR 10527,0 ;
+010737/ CTRL143=1 C,SEQ JMP F,NEXT 10522,0 ;
+```
+
+**`[V]` — NO WORD ON THIS PATH COMPARES `AL#35` AGAINST A CONSTANT AGAIN.** `504B`, `511B` and
+`512B` converge at `010662` and are handled identically from there to the exit. `010735` only
+*copies* the number (`AL#20 := AL#35`) — placing it as a parameter, matching the message's `SMCNO`
+slot — it does not branch on it.
+
+**Two consequences, both practical:**
+
+1. **Handling all three through ONE code path is what the microcode does**, not a convenience. The
+   servicer already does this (`Nd500MicrocodeServicer.cs:2047-2049`, `inlineCopyMon`), so that
+   implementation now has a second, independent source behind it.
+2. **The `511B` return-leg `[OPEN]` gets narrower.** Nothing on this classic path reads bytes back
+   into the process. `DVIO`'s inbound half (`MP-P2-N500.NPL:141016`, `XNINSTR`/`11DMA`) is therefore
+   **SINTRAN's work on the ordinary answer write-back, not a microcode obligation** — on the classic
+   engine. **This does NOT close the question for the B30**: `CALL_5_MATCH 013667B` is a different
+   routine in a different store and has not been walked. Do not carry this verdict across.
+
+**`010741` loads `174B` and sets `K,ONE`.** `EC174` is exactly the oversize error the NPL raises for
+this family (`140645: A:=EC174; CALL EMONICO`), and `K` is the error flag the restart path consumes.
+The microword contents are `[V]`; reading the word as *the oversize exit* is `[D]` — the
+`[OPEN]` condition-delay question means the branch that reaches it is not pinned. Worth noting
+because our servicer already uses that exact pair on its oversize-reject path
+(`funcv = 0x7C /* 0o174 */; kFlag = true`) — arrived at independently, from the B30 side.

@@ -114,8 +114,17 @@ oversize error are **identical** to the already-working `504B`. `[V]`
 ```
 **`DVIO` is bidirectional**: after the output it reads up to `11DMA` bytes *back* into the process
 via the `DVINST` input path. `504B` (`NOUTSTR`) is output only. Whether that return leg needs
-anything from our side, or rides the ordinary answer write-back, is **`[OPEN]`** — do not assume it
+anything from our side, or rides the ordinary answer write-back, was **`[OPEN]`** — do not assume it
 is free. This is precisely the assumption I was about to make from "shares a handler".
+
+> **NARROWED 2026-08-25, classic lane only.** The classic store's match arm was walked forward
+> (`010662 → 010741 → 010735 → 010527/010522`, see
+> `CLASSIC-STORE-MON-SCREENING-CARVE-2026-08-25.md` §4): **no word on that path compares the MON
+> number again, and none reads bytes back into the process.** So on the CLASSIC engine the inbound
+> half of `DVIO` is SINTRAN's ordinary answer write-back, not a microcode obligation. **Still
+> `[OPEN]` for the B30** — `CALL_5_MATCH 013667B` is a different routine in a different store and
+> has not been walked. Do not carry the classic verdict across; that is the same
+> one-store-answers-for-the-other error the addresses table warns about.
 
 **`512B` `A5XMSG` — our obligation is the same copy; the complexity is SINTRAN's, not ours.**
 `142053` dispatches a **32-way function switch** on `N5XFU` (`LFGET`/`LFREL`/`LFSND`/`LFRCV`/…),
