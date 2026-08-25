@@ -139,6 +139,44 @@ the three separate subsystems the 14/9/14 call counts imply.
 
 ---
 
+## 1c. THERE ARE TWO LEDs, AND ONLY ONE OF THEM NEEDS A DESCRIPTION FILE
+
+**A domain reaches SINTRAN in one of two shapes, and the difference decides whether
+`PLACE-DOMAIN` touches a description file at all.** Classified by listing every program's
+`files/` folder — what it actually ships, not what a guide says:
+
+| program | ships | description file needed |
+|---|---|---|
+| all eleven others (CPU-STAT, CONVERT-DOM-A03, LINKER-B01, NC-A06, TEST-REAL, …) | exactly one self-contained `.DOM` | **no** |
+| **LED-FORTRAN-A01** | `LED-FORTRAN-A01.DOM` (1,302,269 B), single file | **no** |
+| **LED-NEW** | `LED-NEW.DOM` (625,949 B) **plus** `LED-B03.PSEG` (223,695 B) + `LED-B03.DSEG` (394,525 B) + the `LED-DEBUGGER-B03` pair | the `:PSEG`/`:DSEG` route does |
+
+**`LED-B03` exists ONLY as a `PSEG`/`DSEG` pair, under `LED-NEW`.** It is a description-file
+domain by construction — the registry holds the entry and the segment names, and on the
+distribution media those names are written as **absolute volume references**:
+`(211160B03-XX-01D:FLOPPY-USER)LED-B03PSEG`. Measured 2026-08-25 by dumping the pack's own
+`(SYSTEM)DESCRIPTION-FILE:DESC` (22528 B): the prefix appears at offsets `0x000800`, `0x004004`
+and `0x0040C4`. **Copying the segments onto the pack cannot fix that** — the name resolves to a
+volume and a user, not to a file.
+
+**`LED-FORTRAN-A01` is the row in this file's tables** (35 distinct MONs, 20 new, the
+`511B/512B/513B` family) and **the "led" in Ronny's `LED → CONVERT → LINKER → NC` order.** It is
+one self-contained `.DOM`, so it should place the same way CPU-STAT does, with no description
+file, no segment registry and no volume prefix anywhere in the path.
+
+**`[OPEN]` — whether `LED-FORTRAN-A01.DOM` is installed on the working pack image.** The pack
+carries `SYSTEM/LED-B03` ×2 and `SYSTEM/CPU-STAT`, so LED-B03 was put there deliberately and
+LED-FORTRAN-A01 may simply be absent. Source file:
+`E:\Dev\Ronny\NDInsight\SINTRAN\ND500-APPS\LED-FORTRAN-A01\files\LED-FORTRAN-A01.DOM`.
+
+> **METHOD NOTE — a control run must exercise the mechanism it claims to test.** A CPU-STAT run
+> was used as the control for "did mounting the floppy break description-file lookup?" and
+> **could not answer it**: CPU-STAT is a self-contained `.DOM` and never opens a description file.
+> It passed, which tests only that the mount does not break the ND-500 lane generally. Same shape
+> as every other false negative in this file — **the instrument could not have shown the thing it
+> was pointed at**, and a pass read exactly like a healthy subject. Check that the control TOUCHES
+> the mechanism before reading its result.
+
 ## 2. NEXT-PROGRAM ORDER — cheapest first
 
 "NEW" = MON numbers this program uses that **CPU-STAT never exercised**, so they have never been
