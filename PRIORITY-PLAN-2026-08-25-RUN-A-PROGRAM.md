@@ -519,7 +519,33 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       pass through 145111-145144 (the FIFO insert) *after* being served? If so, that is the defect
       and it is upstream of everything else.
       **Do NOT "fix" 145047 to stop stripping, nor make the drain re-pack** — both paper over the
-      step without explaining the queueing, and one changes real SINTRAN behaviour.
+      step without explaining the queueing, and one changes real SINTRAN behaviour. (Ronny's
+      standing rule: the CPU must behave identically for all programs, or it is an ape hack.)
+
+      **THE DRAIN IS GUARDED — a stale FIFO entry ALONE cannot cause this.** Full loop,
+      `MP-P2-N500.NPL:1031-1059`:
+      ```
+      135747  SWPD4: PSWWAIT; X:=SWMSG; CALL WN5STATUS  ; mark swapper free
+      135764  WHILE A><D                                ; X5SWH != X5SWF, entries present
+      136015     IF A/\160000><0 GO EMPTY               ; power-fail bits -> refuse, pointer NOT advanced
+      136017     *AAX X5SWH ; NHENT; *STATX             ; CONSUME entry (advance fetch ptr)
+      136027     IF A=SWPWAIT THEN ... CALL 5ACTSWAPPER ; the unpacked activation
+      136047  OD                                        ; not SWPWAIT -> entry dropped, next
+      ```
+      `SWPWAIT` is stamped only by `5ACTSWAPPER`'s entry (144775); a **served** message is moved to
+      `SWPPING` (145022). So an already-served block reads `SWPPING` at the drain and is **skipped,
+      not activated**.
+
+      **SHARPER PREDICTION for the per-call `TRAPN` trace:** the failing activation requires our
+      block to reach `5ACTSWAPPER` a **second time AND be re-stamped `SWPWAIT`** — not merely to
+      leave a stale FIFO slot. If the trace shows the failing activation with **no** second
+      `SWPWAIT` stamp, the drain is NOT the route and the step-3 reading is wrong.
+
+      **ALSO CAPTURE: the queued message's RAW, UNMASKED `N5STA`.** Two guards disagree about the
+      high bits — `136015` refuses to serve if any of `0o160000` is set (and does **not** advance
+      the pointer, so that entry blocks the queue head indefinitely), while `135575` in `LNEWSWAP`
+      does `IF A/\17777=SWPPING`, i.e. real SINTRAN *expects* power bits and masks them off. Stray
+      high bits from our side would trip `136015` while looking correct to any masked dump.
 
       **THIS RETIRES THE STALE-`0o10` QUESTION AS PRIMARY.** With the reason packed correctly the
       swapper runs idx 10, which reaches no paging primitive and no MON 377B anyway — consistent
