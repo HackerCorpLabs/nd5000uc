@@ -907,9 +907,48 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         the earlier healthy-neighbourhood reading `0x40xx = PS_ASI`, `0x016C = PS_AZI`. The
         "initial → set bit 14 → decrement" shape is therefore likely **low half then high half of
         one entry**, not three writes to one cell.
-      `[OPEN]` — that manual is **ND-5000**; the **classic ND-500** PST entry width is unverified and
-      there is no classic microcode oracle. Write *granularity* is halfword either way; it is the
-      **entry stride** that is in question.
+      **CORRECTED by the peer: the 4-byte format is the ND-5000 arm and does NOT apply here.**
+      `ReadPstEntry` is explicit — `ClassicHalfwordTables → ReadPhysical16(PSTP + psn*2)`, else
+      `ReadPhysical32(PSTP + psn*4)`. **Classic is stride 2**, so the `11-17` numbering stands and
+      "PST entry 11 is zero" really was entry 11. **The bit-14 half survives:** classic decodes
+      `mode` in bits 15-14, `page` in bits 13-0, so `0x4000` = access mode 1 = `PS_ASI` — an access
+      field, **not** a commit flag. The "two-step commit" reading is withdrawn.
+
+- [ ] **1.28 THE END STATE IS A DEADLOCK — AND THE PARK ITSELF IS NORMAL.** `[V]`
+      Measured (gate5r, 25-min budget): `#8466 MON 377B argc=4 X5CPU=0` → `#8467 CONTEXT SAVE
+      X5CPU=0 (monitor-call stop)` → **no restart, ever**. 134,748 MPM writes; the last 400 are all
+      **T16**, alternating `0x2098`/`0x0480` at `@0x420EFE` = halfword `0o147` **`PLINK`** (backward
+      queue link), with `0x2098` as a word address = byte `0x424130` = the **TIMEOUT block**. So
+      SINTRAN cycles the process on/off the timeout queue alone while the ND-500 sits parked.
+      1053 faults in ~10 min, then **one** in the remaining 18 — stopped, not slow.
+
+      **THERE IS A WATCHDOG RESCUE, AND ITS GATE EXPLAINS THE SILENCE.** `5TMR3`,
+      `RP-P2-N500.NPL:353-387`: `IF A=PSW1WAIT THEN … EESWPUSER: X:=SWMSG; A:=0; CALL EMONICO`
+      (*restart swapper with error return*) `; CALL ACTRDY`. **Gated on `SWMSG` status =
+      `PSW1WAIT` (`PSW1W = 0o15 = 13`).** At the deadlock the status is **`PSWWAIT` (7)** — set by
+      `SWPD4` two instructions before the drain. **The watchdog never looks at state 7, deliberately:
+      `PSWWAIT` means *free*, not *stuck*.**
+
+      **⇒ THE PARK IS THE MACHINE'S IDLE STATE, NOT A HANG.** `EMPTY` deliberately does not answer;
+      `SWPD4` marks the swapper free; the outstanding `LNEWSWAP` is answered later by
+      `5ACTSWAPPER`'s serve branch (`SWPST`, `NUMPA:=6`, `MICFU:=3MONCO`, `MCCO`). **So the failure
+      is not "nothing wakes the swapper" — it is "no new work ever arrives."**
+
+      **THE MISSING HALF IS THE DOMAIN.** Every quoted event is `X5CPU=0`. If cpu-stat is parked on a
+      page fault, that fault reaches `TRAPDECODER` → `5ACTSWAPPER`, and with the swapper `PSWWAIT`
+      it takes the **serve** branch immediately — no queue, no drain. Nothing found so far blocks
+      that path. So either the domain is **not faulting** (parked on something else) or its fault is
+      **not reaching `TRAPDECODER`**.
+      **Measure, in this order:** (1) **the last `X5CPU=1` event and its stop reason** — likely ends
+      it; (2) `X5SWH`/`X5SWF` — but note equal pointers are **consistent with correct behaviour**
+      here, since an arriving fault bypasses the queue via the serve branch, so they cannot
+      incriminate alone; (3) confirm the final `SWMSG` status really is `0007` and not `000D` — if
+      `000D`, the watchdog *should* have fired and the question becomes why `5TMR3` did not run.
+
+- [x] **1.29 The `0x203` question answered — benign.** cpu-stat probes memory by **doubling** its
+      `GSWSP` request: `0x20801`, `0x40801`, `0x80801`, `0x100801` all succeed (segments 2,3,4,5);
+      `0x200801` (~2 MB) returns `K=1 FUNCV=0x203`. **The only `K=1` in 8470 exchanges** — a sizing
+      probe finding its ceiling, i.e. a program measuring the machine, not failing on it.
 
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
