@@ -701,6 +701,49 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       hit head-on.** Checkable in the existing trail: an answer with **no preceding T16 write of
       `NUMPA`/fn**, or an `N5STA:=MSGN500` / `3MONCO` stamp no T16 code produced.
 
+- [x] **1.18 MEASURED: the write-back masks behave EXACTLY as carved — and our side did NOT answer.**
+      `NUMPA @0x420D44` T16 writes: `#168 = 6` (5ACTSWAPPER, params 2&3 → **fresh fn code**, the
+      idx-10 dispatch), `#272 = 0`, `#362 = 0` (MONICO, nothing written). `MICFU` T16 stamps pair
+      up 1:1: `(#176 3MONCO, #192 3START)`, `(#274, #282)`, `(#364, #372)`. **Three answers, three
+      restart stamps, three mask writes.**
+      **My `[HYPOTHESIS]` that our side answered is REFUTED — all of it is T16 (real SINTRAN).**
+      *Attribution caveat, stated by the peer and adopted:* T17 is the ND-500 side, which is **both**
+      the real swapper **and** our servicer, so thread alone does not separate them. Checked, not
+      assumed: our code writes `SWPST`/`SWPFU` **nowhere** (only a comment at
+      `Nd500MicrocodeServicer.cs:277` saying nothing here ever writes that word).
+
+- [x] **1.19 STEP 5 IS LEGITIMATE — the zero-mask answers are disc-transfer completions.** `[V]`
+      They come from **`5RDTRANSFER` @136245** (*"Return after disc-transfer"*):
+      `136261 X:=SWMSG; CALL OKMONICO % Transfer ok` / `136264 ... EMONICO % Error in transfer`.
+      That completes the swapper's own `LSWPAGE` (SWPFU=2) requests — #210 and #300. Answering
+      "your transfer finished" with a **zero** write-back mask is correct: no work is being handed
+      over, so no fn code should be written. **The fn cell is not supposed to change there.**
+      (`SSWPFREE`, the other `X:=SWMSG; CALL OKMONICO`, is reachable only from `LDATREADY`
+      (SWPFU=5) @136354 or by fall-through from `INLDATREADY`; SWPFU never shows 5, so that path
+      did not run.)
+
+- [ ] **1.20 THE END OF THE TRAIL: SINTRAN NEVER RESTARTED THE SWAPPER, AND IT RAN ANYWAY.**
+      After `#372` there is **not one further T16 `MICFU` stamp and not one further T16 `NUMPA`
+      write.** Yet:
+      ```
+      #390 [T17] SWPFU=0x0001   swapper asks LNEWSWAP   (last SINTRAN answer was #362/#372)
+      #428 [T16] status=0x0007  PSWWAIT -> SWPD4: mark free, drain...
+                                ...drain finds nothing -> EMPTY @136050 -> NO answer, no stamp
+      #452 [T17] SWPFU=0x0001   the swapper asks AGAIN
+      #460 [T17] SWPST=0x0437   reports 0o2067
+      ```
+      On the real machine that `LNEWSWAP` should have stayed **outstanding** and the swapper should
+      have **blocked** until a genuine dispatch arrived. Instead it resumed with a stale fn cell and
+      dispatched idx 0.
+      **⇒ The "who answered" question survives in a SHARPER form: not who wrote `SWPST`, but WHO
+      RESUMED THE ND-500.** Candidate: **`#416/417 [T17] N5STA := 0x0003 (ANSWER)` on SWMSG**,
+      sitting between the unanswered request (#390) and the swapper running again (#452). Resuming
+      the swapper needs neither `SWPST` nor `SWPFU` — it needs `N5STA` and the activate path, which
+      **our servicer does drive**.
+      **FREE CHECK (no new window):** in the span #390→#452, is SINTRAN's *only* action the
+      `PSWWAIT` at #428? If so, whatever set `N5STA:=ANSWER` at #416 was not SINTRAN.
+      `[HYPOTHESIS]` that #416 is our servicer — the servicer's `N5STA` path is **not yet read**.
+
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,
       4=LALLOPAGE, 5=LDATREADY, 6=LCLTSB). The measured `0x0002,0x0002,0x0001,0x0001` is the
