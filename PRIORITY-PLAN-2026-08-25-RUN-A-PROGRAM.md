@@ -785,8 +785,35 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       (written at 004006; message-offset table line 990). Establish the arm before reading those two
       words.
 
-      `[HYPOTHESIS]` (peer's, adopted): the CPU was never parked on the 4th MON 377B — the only
-      remaining actor. Park site and `stopMode` across cycles **not yet measured**.
+- [x] **1.22 ROOT CAUSE FOUND AND FIXED (peer) — the trap-continue fast path un-parked the WRONG
+      PROCESS.** The bridge resumed whichever process the CPU happened to hold, without checking
+      `X5CPU`: SINTRAN's `3TRACO` for the **DOMAIN** (`X5CPU=1`) was resuming the **SWAPPER**
+      (`X5CPU=0`). Guarded on `ReadMessageX5Cpu(msg) == _loadedX5Cpu`, falling through to the real
+      context switch otherwise.
+      **Result: `0o2067` gone entirely (2 → 0), swapper cycles 4 → 128, SINTRAN restart stamps
+      12 → 256, regression 0 failed / 2184 passed.**
+      This is exactly *"the completion the swapper acted on was not one real SINTRAN gave it"* — the
+      project's top rule — and it explains the unparked 4th cycle **without any of the mechanisms
+      chased across items 1.7–1.21**. (Peer also caught their own regression on the way:
+      `_loadedX5Cpu >= 0` treated **unknown** as **different**, breaking
+      `SamsonTrapContinue_OnParkedProcess_ResumesInPlace_NoStaleReload`. Fixed and re-verified.)
+
+- [x] **1.23 RETRACTED — the `CNTXTSAVE` polarity is NOT our defect.** `SRF11` appears **zero
+      times** in the classic lane; `SaveProcessContextBlock` is called **unconditionally**; the
+      bridge already records CNTXTSAVE-on-stop as an acknowledged gap (R2-5). There is no gate to
+      invert. Worth having flagged fast, now closed.
+      **The doc contradiction itself resolves 2-vs-1** — see the note in
+      `microcode\MAILBOX-MICROCODE-PSEUDOCODE.md` §1.2: five ND5000 test comments agree with §1.2's
+      flag reading (negative = no process = nothing to save = **skip**), so the **gate line** is the
+      outlier and the real microcode is very likely `if (SRF11 >= 0) CNTXTSAVE()`. `[D]`, not
+      executed. *If verifying by execution, watch the **writes**, not the pass — a save over an
+      empty context block may be harmless and both polarities would go green.*
+
+- [ ] **1.24 NEXT BLOCKER: no page is ever copied in.** `RESIWR` total still **44**; cpu-stat still
+      does not print. With the reason path now healthy, the question is whether **idx 8**
+      ("connect/page-in a segment", reaches `RPHS`) or **idx 9** ("allocate+link") is ever
+      dispatched — idx 10 reaches no paging primitive at all. If not, what does SINTRAN require
+      before it will ask for one? NPL/pseg carve, no tree needed.
 
 - [x] **1.17 The 4-cycles-against-1-reason count is EXPLAINED, no defect.** `SWPFU` is the
       **swapper's own request code** (`SWPDECODER` GOSW: 1=LNEWSWAP, 2=LSWPAGE, 3=LPRSUSPEND,

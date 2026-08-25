@@ -110,8 +110,24 @@ then read/write that SRF cell. All addresses below are [V] from the `ADR_*` bodi
   > tests the flags left by the PREVIOUS word. A rendering that ignores it comes out shifted by one
   > and still looks plausible (the same trap that got `SCAN_ACCP` bit 5 backwards).
   >
-  > **Settle it by EXECUTING, not reasoning:** set `SRF11` positive, run `MSG_END` from `017412` on
-  > the microword CPU, observe whether `CNTXTSAVE` runs; repeat negative. Third site worth
+  > **RESOLVED 2-vs-1 (2026-08-25) — the GATE LINE is the outlier, not the flag reading.**
+  > A third witness turned up: the ND5000 test suite sets this flag in **five** places, all with
+  > the same comment —
+  > ```
+  > Srf[0x40B] = 0xFFFFFFFF;   // SRF11 = no current process (skip CNTXTSAVE)
+  > ```
+  > (`MailboxStartTests.cs:92,155`, `MicrocodeReplaySpecMeasurementTests.cs:259`,
+  > `Nd5000MonCallMessageBuildTests.cs:299`, `Nd5000MonServiceLoopTests.cs:429`; and
+  > `MicrocodeStartupStateProbeTests.cs:314` labels `0x40B` "SRF11 current-process (SRF 0o2013)".)
+  >
+  > §1.2's reading and those five comments **agree**: sign set = no current process = **nothing to
+  > save** = skip. Only the gate line disagrees, and it would mean "save the context of the process
+  > that does not exist". **So the real microcode is very likely `if (SRF11 >= 0) CNTXTSAVE()`** —
+  > save when a process IS current. Graded `[D]`; not executed.
+  >
+  > **If you do verify by execution, watch the WRITES, not the pass.** A context save over an
+  > empty/unused context block may be harmless, so both polarities can go green and prove nothing.
+  > The informative probe is whether `CNTXTSAVE` **writes** the context block. Third site worth
   > comparing: `MSG_IDLE` (MICFU 47, `015324`), "CNTXTSAVE if needed".
 - `SRF14`, `SRF15` — context/domain values consumed by MSG_UNIX5RE and MSG_HISTOG [?]
 - `SRF17` — saved SC-state in MSG_CLEAR / context code [?]
