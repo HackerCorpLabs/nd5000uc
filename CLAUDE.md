@@ -19,6 +19,14 @@
   is `[V]` at that doc's line 1093: `COND,MSGN` **`INVSEQ=1`** → save when `SRF11` is **non-negative**
   (a process IS loaded). A pseudocode/rendered decode drops things — `INVSEQ`, the one-word condition
   delay, MARG-vs-ORCON — and each dropped thing reads fluently and wrong.
+  **`S3SM5` IS DISASSEMBLED — never park a question as "that lives in S3SM5, we can't see it"** (done
+  3× on 2026-08-25). The NPL *source* is absent; the *code* is not:
+  `E:\Dev\Ronny\NDInsight\tools\sintran-segment-carver\versions\L-VSX-500\re\030-S3SM5.dis` (1.53 MB)
+  + `030-S3SM5-routine-map.md` + `ND500-SYSTEM-MONITOR\FUNCS-BODIES\` — **all ~60 FUNCS routine
+  bodies, byte-verified, base `40000B`, ~11,000 lines.** That is where `MEMNAVAILABLE`, the
+  `SWFUN`/`3SWMESS` stamp and the PST accessors live — e.g. **`073 RPHSG`** "read from a physical
+  segment" @166537 and **`110 WPHSG`** "write into a physical segment" @167550, which connect the
+  swapper's `RPHS` to MICFU `30B/31B` (`3PHSR`/`3PHSW`).
 - **THE GOAL: run real ND-500/ND-5000 programs under REAL SINTRAN, with MON calls FORWARDED over the
   bus/octobus.** A run where our C# `SintranEmulation` answers the MON calls **DOES NOT COUNT** and
   must never be reported as progress toward it (this happened 2026-08-24). Before believing any
