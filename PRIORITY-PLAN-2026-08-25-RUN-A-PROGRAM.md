@@ -309,6 +309,45 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       Still `[OPEN]`: who sets `+5` (never written in the swapper PSEG). Measured values differ per
       entry — `10:0x40, 11:0x80, 12:0x00` — so whoever writes it distinguishes these three
       segments, and our fault is against the `0x80` one. That is an ND-100-side carve.
+
+- [ ] **1.8 ROOT CAUSE FOUND — we never write message offsets `0o7`/`0o10` (the N500A pair).**
+      `[V]` by live PC probe (peer) + `[V]` classic-microcode carve (this session). **This
+      supersedes 1.7's candidate list: the emitter is settled.**
+      A frame probe armed on all nine `0o2067` emitters caught exactly ONE firing, twice:
+      `PC=0x080057E7 = 1000053747`, idx 0's worker, operands `I1=0x0800` vs bound `I2=0x1E0`(480).
+      `r.20` is message halfword `0o10` = **N500A_LO**, which the swapper range-checks as a segment
+      number. Confirmed twice independently (probe operands + the spine dump): after `run` it holds
+      `0x0800`; after `start-swapper` `0x0019`(25, in range); after `place-domain` `0x0000`(<7).
+      **Every trap-record field we DO write is correct** (STOPR=2, MSWMC, TRAPN=0o46, LA, phys
+      seg=11, MMS) — `AnswerTrapStop` covers `0o11..0o23` and never touches `0o7`/`0o10`.
+
+      **The classic microcode DOES write them, and it is the FIRST thing it writes.** Carved from
+      `E:\Dev\Ronny\ND500UC\docs\MC\CONT-STORE-10611.DATA` (8192 × 18-byte words):
+      ```
+      011271  A+B SARG=0o7 B,AM#12 D,AL#20 JSR 007540  ; MAR := message base + 7
+      011272  SARG=0o2 D,AM#20        JSR 007550       ; halfword 2 -> offset 0o7
+      011274  SARG=0o224 D,AM#25      JSR 011527       ; FETCH ND-500 mem [AM#23+0o224] -> AM#20
+      011275  SARG=0o3 D,AL#25        JSR 007546       ; 32-bit write -> offset 0o10-0o11
+      ```
+      So `0o7` gets a literal `2`, and **`0o10` gets a value FETCHED from ND-500 memory at
+      `AM#23 + 0o224`** — not a constant. Leaving it unwritten is why the swapper range-checks
+      stale memory (`0x0800`) as a segment number.
+
+      **The DMA convention, needed to read any microword-lane log** (`[V]` unless noted):
+      `007540` = **set MAR** from `AL#20` (TAG `0o201` MOST + `0o001` LS — not a data write);
+      `007546` = **32-bit** DMA write of `AM#20` (TAG `0o207` MOST, falls through into `007550`);
+      `007550` = **16-bit** DMA write of `AM#20` (TAG `0o007` LS only); `007564` = the shared
+      `W,IO` strobe + POPRET. TAG byte = bit 7 (`0o200`) MOST-half select | low 3 bits = TAG-OUT
+      code (0 rMAR, 1 wMAR, 6 DMA read, 7 DMA write) — matches the independently carved TAG-OUT
+      table, so the decode is cross-checked. **MAR auto-increments one ND-100 word per strobe**
+      `[D]`: `011271` loads it once and ~15 writes follow with no reload; `011274`'s subroutine
+      `011527` is a FETCH (`MEM,RD4` → `AM#20`, POPRET) and emits no writes, so the walk is clean.
+      SARG values spot-checked against the RAW 18-byte words per the project rule (`011271` CS0 low
+      half = `0x0007`; `007540` carries no SARG).
+
+      **NEXT:** run the microword lane (it executes this exact writer) and log every DMA write with
+      offset+value. Prediction to falsify: first two writes are offset `0o7` (16-bit, value 2) then
+      `0o10` (32-bit, fetched). Then make `AnswerTrapStop` write the pair.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
