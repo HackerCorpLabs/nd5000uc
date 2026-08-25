@@ -1260,6 +1260,63 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       since its heap is resident by the time the split runs. `[OPEN]`, and worth a targeted test
       rather than a code change on suspicion.
 
+- [x] **1.44 THE GOAL GATE IS ANSWERED: REAL SINTRAN ANSWERED ALL 46 MON CALLS.** `[V]`, peer's
+      attribution. `Nd500UCSintranBootTests.cs:1766` carries the guarantee in writing: *"This gate has
+      no SintranEmulation anywhere: attaching the bridge disables it outright."* Gate5R runs
+      `ND500UC_BOOT_REALCPU=1` against real SINTRAN booted from `BIGDISK0-L-JULY.IMG`; ND-100 side,
+      3022/5015, 5MPM mailbox, swapper, domain load and monitor calls all real — only the ND-500 CPU
+      is ours. Independent behavioural confirmation: **the output bytes reached the SINTRAN console**,
+      and our servicer does not write the terminal, so something on the ND-100 side executed the 504B
+      handler.
+
+- [ ] **1.45 IT DOES NOT PRINT. The next defect is the MON 504B buffer hand-off, and BOTH of us were
+      asking the wrong question about it.** Console after `run` is `  d d   nL     " \t  d...` —
+      **real bytes, wrong bytes.** (Peer's own correction, recorded: they led with "it prints" while
+      holding only MON-level evidence that the right text was in the program's buffer. One defect
+      fixed, the next exposed underneath it.)
+
+      **The contract is `[V]` and it has exactly TWO legal paths, chosen by a flag — not by an address
+      convention.** `MP-P2-N500.NPL:140656`:
+      ```
+      140656  IF MIFLAG NBIT WSMC THEN            % IS DATA-BUFFER IN COM-BUFFER? (BY MIC.PROG)
+      140661     T:=5MBBANK; 3RMED; *STATX XMICF  % NO, MIC.FUNC=READ DATA MEMORY
+      140675     *AAX ABUFA-N500A; LDDTX; AAX N100A-ABUFA; STDTX   % ND-100 PHYSICAL ADDR
+      ```
+      Symbols (`N500-SYMBOLS.SYMB`): **`WSMC = 0`** (bit 0), **`ABUFA = 140B`** (halfword),
+      **`MIFLA = 177770`** = halfword **−8**, i.e. MIFLAG sits BEFORE the message base,
+      **`3RMED = 10B`**. Same decision appears at `142301`, `143020`, `143173` and
+      `RP-P2-N500.NPL:130437`.
+      And `MON 504B = NOUTSTR` **is in the microcode's inline-copy set `{504B, 511B, 512B}`** —
+      deep-dive lines 2091/2423, `[V]` raw, `CALL_5XX 004013B → CALL_5_MATCH 013667B`: *"the microcode
+      copies the user's buffer into the communication buffer before it stops. The ND-100 then sees
+      `MIFLAG` bit `WSMC` set … and skips its own `3RMED` fetch. Buffer maximum 4000B bytes, addressed
+      through `ABUFA = 140B`."*
+
+      **So "does SINTRAN get a virtual or a physical address?" has a third answer: on the inline path
+      it gets neither — the BYTES are supposed to be in the message.**
+
+      **The peer's negative was a wrong-MICFU search.** They looked for RESIRD/RESIWR (13B/14B) near
+      the calls. The fetch is **`3RMED` = 10B = 8 decimal**, which our servicer **does** implement —
+      `Nd500MicrocodeServicer.cs:1029`, `N5MicroFunction.DataMemoryRead = 8`. So the absence of 13B/14B
+      says nothing at all about this path.
+
+      **My own near-miss, same shape, recorded because it nearly became a finding:** grepping RetroCore
+      for `3RMED` returned nothing and I almost reported "not implemented". It is named
+      `DataMemoryRead`. RULE #0b — the zero result was about my pattern, not the code.
+
+      **The question that actually decides it, and it is one trace read:** did this run take the
+      inline path or the `3RMED` path? `WSMC`/`MIFLAG` appear **nowhere** in `Emulated.HW` /
+      `Emulated.Machines` under those names, so our engine most likely never sets the bit and SINTRAN
+      took `3RMED` — in which case the garble is in how `DataMemoryRead` resolved arg[2]'s address
+      (`0x1000103A`, ND-500 **virtual**, segment 2) rather than in a copy that never happened.
+      `[OPEN]` until measured.
+
+      **Generation caveat, stated deliberately after being burned on one today:** `MP-P2-N500.NPL` is
+      the SINTRAN-side ND-500 message module and serves BOTH transports, so the WSMC/ABUFA/3RMED
+      decision is not 5000-specific. What IS 5000-specific is that the *microcode* performs the inline
+      copy. On the classic lane our engine plays the microcode's role — so the obligation to either
+      fill ABUFA and set WSMC, or answer 3RMED correctly, is ours either way.
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
