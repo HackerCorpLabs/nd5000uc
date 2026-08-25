@@ -86,8 +86,31 @@ Found by asking what jumps to the one handler whose address we knew: `grep ADDR=
 | `0o16`–`0o21` | `007654`–`57` | `011520/33/45/61` | | `0o31` PHYSWR | `007667` | `011453` |
 | `0o32`–`0o35` | `007670`–`73` | `010065/66/67/010132` | | | | |
 
-**`007740` is the illegal/unimplemented-MICFU catch-all** — slots `0o2`–`0o5`, `0o15`, `0o22`, `0o27`,
-`0o36`+ all point at it.
+**Table extent: `007636`–`007720`, indices `0o0`–`0o62`.** `007721` is live code again. **Third
+independent confirmation of the base:** index `0o44` (3RPREG, "read P register") is slot `007702` →
+`007721`, whose first word is literally `ALU,ADIR A,P D,DP`.
+
+**`007740` is the illegal/unimplemented-MICFU catch-all.**
+
+### ⚠️ THREE MICFUs OUR SERVICER IMPLEMENTS ARE **ILLEGAL** IN THE CLASSIC MICROCODE `[V]`
+
+| MICFU | our servicer | classic microcode |
+|---|---|---|
+| `0o5` `3SWMESS` | `case MessageToSwapper` | slot `007643` → **`007740` illegal** |
+| `0o22` `STARTP0` | `case StartProcessZero` | slot `007660` → **`007740` illegal** |
+| `0o27` `3FITRNSF` | `case FileTransfer` | slot `007665` → **`007740` illegal** |
+
+So on the classic lane **we are MORE permissive than the hardware** — the opposite direction from the
+DMEMRD bug. Real classic microcode would answer `5ERANSWER` to all three. (This matches the known
+generational note that the 5800 also routes `3SWMESS`/`3FITRNSF` to `MSG_ILLEG`.)
+
+**`[OPEN]` whether it matters:** harmless if SINTRAN never posts them on this lane — the classic
+bring-up uses MON-60 subfunctions `007B LDSWA` / `054B RUNSW`, not MICFU `0o22`. But if one IS posted,
+we would service something real hardware rejects, which could mask a wrong path rather than failing
+loudly. Worth a guard that logs when a classic-illegal MICFU is accepted.
+
+**Slots with real handlers we have not identified:** `0o6`→`010000`, `0o7`→`010004`,
+`0o32`→`010065`, `0o33`→`010066`, `0o42`→`010742`, `0o50`/`0o51`→`011604`.
 
 ### THE HANDLERS TRANSFER THE EXACT BYTE COUNT — 4/2/1 TAIL, NO ROUNDING `[V]`
 
