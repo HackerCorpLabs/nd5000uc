@@ -565,7 +565,28 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         `SWPFU=1` is the swapper asking for work, the second is at least as likely**, and it would
         mean `SWPST=0` is not evidence of a missing pack at all.
 
-      **NEXT INSTRUMENT: a WRITE-WATCH, not a sample.** A read-based sample at ND-500 call
+      **THE WRITE-WATCH ALREADY EXISTS — DO NOT BUILD ONE.** `MpmAccessTrace` + `TracingRam` are
+      hooked at the single backing store, so they see ND-100 CPU writes and our servicer's writes
+      alike, recording per entry: seq, R/W, physical byte address, value, width, **PC**, **thread
+      id**, I/D space. The boot test already arms it (`MpmTrace.SetCapacity(8192)`,
+      `CaptureReads=false`, `EnableWindow(...)`) behind `ND500UC_WATCH_MON422=1` — a gate that
+      simply was not set. The **thread id** is what separates SINTRAN's ND-100 writes from our
+      servicer's, i.e. it answers the `SWPST` reason-vs-status fork directly.
+
+      **WINDOW GEOMETRY — GET THIS RIGHT OR THE RUN PROVES NOTHING.** `SWPST` is **NOT in the
+      requester's block**: it is word offset `0o103` in **`SWMSG`**, written as
+      `X:=SWMSG; *AAX SWPST; STATX` (145054). Same for `SWPFU=0o101`, `HSWPI=0o104`,
+      `SWPIN=0o105`, and the `PSWWAIT` write at `SWPD4`. A window of `0x00420E30 +256` covers
+      **our block only** and would see **zero** `SWPST` writes — a scope-limited negative, not a
+      result. **Use base `0x00420D30`, length 512**: the two blocks are exactly `0x100` apart, so
+      that spans `SWMSG` (`0xD30..0xE2F`) and the requester block (`0xE30..0xF2F`) contiguously,
+      with every field well inside (`SWPIN=0o105` = byte 138).
+      Covered by our block alone: the `TRAPN` pack (`0o16`), the `SWPWA=5` stamp, the `N5STA`
+      transitions. Needs the widened window: the `SWPST` write's PC/thread, the `PSWWAIT=7` write
+      at `SWPD4` (turning the drain-loop timing from inference into a PC), and the `SWPFU`
+      handshake (`SWACTIVE=0` from SINTRAN @145011 vs `1` from the swapper).
+
+      ~~**NEXT INSTRUMENT: a WRITE-WATCH, not a sample.**~~ (superseded — it exists; see above) A read-based sample at ND-500 call
       boundaries cannot see the pack→strip transition (both happen inside one ND-100 activation
       with no ND-500 call between), and cannot tell which side wrote a cell. Record ND-100 **writes**
       to `TRAPN`, `N5STA` **and `SWPST`** with the writing PC — `SWPST` needs it as much as the
