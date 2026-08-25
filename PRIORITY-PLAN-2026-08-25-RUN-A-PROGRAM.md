@@ -945,6 +945,45 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       incriminate alone; (3) confirm the final `SWMSG` status really is `0007` and not `000D` — if
       `000D`, the watchdog *should* have fired and the question becomes why `5TMR3` did not run.
 
+- [ ] **1.30 THE DEADLOCK IS FULLY EXPLAINED: the page-in SUCCEEDS and the requester is never woken.**
+      `[V]` end to end. Measured final sequence: `#8458 TRAP 46B psn=11` → `#8461 RESTART SWPST=0x0A
+      DISP=0x0A` (5ACTSWAPPER **serve** branch, no queueing — as predicted for a `PSWWAIT` swapper)
+      → `#8462 MON 377B SWPFU=0x0002 (LSWPAGE)` for **segment 11, the correct psn** →
+      `#8465 RESTART K=0 SWPST=0x000B` (`5RDTRANSFER` "Transfer ok", zero mask) →
+      `#8466 LNEWSWAP` → `#8467 CONTEXT SAVE X5CPU=0`. **End of trail. `X5CPU=1` never restarted.**
+
+      **THE WAKE PATH EXISTS AND IS ON THE `SWPST == 0` ARM** — `MP-P2-N500.NPL:980-1006` (@135632),
+      commented *"Restart nd-500 proc."*:
+      ```
+      135636  3TRACO; *MICFU@3 STATX     ; MICFU := 3TRACO (if it was 3START)
+      135654  X:=CSWPM; CALL RN5STATUS   ; CSWPM = THE REQUESTER
+      135656  A/\160000\/MSGN500
+      135660  CALL WN5STATUS             ; requester N5STA := MSGN500(1)
+      135661  CALL XACTRDY
+      135664  IF A><B THEN … CALL XACT500 … FI
+      ```
+      **This is the ONLY path in `LNEWSWAP` that wakes an ND-500 requester after its page arrives.**
+      `SWPST = 0x000B ≠ 0` ⇒ `135550 IF A><0` takes the **ERROR** arm ⇒ that code never runs.
+
+      **AND THE ERROR ARM CANNOT WAKE A PAGE-FAULT REQUESTER EITHER.** `SPFLA = 0o143` is **a
+      continuation ROUTINE ADDRESS, not a flag** — `135165 IF A><0 THEN A=:P FI % GOTO ROUTINE ADDR
+      FOUND IN SPFLAG` (set by `LDATREADY` stashing `INLDATREADY` @136416, cleared @136431; same
+      idiom at `INCLCK`, `STTDRIV`). So: `SPFLA≠0` → `EMONICO` wakes the **ND-500** requester;
+      `SPFLA==0` → `SWPD1`→`SWPD2` → `5RRTWT` restarts the **ND-100** process. A page-fault requester
+      has no SINTRAN-side continuation, so `SPFLA==0` and **the domain is never touched.**
+
+      **⇒ THE DEFECT REDUCES TO ONE CELL: why is `SWPST` `0x0B` after a SUCCESSFUL `LSWPAGE`?**
+      `0x0B = 11` is **the faulting psn** — the same value in the `LSWPAGE` parameter block
+      (`[1] @0x080247AC = 0x0000000B`). The **segment number is sitting where SINTRAN reads an error
+      code** (`0` = OK). Note `5RDTRANSFER` answers via `OKMONICO` ⇒ `NUMPA:=0` ⇒ **nothing writes
+      `SWPST` on that path**, so whatever was last in it survives.
+      **Two readings, not chosen between:** (a) stale scratch surviving a zero-mask answer;
+      (b) the swapper genuinely reporting failure code 11.
+      **Discriminator, a lookup not a run:** find the write that put `0x0B` into `0x420DB6` and
+      compare its seq to `#8462`/`#8465` — before the transfer ⇒ (a), after ⇒ (b).
+      **Also check:** is `SWPST` **ever** written `0` by anyone on this lane? If not, the OK arm is
+      unreachable by construction and the domain could never be woken regardless of transfer success.
+
 - [x] **1.29 The `0x203` question answered — benign.** cpu-stat probes memory by **doubling** its
       `GSWSP` request: `0x20801`, `0x40801`, `0x80801`, `0x100801` all succeed (segments 2,3,4,5);
       `0x200801` (~2 MB) returns `K=1 FUNCV=0x203`. **The only `K=1` in 8470 exchanges** — a sizing
