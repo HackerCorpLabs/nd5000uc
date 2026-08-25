@@ -1476,6 +1476,59 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       `[V]` on all four bodies and on the `0`-sentinel semantics; `[OPEN]` on whether any has fired
       live. `Chain` is the cheapest to test and the most likely of the set to be firing in CPU-STAT.
 
+      **APPLIED 2026-08-25** — all seven landed (`Rett`, `Retk`, `Retb`, `Retbk`, `Entm`, `Chain`,
+      `Init`); `Entt` was fixed separately in the other lane. `Emulated.HW` builds clean, exit code 0.
+      **Not yet measured** — the suite could not run, see 1.51. Two decisions worth keeping:
+      - **A guard can CREATE a defect by skipping once-only work.** Measured next door: an ENTT guard
+        that returned before the status-bit clear left `STO` set, the trap re-raised on resume,
+        the re-dispatch overwrote `pcb.TrappingPC`, and RETT returned into the ENTT — a false ISE
+        (`TRAP 43B pc=0x08004161`). ND-05.009.4 §6.4: the causing bit is cleared **once**, at entry.
+        So every guard was checked against *"does bailing here skip something that must happen once
+        per TRAP rather than once per ATTEMPT?"* For `Rett` the answer inverts the fix: it must
+        **not** clear `InsideTrapHandler` or run `TrapSeqPop` on the abort path, because the retry
+        needs both or it fails RETT's own handler-context check. That contrast is now in the comment.
+      - **`Entm`'s TOS commit was GUARDED, not MOVED.** Relocating it beside B and L would assert TOS
+        is a terminal-microword effect the way L provably is (`ENTS_END` @004206). That is not carved,
+        so it stays put and a third guard does the work. Ordering never fixes this class anyway.
+
+- [ ] **1.50 ATTRIBUTION PROTOCOL + the guard-fire counter (agreed across both lanes).** Two sessions
+      changed the same engine within minutes, so a shared rule was set before either result was read:
+      **run 51 = the ABUFA inline-buffer change against the PRE-guard engine** (its testhost had
+      already loaded the old DLL, so the attribution is clean and it belongs to the other lane);
+      **run 52+ carries all nine changes** and nothing may be attributed to a single fix from it.
+
+      **The way out is not bisecting.** A guard is a *conditional early return* — it can only alter
+      behaviour on a path where `InstructionAborted` is already true at that point. So **a zero
+      guard-fire count across a run is PROOF the seven are inert for that run**, and everything
+      observed belongs to the other change. Exact, not plausible. One counter at the seven return
+      sites buys it.
+
+      **It also closes 1.49's `[OPEN]`, which shape cannot answer:** has any of these seven ever
+      fired live? Zero across a full boot ⇒ the sweep was latent-correctness work. **Non-zero on
+      `Chain` ⇒ a page fault has been surfacing as an ILLEGAL OPERAND VALUE all along**, which reads
+      as a bug in the guest program and would have survived indefinitely.
+
+      Terms: land it **after run 51 reports**, never mid-measurement; report it **whole-run, not a
+      ring** (every negative trusted today that came from a capped instrument has been wrong — see
+      1.49 and case 6 of `verify-provenance-not-plausibility`); and register it in `DIAGNOSTICS.md`
+      as a named switch. **Checked the existing switch list first and there is nothing for it** —
+      the project rule exists because the other lane built a duplicate MICFU tally today while
+      `MicfuHistogram()` already existed with a doc comment describing exactly what was wanted,
+      costing a build and a run.
+
+- [ ] **1.51 The ISE storm at `0x08004A28` was NOT a separate defect — retracted by the other lane.**
+      It was reported as possibly an independent fault in our ENT*/RET* sequence check. It went from
+      **355,193 events to zero on the ENTT fixes alone**, so it was entirely downstream of the ENTT
+      corruption. My `Entb.cs:169` "false ISE" lead pointed at the right *family*, but **nothing in
+      the sequence check itself needs changing on that evidence** — do not go looking for a second
+      bug there. Recorded because a retracted lead left lying around gets re-adopted.
+
+      **Suite still unrun for the seven guards**: the other lane's `testhost` (PID 39580, started
+      14:38:41) holds `Emulated.HW.dll`, and the copy into its test-project `bin` fails. It is not
+      my process and it is not being touched. Note for next time: **that session reported ITSELF as
+      idle at 14:40 while its test run was still executing** — "the session finished its turn" and
+      "the run finished" are different facts, and only the process list settles the second one.
+
       **Final tally for the whole family — 10 safe, 8 unsafe:**
       SAFE = `Call`, `Callg`, `Ret`, `Ents`, `Entsn`, `Entb`, `Entf`, `Entfn` (guard present);
       `Retd`, `Entd` (no memory access, nothing to guard).
