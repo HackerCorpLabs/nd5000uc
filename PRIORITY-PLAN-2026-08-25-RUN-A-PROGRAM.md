@@ -1317,6 +1317,26 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       copy. On the classic lane our engine plays the microcode's role — so the obligation to either
       fill ABUFA and set WSMC, or answer 3RMED correctly, is ours either way.
 
+- [ ] **1.46 THE ONE REGRESSION, PREDICTED: `ENTT_InTrapContext_PerSpec` line 1889.** Suite came back
+      **1 failed / 2183 passed / 13 skipped** against a 0/2184/13 baseline, name swallowed by `-v q`.
+      Prediction `[D]`, from reading both sides:
+      `Emulated.Tests.ND500\Instructions\TestND500_SpecBasedTests.cs:1802` asserts
+      `arg4 (B+32) == initialB (0x3000)` — but it **never calls `InvokeTrapHandler`**; it fakes the
+      trap by hand-setting `pcb.InsideTrapHandler/PendingTrapNumber/TrappingPC` and `regs.B`. Since
+      `Entt.cs:114` now reads `savedB = pcb.PreTrapB`, which was never captured on that fresh PCB,
+      arg4 comes out 0. **Same weakness as the ENTM argument: the `PreTrap*` triple only exists when
+      something dispatched a trap** — the fix depends on a code path instead of on the instruction
+      being correct in isolation.
+
+      **The ordering fix clears both, and it was checked rather than assumed:**
+      `regs.B = trapFrameBase` at `Entt.cs:139` is the **only** early mutation (`TOS` is Step 5, `L`
+      later still), and **every one of the ~40 frame writes addresses `trapFrameBase` directly**
+      (lines 143-218 plus the arg41-50 zero loop) — **not one uses `regs.B`**. So move line 139 down
+      beside the `TOS`/`L` assignments and read `savedB`/`savedL`/`savedTOS` live again: on a restart
+      all three still hold pre-trap values, the instruction is restartable **with no `PreTrap*` at
+      all**, the test goes green unchanged, and the same shape fixes ENTM where `PreTrapB` cannot
+      reach. Peer's before/after harness proves equivalence in one run.
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
