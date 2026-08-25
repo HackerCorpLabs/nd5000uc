@@ -1036,8 +1036,20 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       - **`w1 getb r1` @`0x08004149` takes a buddy ORDER, not a byte count.** The allocator
         @`0x080040F1` computes `n = (size+3)>>2` (words, rounded up; the `shl $0x3E` is a 6-bit
         signed −2, i.e. `>>2`), then `dconv → d4 alog2 → d1 int → d4 comp → +1.0 if inexact →
-        d byconv`, and passes that byte to GETB. If our GETB reads the operand as a size, it hunts a
-        bucket that can never be satisfied and the heap grows forever.
+        d byconv`, and passes that byte to GETB.
+      - **REFUTED, mine, withdrawn same round: "our GETB might read the operand as a size."** It does
+        not. `Getb.cs` reads `DataType.BY` into `logSize` and calls `AllocateHeapBlock(logSize)`, and
+        `Instructionset.BuddySystem.cs` uses MAXL@TOS+0 / STAH@+4 / ENDH@+8 / FLOG[n]@+12+4n — the
+        SAME layout the program builds, since it sets `tos := $0x08000C94` (a literal, encoding `CF`,
+        not a memory read) and builds its lists at `$0x08000CA0` = TOS+12. **The buddy-layout
+        question is closed**; the ND-500 Reference §4.1.5 second-reader offer is moot.
+      - **REFUTED before it was ever raised: I/D-space aliasing on the heap descriptor.** This DOM
+        has program AND data both at virtual 0, so `0x08000C94` is numerically inside routine
+        `0x08000BFE`. If the descriptor were read from I-space, MAXL would be the instruction bytes
+        there — `FF C7 00 0C` = `0xFFC7000C` — and that huge MAXL makes `logSize > maxL` never trap
+        and sends `AllocateHeapBlock`'s `for (cur = order+1; cur <= maxL; cur++)` into billions of
+        reads: a dead hang, not 61 instructions retired per cycle. **Ruled out by computing what it
+        would produce, not by assuming it was fine.**
       - **That order is decided in FLOATING POINT, in a family with a live defect.** One ulp in
         `alog2`/`int` gives an order one too small. EXP's final `2^k` scale is still one power of two
         short (`FWRITE_X` @027451, SC2 @025703) and `INTRF_U`'s rounding was fixed only 2026-08-04.
@@ -1047,10 +1059,13 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         encoding. Corroborated only by the same literal appearing at `0x080040C8` (`d add2 b.0x1C`)
         where the context is also "step the order by one".
 
-      Peer holds the live lane (a per-GETB trace of TOS/MAXL/STAH/ENDH plus every non-empty FLOG
-      entry). Open for me only if the program's own free-list build at `0x08004050..0x08004091`
-      disagrees with the manual's buddy layout — then read ND-500 Reference §4.1.5 / §3.3 on FLOG
-      stride as a second reader.
+      **Two candidates left, both visible in one run of the peer's heap log:**
+      1. The ORDER computation — three float instructions decide a small integer, and `d byconv`
+         (double → byte) belongs on the suspect list next to `alog2` and `int`. The log prints
+         `want=2^N`, and **N is the whole answer**: for the 108-byte month array n = 27 words, so the
+         correct N is **5**. Anything much larger means stop looking at the free lists.
+      2. The program's own list build at `0x08004050..0x08004091` genuinely not linking anything —
+         which the `FLOG:` dump separates from "grew but still trapped" directly.
 
 - [x] **1.33b The PC → routine → MON lookup table for CPU-STAT.** `[V]`
       `E:\Dev\Ronny\ND5000UC\docs\CPU-STAT-PC-ADDRESS-MAP-2026-08-25.md` (commit `5b16f7f`). All 78
