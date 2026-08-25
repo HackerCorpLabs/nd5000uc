@@ -98,10 +98,98 @@ LINKER-B01 is the program that currently fails** (`nd500-apps` skill: *"the link
 LINKER-B01 never prints its ND LINKER banner"*). Whether the two facts are connected is `[OPEN]` —
 this file does not claim it — but it is the first thing to check on that program.
 
-`[OPEN]`: whether 513B belongs to the inline-copy family. The microcode set carved so far is
-`{504B, 511B, 512B}` (`CALL_5XX 004013B → CALL_5_MATCH 013667B`). **513B was not in it.** Do not
-assume it behaves like its neighbours because its number is adjacent — that is exactly the
-adjacency-is-not-dispatch error. Carve `CALL_5_MATCH` before implementing anything for it.
+> **UPDATE 2026-08-25 — a candidate, with the boundary stated.** `513B`'s buffer path posts a
+> **DMEMRD** (see the resolved `[OPEN]` below), and classic `DMEMRD` was **unimplemented until
+> 2026-08-25** — it answered `5ERANSWER` to every request and was the root cause of LED's MON 50B
+> stall. LINKER-B01 uses `513B` **fourteen times**, the most in the corpus.
+>
+> **BUT THE KNOWN LINKER FAILURE IS ON A DIFFERENT LANE.** That symptom was recorded against the
+> RetroCore **standalone DOM runner** (the `SintranEmulation` path, during the byte-exact compile
+> work), **not** the Gate5R real-SINTRAN lane where `DMEMRD` lives. So this does **not** explain the
+> recorded failure, and must not be written up as if it did.
+>
+> What it does mean: **when LINKER-B01 is first run on the Gate5R lane, the fixed `DMEMRD` removes
+> the one blocker we know it would otherwise have hit fourteen times.** Whether its standalone-lane
+> failure has the same cause is still `[OPEN]`, and the two lanes must be compared, not conflated.
+
+### THE WHOLE `5xx` FAMILY DECODED — SINTRAN's level-12 dispatch table `[V]`
+
+`MP-P2-N500.NPL:137332-137365`. `SYMBOL L12MIN=500`, `SYMBOL L12MAX=523`, dispatch
+`5CMNO-L12MIN GOSW` over 20 entries. **Every MON in `500B`–`523B` maps to a named handler:**
+
+| MON | handler | MON | handler |
+|---|---|---|---|
+| `500B` | `STAPROC` | `512B` | `A5XMSG` — XMSGCallA |
+| `501B` | `NSTOPROC` | `513B` | `B5XMSG` — XMSGCallB |
+| `502B` | `SWITPROC` | `514B` | `M5TMOUT` — ND500TimeOut |
+| `503B` | `NINSTR` | `515B` | `5MTRANS` |
+| **`504B`** | **`NOUTSTR`** — OutputString | `516B` | `M516` — patch stub |
+| **`505B`** | **`GERRC`** — GetTrapReason | `517B` | `M517` — patch stub |
+| `506B` | `5SIBMO` | `520B` | `M520` — patch stub |
+| `507B` | `SPRIO` | `521B` | `M521` — patch stub |
+| `510B` | `SWMC` | `522B` | `M522` — patch stub |
+| **`511B`** | **`DVIO`** | `523B` | `M523` — patch stub |
+
+**Confirmed five independent ways** against the per-call specs: `504B` = OutputString = `NOUTSTR`,
+`505B` = GetTrapReason = `GERRC`, `511B` = DVIO = `DVIO`, `512B`/`513B` = XMSGCallA/B =
+`A5XMSG`/`B5XMSG`, `514B` = ND500TimeOut = `M5TMOUT`. The alignment is exact at both ends
+(`L12MIN`=500B at index 0, `L12MAX`=523B at index 19).
+
+**`516B`–`523B` are unimplemented patch stubs** — `M516: GO NORMMC; 0/\0` and friends at `137451+`,
+described in the source as *"ENTRIES FOR PATCHING IN ADDRS TO NEW DRIVER-LEVEL MONITOR CALLS"*. If a
+program calls one, it falls through to `NORMMC`, i.e. the ordinary system-monitor path.
+
+### CONVERT-DOM adds `505B` and `514B` — neither is inline-copied `[V]`
+
+- **`505B GetTrapReason`** reads the swapper's error code, *"only relevant to programmed trap
+  handlers … the swapper starts the trap handler when it detects a fatal error"*. **It CLEARS the
+  code when read** — a destructive read, so an emulator that answers it twice gives different (and
+  correct) answers, and one that caches it is wrong. Ties directly into the `SWPST`/error machinery.
+
+  **SAFE ON THE GATE5R LANE, VERIFIED 2026-08-25** — but the thing that *could* have broken it was
+  checked rather than assumed. Since SINTRAN owns the destructive semantics, correctness needs each
+  call **delivered exactly once**. The only re-execution in the bridge is
+  `retryFaultingInstruction: true`, set on **exactly one path** — the TRAP stop at
+  `Nd500CpuProcessBridge.cs:180`. The monitor-call stop defaults it to **false**, so a MON call is
+  never replayed. **Give `505B` no cache and no replay.**
+- **`514B ND500TimeOut`** suspends the program in an **ND-500 time queue, not the ND-100's**, and the
+  spec explicitly says to use it rather than MON `267B` TimeOut from the ND-500 side.
+
+### `[OPEN]` RESOLVED 2026-08-25 — `513B` IS NOT INLINE-COPIED *BECAUSE IT DOES NOT NEED TO BE* `[V]`
+
+The old warning stands as method (never assume adjacency), but the question now has an answer, and it
+did **not** come from `CALL_5_MATCH` — it came from the SINTRAN side.
+
+**`512B` (A5XMSG) and `513B` (B5XMSG) ARE THE SAME HANDLER.** `SUBR A5XMSG,B5XMSG` at
+`MP-P2-N500.NPL:2062`; both labels fall into ONE body at `:2076-2077` with **no branch on the MON
+number**. The only difference is the buffer convention — **B carries its data buffer via `LBUFA`
+(`0o141`)**, and subfunctions **6 `LFREA` / 7 `LFWRI` / 53 `LFWRT`** are commented *"use B5XMSG"*.
+
+Those three subfunctions fetch the buffer **by posting a DMEMRD**, at `142254-142337`:
+
+```
+142301   IF MIFLAG NBIT WSMC THEN            % buffer NOT already in the com-buffer?
+142304      A:=D; *AAX NRBYT; STATX          % NRBYT := byte count
+142310      *AAX 5DITN-NRBYT; STZTX          % 5DITN := 0
+142312      *AAX X5BUF-5DITN; LDDTX; AAX N500A-X5BUF; STDTX   % N500A := ND-500 buffer addr
+142316      *AAX ABUFA-N500A; LDDTX ; CNVWADR
+142323      *AAX N100A-ABUFA; STDTX          % N100A := converted com-buffer addr
+142326      "INFWRIT"; *AAX SPFLA-N100A; STATX
+142332      3RMED; *STATX XMICF              % MICFU := 3RMED (0o10 DMEMRD)
+142334      MSGN500; CALL WN5STATUS
+```
+
+**Exactly the copy-family field contract** (`N500A` / `N100A` / `NRBYT` / `5DITN=0` / `SPFLA`), and the
+write side mirrors it with `3WMED` + `INFRRE` at `143075-143105`.
+
+**So `513B` is outside the microcode's inline-copy set by design: its buffer crosses by data-memory
+read instead.** With classic `DMEMRD`/`DMEMWR` implemented (2026-08-25), the mechanism `513B` needs
+exists. **The discriminator is `MIFLAG` bit 0 `WSMC`** ("the data buffer is in the communication
+buffer"): set ⇒ no transfer needed; clear ⇒ a DMEMRD is posted.
+
+`[OPEN]` remaining: whether `CALL_5_MATCH` also has something to say about `513B`. The SINTRAN-side
+answer above is sufficient to explain the exclusion and to predict behaviour, so this is no longer
+blocking.
 
 ---
 
@@ -226,7 +314,78 @@ carried by the forwarded lane.
 | CONVERT-DOM-A03 | 43 | 26 | incl. `511B` `512B` `513B` `514B` `505B` |
 | LINKER-B01 | 48 | **30** | incl. `511B` `512B` `513B` `514B` `505B` |
 
-**TEST-REAL is the obvious next run: zero new MON numbers.** If it fails, the defect is
+> ## ⚠️ THIS CENSUS IS OF THE **ND500-APPS BUNDLE**, NOT THE MOUNTED PACK (corrected 2026-08-25)
+>
+> The tables in this file are built from `E:\Dev\Ronny\NDInsight\SINTRAN\ND500-APPS\*\analysis\`.
+> **`D:\BIGDISK0-L-DOMS.IMG` holds a DIFFERENT, SMALLER set** — enumerated (not pattern-matched),
+> exactly **8** `:DOM` files:
+>
+> `AUTOMAKE-500-C00` · `CAT-CAT5-B06` · `CODE-COVERAGE` · `CONVERT-DOM-A03` · `CPU-STAT` ·
+> `LED-FORTRAN-A01` · `NC-A06` · `PLANC-500-G00`
+>
+> **`LINKER-B01` IS NOT ON THE PACK IN ANY FORM.** What is there under that name is
+> `BRF-LINKER-C01:PROG` (an ND-100 program) and `LINKAGE-LOAD-H02` (PSEG/DSEG) — **different
+> programs, not alternate forms.** So Ronny's `LED → CONVERT → LINKER → NC` order is runnable here
+> only as **LED → CONVERT-DOM-A03 → NC-A06**; LINKER needs an image hunt before it is a target.
+>
+> **`TEST-REAL` and `FILE-COMPARE` are also absent from the pack**, which retires the recommendation
+> immediately below — see the corrected one.
+>
+> **CHEAPEST NEXT RUNS THAT ARE ACTUALLY ON THE PACK:** `CODE-COVERAGE` (**1** new MON: `113B`),
+> then `AUTOMAKE-500-C00` (**2** new: `312B` `321B`) — and `312B`/`321B` are already reached by LED.
+>
+> **`CAT-CAT5-B06` — `[OPEN]` CLOSED 2026-08-25, censused straight from the DOM bytes.** It has no
+> `analysis/` folder, so it was scanned for trampoline call sites directly:
+>
+> | | distinct | new vs CPU-STAT | 5xx family |
+> |---|---|---|---|
+> | **CAT-CAT5-B06** | **31** | **3** — `312B` `317B` `321B` | `503B`×1 `504B`×1 only |
+>
+> **Only three new MONs, and LED already reaches two of them** (`312B`, `321B`). The one that matters
+> is **`317B` UECOM** — the nested-SINTRAN-command call, which is exactly how NC re-invokes its later
+> passes. **CAT-CAT5 uses NO `511B`/`512B`/`513B`/`514B`** — the XMSG family is not in its path at all.
+> So NC's back end is small, and NC's real surface is its front end's 6 plus `317B`.
+
+### ⚠️ THE CENSUS METHOD — TWO CALL ENCODINGS, AND CALIBRATION CANNOT CATCH THE SECOND
+
+A MON call reaches the segment-31 trampoline in **two different encodings**:
+
+```
+C3    F8 00 hh ll      call  $0xFFFFFFFFF80000nn     ; the common form
+B5 CF F8 00 hh ll      callg $0xF80000nn             ; used by the 5xx/XMSG family
+```
+
+`nn` is the MON number in **hex**, and it is **two bytes** — a scan requiring the third byte to be
+`0x00` silently drops the entire `5xx` family (`504B` = `0x144`).
+
+**CPU-STAT uses ONLY the `C3` form.** So a scanner that matches `C3` alone **calibrates perfectly
+against CPU-STAT (28/28) and is still wrong** — it under-counted LED as 33/18 with no `513B` at all,
+against the true 35/20 with `513B`×9. *A calibration sample that lacks the second encoding cannot
+detect a missing encoding.* Cross-check against a disassembly that has both, never against a clean
+pass on one program.
+
+With both encodings the byte scan reproduces this file's tables **exactly** on five programs
+(LED 35/20, CONVERT 43/26, NC 34/6, AUTOMAKE 13/2, CODE-COVERAGE 15/1).
+
+**BUT IT ALSO PRODUCES FALSE POSITIVES, so it is `[D]`, not `[V]`, wherever no disassembly exists to
+check it against.** On **PLANC-500-G00** it reports two MONs the disassembly does not contain
+(`65B`×1, `336B`×4). All five of those hits sit in a **~250-byte cluster at file offsets
+`0x4559`–`0x4653`** — the signature of a *data table of trampoline addresses*, where the byte before
+the address happens to be `C3` or `B5 CF`. Real call sites are scattered through code, not packed
+five-to-250-bytes.
+
+**So the scan can BOTH miss (the encoding bug above) and OVER-REPORT (data tables). A negative from
+it is not safe either.** Use it only where a disassembly is unavailable, and check hit *clustering*
+before believing a result.
+
+**`CAT-CAT5-B06`'s three hits are `[D]`, not `[V]`** — it has no disassembly to cross-check. They sit
+at `0x1BF59`, `0x1BF7F` and `0x20877`, i.e. **scattered, not clustered**, so they do not carry the
+false-positive signature and the `312B`-then-`321B` adjacency is what a capability probe followed by
+its call looks like. Plausible, and consistent with `317B` being how NC re-invokes its passes — but
+**unverified**. Disassembling `CAT-CAT5-B06.DOM` is what would settle it.
+
+**~~TEST-REAL is the obvious next run~~ (NOT ON THE PACK — see the box above).** Zero new MON
+numbers. If it fails, the defect is
 opcode-level rather than MON-level, which is a cleanly separated result — and that is worth having
 before touching anything else. CODE-COVERAGE then costs exactly one new MON.
 
@@ -254,9 +413,47 @@ exercised, these appear in the most programs:
 | `74B` | SETBT | 4 |
 
 `113B`, `312B` and `321B` are in **seven of ten** programs, so they are near-certain to be the first
-stop of anything we run next. Everything above is a *name from the disassembler's own annotation* —
-the numbers are `[V]` from the trampoline targets, the **names are `[D]`** and should be confirmed
-against `SINTRAN-Commands.md` / the MON oracle list before being relied on.
+stop of anything we run next. **CONFIRMED 2026-08-25: LED reached `143B`, `262B`, `312B` and `321B`
+within minutes of the DMEMRD fix — this prediction held.**
+
+### NAMES NOW `[V]` — confirmed against `E:\Dev\Ronny\NDInsight\Developer\MON\calls\*.yaml`
+
+(The `[D]` caveat below is discharged for these six; the per-call YAMLs are extracted from
+*Monitor Calls.md, ND-860228.2 EN*.)
+
+| MON | file | name | short |
+|---|---|---|---|
+| `113B` | `113B_GetCurrentTime.yaml` | GetCurrentTime | CLOCK |
+| `143B` | `143B_ExecutionInfo.yaml` | ExecutionInfo | |
+| `262B` | `262B_GetSystemInfo.yaml` | GetSystemInfo | |
+| `312B` | `312B_CheckMonCall.yaml` | CheckMonCall | MOINF |
+| `317B` | `317B_ExecuteCommand.yaml` | ExecuteCommand | UECOM |
+| `321B` | `321B_UEAdministrator.yaml` | UEAdministrator | UEADM |
+
+### `312B` IS A CAPABILITY PROBE — this reframes the whole gap list `[V]`
+
+> *"Some monitor calls are optional or only available in later versions of SINTRAN III. This monitor
+> call checks if a monitor call exists in your particular SINTRAN III system."*
+> Parameters: `MonCallNumber` (in), `MonCallEntry` (out) — **"0 means not implemented"**.
+
+**Programs ASK before they call.** That is why `312B` is in seven of ten. Consequences:
+
+- A wrong answer here mis-steers a program long before it reaches the MON it was asking about.
+  Answer `0` for something real and it silently takes a fallback path; answer non-zero for something
+  our forwarding does not carry and it walks into the gap.
+- **`312B`'s answer must agree with what we actually forward.** It is the one MON whose correctness
+  is about the *whole set*, not about itself.
+
+### `321B` HAS NO VERIFIED CONTRACT `[OPEN]`
+
+Its YAML is an explicit **STUB**: *"handler body NOT located in the available NPL source tree … no
+parameter block, return values, or caller convention can be confirmed"*, and it is listed in manual
+**section 2.16, "numbers no longer supported"**. It is nonetheless in seven of ten programs. Since we
+FORWARD to real SINTRAN, absence from our source tree says nothing about whether the running L07
+answers it — but if it returns an error, callers must cope. Do not synthesise an answer for this one.
+
+Everything else in the table above is a *name from the disassembler's own annotation* — the numbers
+are `[V]` from the trampoline targets, the remaining **names are `[D]`**.
 
 **`317B` UECOM** appears in NC-A06 only, and it is not optional there: the `nd500-apps` skill records
 that NC re-invokes its own later passes as nested SINTRAN commands through MON 317B. **No 317B, no
