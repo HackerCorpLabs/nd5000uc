@@ -229,6 +229,61 @@ down the `011170` full-report arm instead of the `011146` demand-page arm; LED r
 forever). The durable fix is composing the bits and letting classification fall out, not hardcoding
 a subtype.
 
+## 4c. WHY THE SUBTYPE CHOICE CHANGES BEHAVIOUR — the two arms are not two report formats
+
+A servicer fix on 2026-08-25 changed the data-side zero-PST subtype from `6` to `10B` and moved
+LED-FORTRAN-A01 from *refaulting one page forever* to *demand-paging normally*. That fix rests on
+four measured outcomes. **This is the structural reason underneath it**, which matters because
+"code 6 and code 10B are both fault reports, one just longer" would make the fix look arbitrary.
+They are not both reports.
+
+**The `6`/`7` arm — `011170` — builds a full fault report and nothing else:**
+
+```
+011170/ A,BM#10 D,AM#30 JMPNS 11172 ;
+011172/ ALU,ADIR  A,XD,DSTS0  D,AL#30 TYP,HW ;   % gather the fault-status registers
+011173/ ALU,ADIR  A,XD,DRADDR D,AL#31 ;
+011174/ ALU,AND   A,XD,LARG   B,AL#31 D,AL#31 ;
+011175/ ALU,ADIR  A,AM#31     D,AL#32 ;
+011176/ ALU,ANDCB A,XD,DSTS1  B,AM#30 D,AL#33 TYP,HW ;
+011177/ ALU,AND   A,XD,DSTS2  B,AM#30 D,AL#34 ;
+```
+
+`011213` is the instruction-side mirror (`ISTS0 → AL#30`). This arm's whole job is to marshal
+`DSTS0/DRADDR/LARG/DSTS1/DSTS2` into `AL#30`-`AL#34` for the ND-100.
+
+**The `10B` arm — `011146` — is a different routine with LOCAL EXITS the report arm does not have:**
+
+```
+011146/ ALU,AND  A,XD,S2   B,BM#0  COND,MZRO NEXT SET ;
+011147/ ALU,FZRO A,XD,SARG D,AL#20 C,SEQ ... F,JMP 11071,1 ;   % -> local
+011150/ ALU,ADIR A,XD,TE   D,AL#21 ;
+011151/ ALU,AND  A,XD,S1   B,AL#21 D,AL#21 ;
+011152/ ALU,AND  A,AL#21   B,BM#31 COND,MZRO NEXT SET ;
+011153/ ALU,FZRO A,BM#31   D,AL#21 C,SEQ ... F,JMP 11075,0 ;   % -> local
+011154/ ALU,AND  A,XD,SARG B,AM#27 TYP,HW COND,MZRO ... 100 ;  % test subtype bit 6 = side
+011155/ C,SEQ NEXT F,JMP 11160 ;
+...
+011167/ ALU,ADIR A,DATA D,AM#21 JMP 11232 ;
+011232/ D,TRAPCLR JMPNS 7764 ;                                  % CLEAR THE TRAP AND RESUME
+```
+
+**`[V]` — the `10B` arm can reach `011232`, whose destination is `TRAPCLR`.** That is the microcode
+clearing the trap and resuming, with no report marshalled and nothing sent to the ND-100 on that
+path. It also checks `S2` bit 0, `TE`, `S1` and bit 31 first, and can leave early via `011071`/
+`011075` (note `011075` tests **`AM#37`**, the CALL-in-flight interlock).
+
+**So the subtype does not select a message FORMAT — it selects WHICH ENGINE HANDLES THE FAULT.**
+Sending a demand-page fault down the `6` arm asks for a full status report to be built for a
+condition that arm has no resolution path for; the fault is described and never fixed, which is
+exactly "the same page refaults forever". `[D]` on the precise resolution semantics of `011146`'s
+local paths — read from branch structure, not executed — but `[V]` that `TRAPCLR` is reachable from
+this arm and not from `011170`.
+
+**Consequence:** the durable fix is to compose the hardware fault-status bits (§4b) and let the
+subtype fall out of the microcode's own selector, rather than mapping our `MMWHERE` nibble onto
+classic codes. A hardcoded subtype is a guess about which engine should run.
+
 ## 5. HOW MUCH THE REMAINING `[OPEN]` ACTUALLY BLOCKS — measured, and it is almost nothing
 
 §2 leaves open whether the classic store has the B30's other assist families. That is still open as
