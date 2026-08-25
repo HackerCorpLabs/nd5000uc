@@ -1088,20 +1088,48 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       E1-E4, SC13, SRF10`, then `RETT_NPLBR`: `SC3→P, SC5→L, SC6→DPA, SC3→CLKSP, SC4→P`. Sixteen
       consecutive `+4` steps landing on X1-4/A1-4/E1-4 in order is not a coincidence.
 
-      **So the save/restore pair is machinery the real ND-500 does not have**, and it cannot be made
-      correct by fixing the frame base — it is the invented RESTORE that hands back the stale
-      `0x08001A28`. Removing it should leave TOS untouched and let GETB #2 see `MAXL = 23` exactly as
-      GETB #1 did. For the record, ENTT's real save block reads EA2 at displacements 84, 88, 92, 96,
-      **100**, 104 and writes EA3 at 4, 8, 12, 16, 20, 24 — so 100 exists as a SOURCE displacement,
-      never as a frame destination.
+      **RETRACTED, MINE, SAME ROUND — "so delete the save/restore, the real machine has no such
+      machinery". WRONG FOR THE CLASSIC LANE, and it would have deleted correct code.** The
+      generation caveat I attached was not a small print item, it was the whole answer. For the
+      classic ND-500 the architecture manual contradicts the B30 microcode BY NAME:
+      **ND-05.009.4 §13.10 ENTT** — *"The register block is stacked as shown in table 5"* — and
+      **Table 5 (p.26) lists arg21 = TOS**, between PS (arg20) and LL/HL (arg22/23). With arg1 at
+      `B+20` and `argN = B+20+4(N-1)`, **arg21 = B+100**. So our `frame+100` is Table 5 arithmetic,
+      not a decimal coincidence borrowed from an EA2 source displacement — and LL at +104 and HL at
+      +108 fall out of the same formula and match too. §6.4 confirms the frame is meant to be
+      restored from: *"Modification of status bits is done by changing the status word in the saved
+      register block… Upon trap handler return, this status word is merged… and loaded into the
+      status register."* A frame the handler may EDIT to influence the resume is a frame that gets
+      restored from.
 
-      **Caveats, stated not buried:** (1) this is ND-5800 B30 microcode and the failing lane is the
-      functional `CpuND500` classic engine, for which we have no microcode — same family and a
-      shared PCB/DIT model, but a generation caveat, not proof about the classic engine. (2) The
-      restore LIST is claimed; where EA3 initially points on entry to RETT is not.
+      **Both are true, and the difference is generational — write it down as one.** The classic
+      ND-500 carries TOS in the trap frame (Table 5 arg21). The ND-5800 moved it into the PCB. That
+      is a real architectural split, not a contradiction to resolve away.
 
-      Open: `STORTOS` (`tos =:`) @`0o001133` should show the same DPA+0x3C on the read-back side —
-      a five-minute decode if a second confirmation is wanted before code changes.
+      **Second data point on the split, decoded on request** `[V]`: on the B30, TOS is **dual-homed**.
+      `LOATOS` @`0o001020` reads the operand into `SC5`, then `LOAD_TOS` copies `SC5` into **`SRF12`**
+      (a live register-file cache) *and* writes it physically to **`DPA + 0x3C`** (the PCB copy).
+      `STORTOS` (`tos =:`) @`0o001133`-`0o001134` reads **`SRF12`** back — `AA=7 (EA3)`, `AB=0`, no
+      displacement, straight to the operand address — so it never re-reads the DIT. The 5800 keeps
+      the authoritative copy in the PCB precisely so it survives a context switch by construction;
+      the classic engine has no such backstop, which is why the frame carries it.
+
+      For the record, ENTT's B30 save block reads EA2 at displacements 84, 88, 92, 96, 100, 104 and
+      writes EA3 at 4, 8, 12, 16, 20, 24. (2) The RETT restore LIST is claimed; where EA3 initially
+      points on entry to RETT is not.
+
+- [ ] **1.36 WHERE IT ACTUALLY POINTS: does TOS survive a page fault taken INSIDE ENTT?** The MON
+      trail shows `0x0800415A` — the ENTT instruction itself — taking **four** context saves before
+      completing (`#758/#761/#763/#765`, all `P=0x0800415A`), then `#776 CONTEXT SWITCH X5CPU=0→1`
+      with `B=0x08001728`, the pre-ENTT B, proving it had not completed. Unsurprising: ENTT writes
+      ~220 bytes into a trap data field that is not resident. So ENTT executes several times and each
+      attempt re-snapshots the registers, and the value finally landing in arg21 is whatever survived
+      four park/reload round-trips through the process context block. Our context block carries TOS
+      at `+0x4C` and `SaveProcessContextBlock` / `StartProcessFromContextBlock` are symmetric on it —
+      **but that is code symmetry, not a measurement**, and it says nothing about WHEN the block was
+      last refreshed. Peer's probe prints `savedTOS` on every ENTT attempt, which separates "already
+      wrong on the first attempt" (the STO dispatch lost it) from "degrades across a fault park" (the
+      context round-trip lost it).
 
       **`want=2^10` stays open as a possible SECOND, separate defect** `[D]`. 1024 words = 4 KB, and
       my arithmetic says the month array is 27 words = order 5 — but this is the FIRST allocation the
