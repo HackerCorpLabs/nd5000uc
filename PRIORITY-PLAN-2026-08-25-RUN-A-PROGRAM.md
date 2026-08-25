@@ -1379,9 +1379,15 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       So the implementation is close to a copy of the PHYSRD arm with the address resolution swapped.
       **Do NOT reuse PHYSRD's field mapping wholesale** — the code's own comment warns about the
       mirror-image mistake ("NOT the 13B/14B raw-physical copy").
-      `[D]` on what `5DITN = 0` selects: the name is ND-500 DIT number and DIT==PCB==domain, so this
-      reads as "translate in domain 0", but that is inferred from the symbol name plus the DIT model,
-      not verified. **Worth pinning before implementing** — if our handler translates through the
+      **`5DITN` PINNED, `[V]`, upgraded from `[D]` by carving all seven writers in the NPL tree:**
+      every single one is a `STZTX` (store zero) — `136414`, `137175`, `140667`, `142310`, `143057`
+      in `MP-P2-N500.NPL` — and `RP-P2-N500.NPL:566` spells it out: **`0=:X.5DITNO  % DEFAULT DIT #0`**.
+      So slot `14B` is a **DIT (domain) number**, symbol `5DITNO`, and **SINTRAN always sends 0**.
+      What is still genuinely open is only whether "DIT #0" means literally domain 0's tables or
+      "default = the message's own process". **That question is decidable at implementation time and
+      must not be guessed: read `CED` when the 3RMED arrives. If `CED == 0` the two readings are
+      indistinguishable and it does not matter; if `CED != 0`, honour the field.**
+      **Worth pinning before implementing** — if our handler translates through the
       current process's tables and SINTRAN means domain 0, that alone reproduces "real bytes, wrong
       bytes".
 
