@@ -63,7 +63,53 @@ PHYSWR (`011453`-`011467`) is identical except `011465` uses `B,BM#1` where `011
 Helpers: `007771` = PST walk · `012026` = load LC from `AM#21` · `007540`/`007543`/`007544`/`007546`
 = shared parameter/store helpers.
 
-## 4. WHAT IS STILL `[OPEN]` — the DMEMRD handler address
+## 4a. `[OPEN]` CLOSED — THE CLASSIC MICFU DISPATCH TABLE, AND THE REAL HANDLERS `[V]`
+
+Found by asking what jumps to the one handler whose address we knew: `grep ADDR=011433` returns
+**two consecutive bare-`JMP` words**, which is a jump table.
+
+```
+007635   ALU,A+1 A,AM#22 D,AM#22 JMPREL      <- the computed jump
+007636   <slot 0>                            <- TABLE BASE, index = MICFU
+```
+
+**Base `007636`, index = MICFU.** Verified by the two known entries landing exactly:
+`007636 + 0o30 = 007666 → 011433` (PHYSRD) and `007636 + 0o31 = 007667 → 011453` (PHYSWR).
+
+| MICFU | slot | handler | | MICFU | slot | handler |
+|---|---|---|---|---|---|---|
+| **`0o10` DMEMRD** | `007646` | **`010010`** | | `0o23` 3START | `007661` | `010201` |
+| **`0o11` DMEMWR** | `007647` | **`010040`** | | `0o24` 3MONCO | `007662` | `010212` |
+| `0o12` CACHE | `007650` | `010307` | | `0o25` 3TRACO | `007663` | `010177` |
+| `0o13` RESIRD | `007651` | `010036` | | `0o26` 3WMONCO | `007664` | `010223` |
+| `0o14` RESIWR | `007652` | `010063` | | `0o30` PHYSRD | `007666` | `011433` |
+| `0o16`–`0o21` | `007654`–`57` | `011520/33/45/61` | | `0o31` PHYSWR | `007667` | `011453` |
+| `0o32`–`0o35` | `007670`–`73` | `010065/66/67/010132` | | | | |
+
+**`007740` is the illegal/unimplemented-MICFU catch-all** — slots `0o2`–`0o5`, `0o15`, `0o22`, `0o27`,
+`0o36`+ all point at it.
+
+### THE HANDLERS TRANSFER THE EXACT BYTE COUNT — 4/2/1 TAIL, NO ROUNDING `[V]`
+
+`DMEMRD` @`010010`:
+
+```
+010014-15  AM#26 := count (EX,SHL) ; LC := AM#26          whole-word iterations
+010016     AM#23 := count AND 3                           THE REMAINDER
+010017-21  MEM,RD4 ... LCDECR ... JMP 010017              main loop, 4 bytes/iteration
+010022-23  test AM#23 bit 1, then bit 0
+010024     MEM,RD2                                        the 2-byte tail
+010030     MEM,RD1                                        ** the ONE-BYTE tail **
+```
+
+`DMEMWR` @`010040` is symmetric: `MEM,WR4` @`010050`, `MEM,WR2` @`010054`, **`MEM,WR1` @`010062`**.
+
+**So the real microcode NEVER writes past the requested count.** It masks the count with 3 and emits a
+`RD1`/`WR1` for an odd tail. Combined with `MEMNBY` ("number of bytes minus one", 1–4), this makes a
+read-modify-write implementation of the odd tail **faithful to hardware, not merely safer** — and an
+implementation that rounds up to whole halfwords would zero a byte the hardware leaves alone.
+
+## 4. ~~WHAT IS STILL `[OPEN]`~~ — SUPERSEDED BY §4a; kept for the refuted methods
 
 **Not located.** Two methods tried and both refuted, recorded so they are not repeated:
 
