@@ -1534,7 +1534,7 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       argument for the narrow `504B`-only scope (511B/512B operand layouts unverified): the failure
       is not observable as a formatting bug, so a wrong guess there would not fail cleanly.
 
-- [ ] **1.50 ATTRIBUTION PROTOCOL + the guard-fire counter (agreed across both lanes).** Two sessions
+- [x] **1.50 ATTRIBUTION PROTOCOL + the guard-fire counter (agreed across both lanes).** Two sessions
       changed the same engine within minutes, so a shared rule was set before either result was read:
       **run 51 = the ABUFA inline-buffer change against the PRE-guard engine** (its testhost had
       already loaded the old DLL, so the attribution is clean and it belongs to the other lane);
@@ -1559,12 +1559,49 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       `MicfuHistogram()` already existed with a doc comment describing exactly what was wanted,
       costing a build and a run.
 
+      ### RESULT, 2026-08-25 — `ABORT GUARDS (whole run): none`
+
+      Gate5R ran on the real-SINTRAN lane with `ND500UC_BOOT_REALCPU=1` + `ND500UC_BOOT=1` +
+      `RETROCORE_BIGDISK0L`. **`Passed: 1, Skipped: 0`, 1m53s** — checked as counts, not as an
+      exit code, because a skipped Gate5R also exits 0 and that already produced one green run
+      that measured nothing. The run reached the end of the program: `MON 262B` present, MICFU
+      tally `24B:218 25B:142`, 3370 lines of gate dump.
+
+      **What it settles.** All seven guards fired **zero** times. A guard is a conditional early
+      return, so zero means the seven guarded instructions behaved **identically with and without
+      their guards** on this run. **Every behaviour change in run 52 therefore belongs to the other
+      lane's changes — the `ABUFA` pointer fix and the two ENTT fixes — and none of it to the
+      sweep.** That is the attribution the protocol was set up to get, obtained exactly, without
+      bisecting nine changes apart.
+
+      **What it does NOT say, and the distinction matters.** Zero is not "the guards were
+      unnecessary". They are correct for the documented fault model (`CpuND500.Trap.cs:430`:
+      *"Every mid-instruction memory-access commit must check `InstructionAborted` and bail before
+      storing"*) and this run simply never drove a fault through those eight instructions. The run
+      DID take real page faults — `TRAP 46B` at `faultSeq=132/133` — they just did not land inside
+      a guarded body. **One run is not the instruction set**; the counter stays wired so any later
+      program answers the same question for free.
+
+      **`Chain` = 0 specifically retires 1.49's `[OPEN]`.** No page fault has been surfacing as an
+      ILLEGAL OPERAND VALUE through CHAIN's zero end-of-chain sentinel on this path. The sweep was
+      latent-correctness work, as suspected — now measured rather than argued.
+
+      **Harness line deliberately NOT committed.** `Nd500UCSintranBootTests.cs` now also carries the
+      other lane's LED work (floppy mount, `ENTER-DIRECTORY`, `ND500_DOMAIN`/`ND500_EXPECT`).
+      Staging is whole-file, so committing my one line would sweep in their WIP — against
+      `shared-tree-commit-hygiene`. The measurement needed no commit.
+
 - [ ] **1.51 The ISE storm at `0x08004A28` was NOT a separate defect — retracted by the other lane.**
       It was reported as possibly an independent fault in our ENT*/RET* sequence check. It went from
       **355,193 events to zero on the ENTT fixes alone**, so it was entirely downstream of the ENTT
       corruption. My `Entb.cs:169` "false ISE" lead pointed at the right *family*, but **nothing in
       the sequence check itself needs changing on that evidence** — do not go looking for a second
       bug there. Recorded because a retracted lead left lying around gets re-adopted.
+
+      > **OBSOLETE, corrected in place 2026-08-25.** The paragraph below was written while the tree
+      > was blocked. The suite has since run green **twice** (2184 passed / 0 failed / 13 skipped,
+      > exit 0, warnings unchanged at 1553) and Gate5R has now run too (see 1.50). Kept, not
+      > deleted, for the "idle session ≠ finished run" lesson, which is still live.
 
       **Suite still unrun for the seven guards**: the other lane's `testhost` (PID 39580, started
       14:38:41) holds `Emulated.HW.dll`, and the copy into its test-project `bin` fails. It is not
