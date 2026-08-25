@@ -1391,6 +1391,56 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       current process's tables and SINTRAN means domain 0, that alone reproduces "real bytes, wrong
       bytes".
 
+- [ ] **1.48 MY SWEEP USED THE WRONG TEST. RETRACT 1.41/1.43's RESULTS AND THE ORDERING FIX — the
+      correct question is the GUARD question, and the answer is worse.** The ordering change I
+      recommended and the peer accepted **regressed Gate5R straight back** (`TOS=0x08001A28` on the
+      retry, 355,193 ISE trap-35 events) while the unit test went green — one oracle passing while the
+      real lane broke. **Mine: I pushed a measured fix off in favour of a structural argument, and the
+      structure I reasoned about was not this engine's.**
+
+      **Why "commit last" is meaningless here, and it is stated in our own source.**
+      `CpuND500.Trap.cs:430`: *"**Every mid-instruction memory-access commit must check
+      `InstructionAborted` and bail before storing.**"* A fault does **not** unwind — it sets a sticky
+      flag; `CpuND500.Memory.cs:173` then makes every subsequent read return `0` and every write a
+      silent no-op, **and execution runs on to the end of the method.** So moving a commit later in the
+      method changes nothing: the method still reaches it. ENTT does fault on its own writes —
+      `#760 TRAP 46B pc=0x0800415A addr=0x08001800` = `trapFrameBase + 216`, the 220-byte trap data
+      field straddling a page boundary — and the guard, not the ordering, is what stops the commit.
+
+      **THE CORRECT TEST: does every path that can fault reach a commit without checking
+      `InstructionAborted`?** Re-swept on that basis:
+
+      | instruction | guards | verdict |
+      |---|---|---|
+      | `Ents`, `Entsn`, `Entb`, `Entf`, `Entfn` | 2, correctly placed | **SAFE** |
+      | `Call`, `Callg` | 3 | **SAFE** |
+      | **`Entm`** | 2 — but `regs.TOS` @146 sits **outside both** | **UNSAFE** |
+      | **`Init`** | **0** | **UNSAFE** — B@110, TOS@113, L@118 all commit, no guard anywhere |
+      | **`Rett`** | **0** | **UNSAFE** — 4 commits (L@165, R@166, TOS@194, B@213) |
+      | **`Retb`, `Retbk`** | **0** | **UNSAFE** — commit B/L after frame reads |
+      | `Retk`, `Retd`, `Entd`, `Chain` | 0 | unchecked; `Chain` shows no commits |
+
+      **`Rett` is the alarming one and it is the return half of the pair being fixed.** It READS the
+      frame, and a faulted read returns `0` (`Memory.cs:173`), so with no guard a fault mid-restore
+      commits **zeros** into L, R, TOS and B. `[V]` on the shape and the return-0 semantics;
+      `[OPEN]` on whether it has fired.
+
+      **My 1.41/1.43 "the RET family is CLEAN by construction" is WITHDRAWN.** It was clean only under
+      a test that assumes faults unwind. My ENTM finding survives — but for the guard reason, not the
+      ordering one: the guard at 169 protects B and L, and `regs.TOS` at 146 is outside it.
+      **`SplitHeapBlock`/`AllocateHeapBlock` should now be re-checked against the guard question too**,
+      since a no-op write mid-split silently half-rebuilds the free lists.
+
+      **The lesson, and it is the sharper form of today's other three:** I verified the *shape* of the
+      code carefully and never verified the *machine model* the shape was supposed to protect against.
+      Precision on one axis, an unchecked assumption on the other — the same failure as the `AM#12`
+      base walk, and the second time today after the ENTT/Table-5 generation caveat.
+
+      **Lead for the ISE item, peer's, `[D]` and explicitly not measured:** `Entb.cs:169`'s comment —
+      *"a fault there leaves L and the interlock untouched and the retried entry instruction still sees
+      its CALL. **Without this the retry raises a FALSE ISE — the defect that killed vi through
+      ENTS.**"* Same class as the trap-35 spin, with a prior fix to read.
+
 - [ ] **1.40 WRITE UP THE GENERATIONAL SPLIT AS ITS OWN ITEM (peer's suggestion, agreed).** The
       dual-homed `SRF12` + `DPA+0x3C` shape decoded in 1.35 is **exactly the structural backstop that
       would have made 1.38 impossible on the ND-5800**: with the PCB copy authoritative, a park/reload
