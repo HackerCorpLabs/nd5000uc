@@ -73,6 +73,63 @@ adjacency-is-not-dispatch error. Carve `CALL_5_MATCH` before implementing anythi
 
 ---
 
+## 1b. WHAT 511B / 512B / 513B ACTUALLY REQUIRE — carved, and smaller than the counts suggest
+
+**Ronny's order is LED → CONVERT → LINKER → NC.** All three of the first are blocked on this one
+family, so it is the critical path. Carved from the reference (`[V]`) and the NPL source rather than
+inferred from the call counts.
+
+**`513B` — the most-used of the three (14 / 9 / 14 sites) — needs NOTHING, and doing the obvious
+thing to it is a BUG.** The microcode's inline set is exactly `{504B, 511B, 512B}`
+(`CALL_5XX 004013B`–`004016B` → `CALL_5_MATCH 013667B`, `MICRO-5800-B30.LABE:376`). `513B` (`B5XMSG`)
+shares the *ND-100* handler body with `512B` (both reach `142053`), which makes it look like a
+sibling — and the reference flags this verbatim: *"An emulator that treats `512B` and `513B` alike
+will be wrong on the ND-5000 side."* **Sharing a SINTRAN handler is not sharing a microcode
+obligation.** So the heaviest user of the family is free, provided nobody "tidies" it into the set.
+
+**`511B` `DVIO` — the outbound copy is literally the SAME ROUTINE as `504B`.**
+`MP-P2-N500.NPL:140627` is `SUBR DVIO,NOUTSTR` with **both labels on the same address**:
+```
+140627   DVIO:
+140627   NOUTSTR:
+140627          CALL 5GTDF; GO NORMMC              % IF TERMINAL GET ADDR OF DATAFIELD
+140631          A:=D; ... *AAX TODF; STATX         % TODF = OUTPUT DATAFIELD
+140636          *AAX DNOBY-TODF; LDDTX; AAX -DNOBY % D = number of bytes
+140641          IF A><0 OR D>>4000 THEN            % 4000B MAX because of com-buffer size
+140645             A:=EC174; CALL EMONICO          % oversize -> restart process with error
+140651          ELSE IF D=0 THEN CALL OSTRS        % zero bytes -> restart, no copy
+```
+So the copy obligation, the byte count source (`DNOBY`), the `4000B` ceiling and the `EC174`
+oversize error are **identical** to the already-working `504B`. `[V]`
+
+**BUT `511B` IS NOT A FREE EXTENSION — it has a second half `504B` does not.** At `OSTRS`
+(`141005`) the shared body discriminates:
+```
+141012          *AAX SMCNO; LDATX; AAX -SMCNO      % A = monitor call number
+141016          IF A=511 THEN                      % DVIO
+141021             T:=5MBBANK
+141022             *AAX 11DMA; LDDTX               % max number of bytes, continue
+141025             X=:N5MESSAGE; CALL XNINSTR      % XNINSTR in NINSTR (mon DVINST)
+141027          FI
+```
+**`DVIO` is bidirectional**: after the output it reads up to `11DMA` bytes *back* into the process
+via the `DVINST` input path. `504B` (`NOUTSTR`) is output only. Whether that return leg needs
+anything from our side, or rides the ordinary answer write-back, is **`[OPEN]`** — do not assume it
+is free. This is precisely the assumption I was about to make from "shares a handler".
+
+**`512B` `A5XMSG` — our obligation is the same copy; the complexity is SINTRAN's, not ours.**
+`142053` dispatches a **32-way function switch** on `N5XFU` (`LFGET`/`LFREL`/`LFSND`/`LFRCV`/…),
+allocates an xtblock through `MON 2XMSG`, and so on. **None of that is ours** — real SINTRAN runs it.
+The ND-5000 side owes only the inline buffer copy, the same shape as `504B`. Do not let the size of
+the XMSG subsystem be mistaken for the size of our task.
+
+**NET IMPLEMENTATION for Ronny's first three programs:** extend the existing `504B` inline copy to
+`511B` and `512B` (same mechanism, same `DNOBY`/`4000B`/`EC174` contract), **explicitly exclude
+`513B`**, and settle the `511B` input-leg `[OPEN]`. That is one change plus one open question — not
+the three separate subsystems the 14/9/14 call counts imply.
+
+---
+
 ## 2. NEXT-PROGRAM ORDER — cheapest first
 
 "NEW" = MON numbers this program uses that **CPU-STAT never exercised**, so they have never been
