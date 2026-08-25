@@ -1491,6 +1491,49 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
         is a terminal-microword effect the way L provably is (`ENTS_END` @004206). That is not carved,
         so it stays put and a third guard does the work. Ordering never fixes this class anyway.
 
+- [x] **1.52 THE GOAL GATE IS MET — CPU-STAT PRINTS ITS REPORT UNDER REAL SINTRAN, MON CALLS
+      FORWARDED.** Not a near miss and not our emulation answering:
+
+      ```
+       CPU number       :      100
+       CPU type         :        2 (ND-100 48-bit floating)
+       Operating system :        5 (Sintran III VSX-500)
+       Generated        :       16 December 1988   9:34
+      ```
+
+      39 output calls, `MON 262B` GetSystemInfo, clean `MON 0B`, 1.7 minutes. Whole-run MICFU tally
+      `1B:2 12B:1 13B:8 14B:44 17B:8 20B:2 21B:2 23B:3 24B:218 25B:142 26B:1 30B:2 31B:3` — **still
+      no `10B`**, so SINTRAN took the inline (WSMC) arm exactly as carved and the defect was that we
+      never held up our end of it. Suite 2184/0/13 throughout.
+
+      **FOUR defects stood between the boot and that page:** (1) ENTT ignoring `InstructionAborted`
+      (contract in `CpuND500.Trap.cs:430`); (2) ENTT clearing its trap bit *after* the guard instead
+      of at entry (ND-05.009.4 §6.4); (3) the inline user buffer never copied at all; (4) **`ABUFA`
+      read as a buffer when it is a POINTER to one.** The 355,193-event ISE storm was downstream of
+      (1) and vanished with it — see 1.51.
+
+      **THE ATTRIBUTION IS NOT CLAIMED, and that is deliberate.** This run carried NINE changes from
+      two sessions, so no single fix can be credited from it. What exists is a symptom chain that
+      localises hard — long garbage → **exactly two NUL bytes matching the 2-byte length of the
+      first `MON 504B`** → correct text. A *matching length* proves SINTRAN read the right descriptor
+      and the wrong payload, which isolates the fault to the destination and rules out the length and
+      the trigger in one observation. That is strong, and it is still not the counter (1.50).
+
+      **THE `LDDTX` MISS — the only error today BOTH sessions made simultaneously, and the one with
+      a structural fix.** `140675  *AAX ABUFA-N500A; LDDTX; AAX N100A-ABUFA; STDTX`. `LDDTX` loads
+      **FROM** the slot; the following `STDTX` stores what it loaded into `N100A`, the ND-100
+      **physical** address. A slot that feeds a physical-address field cannot itself be the buffer.
+      I carved that line and then handed it on as *"addressed through ABUFA"* — and neither session
+      pushed on the `L`. **A SUMMARY OF A CARVE IS NOT THE CARVE** (same shape as the
+      swapper-handlers sentence with three errors in it, `verify-provenance` case 4). The fix is not
+      "read more carefully" — it is that **a handover must QUOTE THE INSTRUCTION, not paraphrase
+      it**. Adopt that for every carve handed between lanes.
+
+      **A wrong inline-copy guess does not print wrong text — it CHANGES CONTROL FLOW.** Setting
+      `WSMC` with an empty buffer stopped output after **2** calls instead of 39. That is the real
+      argument for the narrow `504B`-only scope (511B/512B operand layouts unverified): the failure
+      is not observable as a formatting bug, so a wrong guess there would not fail cleanly.
+
 - [ ] **1.50 ATTRIBUTION PROTOCOL + the guard-fire counter (agreed across both lanes).** Two sessions
       changed the same engine within minutes, so a shared rule was set before either result was read:
       **run 51 = the ABUFA inline-buffer change against the PRE-guard engine** (its testhost had
