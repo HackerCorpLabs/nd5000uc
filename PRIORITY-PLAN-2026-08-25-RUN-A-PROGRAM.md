@@ -414,6 +414,38 @@ Goal: the domain's entry page becomes present and CPU-STAT executes past `0x0800
       **Do NOT change the trap record.** Two independent supports now say it is correct and
       complete: the corrected offset walk, and `N500A` being a copy parameter a trap answer has no
       business writing.
+
+- [ ] **1.10 THE ANSWER WAS ALREADY CARVED ON 2026-07-21 — and the peer's MICFU census is the
+      measurement it was missing.** `[V]`
+      See `E:\Dev\Ronny\NDInsight\SINTRAN\ND500\CARVE-MSWIN-MESSAGE-SENDER-2026-07-21.md`.
+      - **The overlay, from symbols:** `SWFUN=000007`, `SWRST=000010`. Same two words as `N500A`;
+        which name applies depends on the arm.
+      - **SINTRAN writes `0o10` in exactly ONE place**, `SWPDECODER`/`LNEWSWAP`,
+        `MP-P2-N500.NPL:975-976`: `*AAX RETP4+1; LDATX` then `X:=CSWPM; *AAX 10; STATX` — gated on
+        `MICFU==3SWMESS` **and** `SWFUN ∈ {MSCRS, MSCRENEWVERS}`. `SWRST`'s only other NPL
+        reference is a read (`LDATX` @134130).
+      - **`3SWME = 000005`, and the peer's whole-boot MICFU census has ZERO occurrences of 5.**
+        So that arm never runs, and the only NPL writer of `0o10` never executes.
+      - **The carve doc establishes `[V]`** (full-tree grep of every ND-100 NPL file + the complete
+        `s3vs-4.symb` build): `SWFUN` is only ever LOADED, never STORED, and `MICFU := 3SWMESS` is
+        never written by any ND-100 routine in the tree. The code that stamps `MICFU := 3SWMESS`,
+        fills `SWFUN` and writes the ~15-word body is **`S3SM5`** — ND-100 code (per that doc's own
+        2026-07-21 correction banner), MSWIN builder at runtime octal **140771..141001**, full body
+        builder at **162155..162207**. **Its source is NOT in the repo** (paged segment, carved as
+        bytes only) — which is why an earlier grep recorded a scope-limited negative as a true
+        absence.
+      - That doc's item 4 already concluded, graded `[I]`: *"the fill step is not skippable by any
+        ND-100 code — it simply belongs to a sender that did not run."* **The MICFU=5 zero upgrades
+        that `[I]` to measured.**
+
+      **CAVEAT TO SETTLE FIRST — two readings predict the same garbage but DIFFERENT fixes.** The
+      overlay depends on WHICH message the worker's `b.24` points at. If it is the swapper's own
+      `SWMSG`, the field is `SWRST` and it is empty because `S3SM5` never stamped it. If it is the
+      trap-answer message, it is `N500A` holding a stale copy parameter. Pin the message identity
+      before acting on either.
+
+      **If it is the `SWMSG` reading:** the question becomes why `S3SM5`'s builder at
+      `140771..141001` never executes — a bytes-only carve needing the disassembly, not a grep.
 - [ ] **1.5 Fix, re-run, and state the result in terms of PROGRESS THAT IS NOT CORRUPT** — PC
       advancing, `K=0` on restarts, `EmulatedMonPathMarker.Count == 0`.
 
