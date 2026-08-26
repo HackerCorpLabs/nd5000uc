@@ -84,6 +84,57 @@ Segment base is `segmentNumber << 27` (`0x08000000` = 1, `0x10000000` = 2). `LIN
 that assumes "PROG is segment 1 at `0x08000000`" works on 12 programs and silently mis-places the
 other two. **Whether our RetroCore loader handles this is `[OPEN]` — §4 step 1 measures it.**
 
+> ### ❌ THE SEGMENT-TRANSLATION THEORY IS REFUTED (measured 2026-08-26). Kept so it is not re-derived.
+>
+> The worry above led to a specific mechanism: the MMU prefers the guest capability walk and falls
+> back to our `PCBTable` shadow when `PSTP == 0 || regs.PS == 0`; the shadow covers segment 1 only;
+> therefore a segment-2 or segment-22 program would be silently mis-translated. Plausible, and it
+> had real supporting evidence — the shadow genuinely is segment-1-only, and a segment-0 access
+> under that fallback really did once produce `Fatal error from Swapper, ERROR CODE 200B`.
+>
+> **It does not happen.** Instrumented and measured on the real-CPU lane, two different programs:
+>
+> | run | translations outside segment 1 | shadow fallbacks |
+> |---|---:|---:|
+> | CPU-STAT (gate 5R) | **2,349,416** | **0** |
+> | LINKAGE-LOAD-H02 | **154,427** | **0** |
+>
+> The guest PST walk is live and handles every segment. Whatever stops a program outside segment 1,
+> **it is not segment translation** — stop looking there.
+>
+> **The denominator is the whole point.** The first version of this instrument counted only
+> fallbacks, and reported "none" — which was true, meant nothing, and read exactly like a pass.
+> CPU-STAT lives in segment 1, so the counter may simply never have been asked. `0 of 0` and
+> `0 of 2,349,416` printed identically. Report the pair, never the numerator.
+
+### 3a-bis. WHAT ACTUALLY STOPS A NON-SEGMENT-1 PROGRAM — domain registration `[V]`
+
+`place-domain LINKAGE-LOAD-H02` answers **`NO SUCH DOMAIN`**, and the reason is not the CPU, the
+MMU, the loader or the segment number:
+
+**COPYING A `PSEG`/`DSEG` PAIR ONTO A PACK IS NOT INSTALLING AN ND-500 DOMAIN.** The domain must be
+registered in that pack's `DESCRIPTION-FILE:DESC`, and registration is a separate step — it is what
+the vendor installer's section #3 does with `SET-DOMAIN` … `END-DOMAIN`, not something a file copy
+achieves.
+
+Read out of the two description files directly (they are the same 22528-byte fixed-size table, so
+equal size proves nothing about equal content):
+
+```
+D:\BIGDISK0-L-DOMS.IMG (SYSTEM)   LED-B03, SCRATCH-DOMAIN, SCRATCH-SEG-01      <- no NLL
+ND-disk-00042.img      (floppy)   LINKAGE-LOAD-H02, SCRATCH-DOMAIN, SCRATCH-SEG-01
+```
+
+The DOMS pack carries `LINKAGE-LOAD-H02:PSEG`, `:DSEG` and `:UTIL` — every file — and still cannot
+place it. So the supported route is to mount the distribution floppy (`ND500_FLOPPY` +
+`ND500_FLOPPY_DIR`) and place from `(FLOPPY-USER)`, exactly as the 3022-lane harness does; no image
+needs writing.
+
+**Two wrong guesses were spent before reading the table, and both looked reasonable:** that the
+description file was missing (it is present), and that the absent `:LINK` file was the blocker (added
+it to a copy of the pack — still `NO SUCH DOMAIN`). The install spec listing four files was a good
+lead and still the wrong answer. The table itself took one command to read.
+
 ### 3b. Entry points are not at the start, and one tool already got that wrong
 
 Entry points measured: `0x08000004` (most), `0x0800065C` (PLANC), `0x08001305` (AUTOMAKE),
