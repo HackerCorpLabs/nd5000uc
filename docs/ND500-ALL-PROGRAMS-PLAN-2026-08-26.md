@@ -157,10 +157,54 @@ divergences (task #50). Coverage of *presence* says nothing about coverage of *b
 
 ---
 
+## 3c. WHERE THE NIGHT OF 2026-08-26 ACTUALLY LANDED
+
+Five mechanisms were proposed as "the reason non-segment-1 programs fail". **All five are dead, each
+on a measurement rather than an argument**, and the list is worth keeping so none is re-proposed:
+
+| proposed cause | how it died |
+|---|---|
+| shadow-capability fallback | **4.3M** non-segment-1 translations across 3 programs, **0** fallbacks |
+| acquisition path (DOM vs 412B) | LINKER and CPU-STAT share it; LINKER failed, CPU-STAT worked |
+| backing device (floppy vs pack) | LINKER livelocks **identically** from the hard pack |
+| PST stride / `PSTP` base | `entry@0x1A = 13*2`, table coherent, psn 11/12 serviced from it |
+| faults answered with nothing moved | **57** disc-I/O requests against 42 faults — content does arrive |
+
+**TWO REAL DEFECTS WERE FIXED, and both were ours:**
+
+1. **Classic `DMEMRD`/`DMEMWR` unimplemented** → MON 50B stalled LED, 132,042 identical requests.
+2. **A zero-length `DMEMRD` refused** → LINKER livelocked, 174,476 identical requests, `10m33s` of
+   spin. The microcode treats a zero count as *normal completion* (`010016 → 010022 → 010023 →
+   010027 → 011405`), not as malformed.
+
+Both are the same class: **a MICFU answered `5ERANSWER` is not a quiet gap, it is an infinite
+retry** — the swapper has nothing else to do but ask again. Now detected automatically
+(`993ad4f57`): consecutive declines of one MICFU with no intervening progress, reported once with
+the decline **reason**, because both storms were MICFU `0o10` and only the reason names the bug.
+
+**THE PAGE-IN PATH DOES NOT USE THE MAILBOX.** Pages move by **disc DMA** — `LSWPAGE`
+(`MP-P2-N500.NPL:136112`) hands SINTRAN an 11-word transfer block, it queues on `QP5SW`, the
+controller DMAs into shared memory. So **a MICFU tally is blind to every page-in by construction**,
+and `30B`/`31B` at 1-3 per run are doing something else entirely. Reading that gap as a defect cost
+an hour; the citation was already on disk, twice.
+
 ## 4. THE PLAN
 
 Each step's exit criterion is a **measurement**, and each names the command. No step is "done" on a
 reading of the code.
+
+> **STATUS 2026-08-26 ~05:00.** Step 1 is being taken on the **real-SINTRAN lane** rather than
+> standalone, which is strictly better: `nd500uc-47` is running NC-A06, CAT-CAT5-B06,
+> AUTOMAKE-500-C00 and PLANC-500-G00 on the fixed engine. Already through:
+> **CPU-STAT** (full report), **LED-FORTRAN-A01** (interactive), **LINKER-B01** (runs to its own
+> `DDBTABLES` message and exits, from both floppy and hard pack). The step-1 table below should be
+> filled in from those runs rather than re-run standalone.
+>
+> **STILL OPEN, and it is one program and one question:** LED ends on `PST entry 13 is ZERO` for
+> segment 2 — `cap=0xC00D` names a psn with no PST entry, while psn 11 and 12 in the same table are
+> serviced in the same run and SINTRAN does post `MSWPFAULT` naming psn 13. Every MMU-side and
+> capability-side mechanism is eliminated (§3c), so the remaining question is whether the disc I/O
+> for psn 13 completes and whether anything then writes the entry — the **swapper page-in path**.
 
 ### Step 1 — RetroCore standalone baseline `[OPEN]`, this is the missing number
 
