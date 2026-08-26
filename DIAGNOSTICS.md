@@ -4,6 +4,63 @@
 **Last verified:** 2026-08-08. Each of these was built once and re-discovered several times —
 check here BEFORE building a new instrument.
 
+## RetroCore C# — SETTINGS ARE COMMANDS NOW, NOT ENVIRONMENT VARIABLES (2026-08-26)
+
+**Before reaching for an environment variable on the C# side, check whether it is a config key.**
+Six were migrated on 2026-08-26. Each old variable still works as a **deprecated fallback that warns
+once naming its key**, so nothing broke — but the key is the supported form, and a configured value
+always beats the variable.
+
+Set them from an `.ini` script or the console, exactly like any other command:
+
+```ini
+Config ndix_disk_image             D:\ND\NDIX\root.img
+Config terminal_type               93
+Config demand_segments             off
+Config trap_dispatch               legacy
+Config octobus_sniff_require_init  on
+Config octobus_sniff_repeat        0
+Config nd100_clock_isolation       off
+Config                                    # lists every key with its valid values
+```
+
+| old environment variable | config key | note |
+|---|---|---|
+| `NDIX_DISK_IMAGE` | `ndix_disk_image` | |
+| `ND500X_TERMINAL_TYPE` | `terminal_type` | **only affects the standalone DOM-runner lane** — on the real-SINTRAN lane the MON is forwarded, so use `SET-TERMINAL-TYPE` at the SINTRAN console instead |
+| `ND500X_NO_DEMAND_SEGMENTS` | `demand_segments` | **polarity inverted** — the key is positive |
+| `ND500X_NO_TRAP_DISPATCH` | `trap_dispatch` | **polarity inverted** |
+| `ND5000_SNIFF_REQUIRE_INIT` | `octobus_sniff_require_init` | |
+| `ND5000_SNIFF_REPEAT` | `octobus_sniff_repeat` | **a threshold of 2 or more can never be met** — see below |
+| `ETHII_RX_INJECT` | Ethernet-II controller property | was `static readonly` = unsettable |
+| `RETROCORE_ND100_CLOCK_ISOLATION` | `nd100_clock_isolation` | **polarity inverted**; was `static readonly` |
+
+**⚠️ FOUR OF THESE WERE `static readonly` — read once at type initialisation and FROZEN for the
+process.** In a test run the first test to touch the type decided the value for every test after it,
+so setting one per-test worked or silently did nothing depending on order. The run still completed
+and still printed a report, so **a knob that never applied read exactly like a measurement.** All
+four are instance state now. If you ever set one of these per-test and got an inconsistent result,
+that was why.
+
+**⚠️ `octobus_sniff_repeat` 2 or more cannot be satisfied by the real doorbell.** `XMSINIT` sets
+`X5ACT` to `-1`, SINTRAN wakes with a single `X5ACT := 0`, and **the microcode re-arms by writing 1,
+not -1** (microword `0o24722` at `IDLE_2`, before consuming the message). So the genuine doorbell
+produces exactly ONE `-1 -> 0` transition per XMSINIT; a threshold of 2 or more selects against the
+cell it was meant to find and the sniff never latches — the CPU just looks idle. Setting it logs a
+warning. The older "the doorbell repeats, a watchdog rings it" claim was an inference written as an
+observation and is refuted.
+
+Full reference (every key, valid values, which lane each applies on, a worked `.ini`):
+`E:\Dev\Repos\Ronny\RetroCore\Emulated.Machines\ND\ND100\README.md`
+Catalog of all 111 variables + root cause + what is still to migrate:
+`E:\Dev\Ronny\ND5000UC\docs\RETROCORE-ENV-VAR-CATALOG-AND-CONFIG-DESIGN-2026-08-26.md`
+
+**Still environment variables** (the diagnostic sinks — migration item 4, not done):
+`ND500_MONLOG` · `ND500_HEAPLOG` · `ND500_FRAME_LOG` · `ND500_FRAMEPROBE` · `ND500_WATCH_ADDR` ·
+`ND500_WATCH_LOG` · `ND500_FREEZE_MONLOG_ON_ERR` · `ND100_PT_TRACE` (+`_LO` `_HI` `_MAX`) ·
+`ND500UC_WALKTRAIL` · `ND500UC_CAPTRAIL_FILE` · `ND500_READTRAIL_MIN` / `_MAX`, plus ~60 in the test
+harnesses.
+
 ## Legacy C# ND-500 (`Emulated.HW`, env vars read by the CPU/tests)
 
 | Switch | What it does | When to use |
@@ -24,7 +81,7 @@ check here BEFORE building a new instrument.
 | `ND500X_MONLOG=1` | MON-call trace — names every OPEN/WFILE/SMAX/CLOSE |
 | `ND500X_LOADDBG=1` | DOM loader segment placement |
 | `ND500X_INITLOG=1` | INIT stack setup |
-| `ND500X_NO_DEMAND_SEGMENTS=1` | turn off demand segment allocation |
+| `ND500X_NO_DEMAND_SEGMENTS=1` | turn off demand segment allocation. **This row is the C emulator's and is still current.** The C# twin moved to `Config demand_segments on\|off` (positive polarity) — do not set the variable expecting it to steer RetroCore |
 | `--trace-file <path>` | full ordered instruction trace (~583 MB/compile) |
 
 ## Microword CpuND5000 (NuGet tests)
