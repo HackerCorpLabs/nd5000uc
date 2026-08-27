@@ -565,49 +565,22 @@ reported address as the data the program wanted would send the next reader to th
    discriminate on its own and needs a second signal saying whether the post SUCCEEDED and zero is
    the answer. The `unmapped`-versus-`zero` distinction already built into the state line is the
    right instrument; until it is pointed at this, `SWPFU=0` is not evidence of anything.
- - **CLOSED, 2026-08-28: `0x00000800` is probably not a base pointer at all.** The question was
-   framed as "is `0x800` the right base, or a mangled `0x8800`" - and the framing was the error.
-   There is exactly ONE `0x8800` in the whole run, and `0x0800` is a SEPARATE HALFWORD OF THE SAME
-   MESSAGE:
+ - **STILL OPEN: what the two CELLS hold.** `riom@0x08024144 = 0x00000800` and
+   `globals@0x0802620C = 0x00000800` are whole 32-bit cells on the base-pointer path the 7.7.2
+   carve describes; the carve's fixed octobus values were `0x00008800` in both, with a head at
+   `0x00008824`. Whether `0x00000800` is correct on this lane is **unverified**.
 
-       MSGBODY |00: FFFF FFFF 0001 0001 0000 0000 000C 0006 |08: 8800 0021 2400 0800 |16: 4800 ...
-                                                 MICFU=000C = 0o14 = RESIWR
+   **THIS BULLET WAS BRIEFLY MARKED CLOSED, AND THAT WAS AN ERROR - see 5f.** The RESIWR decode in
+   5f is correct and answers nothing here: it is about two HALFWORDS INSIDE A MESSAGE BODY, and
+   this question is about two 32-BIT CELLS IN ND-500 MEMORY. Different numbers that happen to
+   share the digits `800`. Whether the cells are filled FROM that message is itself unestablished.
 
-   Two different fields that coexist in one message were never one value before and after a mask,
-   so truncation (`0x8800` keeps its low bits and gives `0x8800`), unit conversion (a byte offset
-   `0x8800` as a word address would be `0x4400`) and "bit 15 was cleared" are all dead.
-   `0x800` is **exactly one ND-500 page** - `CpuND500.MMU.cs:39` `NBPG = 2048`,
-   `PAGE_OFFSET_MASK = 0x7FF`, PFNs derived as `dest >> 11` - and against the known offsets
-   (N5STA=2, SENDE=3, X5CPU=4, X5ACT=5, MICFU=6) index 9-10 reads as the ND-100 word address
-   `0x00212400`, the same family as `0x00210718`, with index 11 in the byte-count position. That
-   is a coherent one-page copy.
-
-   **`[V]` 2026-08-28 - discharged against the handler's own geometry, not against another
-   decode.** `Nd500MicrocodeServicer.cs` case 14B reads, byte-exact and microcode-verified:
-
-       destHi = word 7  (N500A)     destLo = word 8  (N500A_LO)
-       srcHi  = word 9  (STOPR)     srcLo  = word 10 (NUMPA)
-       nrbyt  = word 11 (MCNO, 0o13)
-
-   Applied to the measured body `... 000C 0006 | 8800 0021 2400 0800`:
-
-       destNd500 = 0x0006 << 16 | 0x8800 = 0x00068800     ND-500 destination
-       src       = 0x0021 << 16 | 0x2400 = 0x00212400     ND-100 word address
-       nrbyt     = 0x0800 = 2048                          exactly one page
-
-   **`0x8800` is the LOW HALFWORD OF THE DESTINATION ADDRESS `0x00068800`, and `0x0800` is the byte
-   count.** They are not the same number in two states, not related at all, and the one-bit
-   difference between them is a coincidence between a fragment of an address and a length. The
-   destination is page-aligned (`0x68800 & 0x7FF == 0`, page `0xD1`), which is the prediction this
-   decode had to satisfy and does.
-
-   This also disconnects it from the octobus base entirely: that `0x00008800` is a whole 32-bit
-   cell, while this `0x8800` is half of `0x00068800`.
-   The live possibility is that reading a SIZE as a POINTER gives a list head at `0x800 + 0o44`
-   that is permanently uninteresting - the same livelock, with the defect one level up in what
-   that cell MEANS rather than in a bit lost on the way.
- - Who fills the L1 page table for segment 22, and why that never happens after the swapper's
-   answer, is the next thing to carve.
+   Name the shape, because it is the sibling of the one in 5c: an **out-of-frame ANSWER** - true
+   about a number that is not the one in question. Like the out-of-frame instrument, its output
+   carries no signal of its own irrelevance, and it is MORE dangerous than a wrong answer because
+   it is satisfying. An open question with a good answer sitting next to it is the most reliable
+   way for an open question to disappear. The defence is the analogue of the one that worked in
+   5c: **state which ADDRESS the answer is about, not just what it says.**
 
 ### 5e. Marker corrections - three in one night, all the same mistake
 
@@ -619,3 +592,31 @@ going to appear from a program that paints a screen - LED emits
 
 Each marker was a guess about what a program prints, made while the program itself sat on disk
 available to be read. **Read the artefact, do not guess the banner.**
+
+## 6. Verified: the RESIWR message decode (this answers the BODY, not the cells)
+
+`[V]` 2026-08-28, discharged against the 14B handler's own parameter geometry in
+`Nd500MicrocodeServicer.cs`, which is microcode-verified:
+
+    destHi = word 7  (N500A)     destLo = word 8  (N500A_LO)
+    srcHi  = word 9  (STOPR)     srcLo  = word 10 (NUMPA)
+    nrbyt  = word 11 (MCNO, 0o13)
+
+Applied to the one measured body containing `8800`:
+
+    MSGBODY |00: FFFF FFFF 0001 0001 0000 0000 000C 0006 |08: 8800 0021 2400 0800
+                                              MICFU=000C = 0o14 = RESIWR
+
+    destNd500 = 0x0006 << 16 | 0x8800 = 0x00068800   ND-500 destination
+    src       = 0x0021 << 16 | 0x2400 = 0x00212400   ND-100 word address
+    nrbyt     = 0x0800 = 2048                        exactly one page
+
+So `0x8800` is the **low halfword of the destination address** `0x00068800` and `0x0800` is a
+**byte count**. They are not one value in two states and not two related fields - one is a
+fragment of a pointer, the other a length. The prediction attached to this decode was "a
+2048-byte copy to a page-aligned destination", and it holds: `0x68800 & 0x7FF == 0`, page `0xD1`.
+Discharged, not merely coherent.
+
+**WHAT THIS DOES NOT DO IS ANSWER 5d.** It disposes of the *coincidence* that made a lost-bit-15
+theory attractive - half an address happening to differ from a length by one bit - and it says
+nothing about what the two 32-bit cells hold or should hold.
