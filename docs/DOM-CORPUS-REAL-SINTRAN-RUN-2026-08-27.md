@@ -668,17 +668,85 @@ re-reading on every fault, which is what proves the watch covers the cell). No w
 in that slice, but reads flooded the ring, so "entry 2 is never written during RUN" is NOT
 yet established - only "not written recently". A writes-only re-run settles it.
 
-### 7a. The next question, and why it is not the obvious one
+### 7a. The next question - and a correction to how NOT to ask it
 
-The trap reports `addr=0xB0215310` while the operand's own EA is `ea=0xB000278C`
-(`mode=PREINDEXED reg=1 disp=0`). Pre-indexed means the instruction first READS a pointer at
-`0xB000278C` - which is inside L1 entry 0 and therefore mapped - and then uses that pointer.
-So `0xB0215310` is the POINTER'S VALUE, not an address the compiler emitted.
+RETRACTED, same day it was written: an earlier draft of this section said the trap address
+`0xB0215310` is the VALUE of a pointer the instruction reads pre-indexed, and that reading
+the 4 bytes at `ea=0xB000278C` would settle things. That is wrong on the evidence already in
+the log. `CpuND500.Fetch.cs` prints `pointer@0x.. held 0x..` whenever an operand actually
+indirects; the fault line prints plain `-> ea=0xB000278C`, so NO indirection happened. And
+this harness already records (see the note beside the 44B dump) that the `operand:` text
+carries the LAST recorded operand, which need not belong to the trapping instruction. So the
+operand line is not usable as evidence about this fault in either direction.
 
-That splits the next carve in two, and the two need opposite fixes:
-  - the pointer is legitimate and segment 22 really should be longer than 2 MB (then the
-    defect is in what SINTRAN was told the segment size is, at PLACE time); or
-  - the pointer is garbage read out of a page that was itself never correctly filled (then
-    `0x215310` is meaningless and chasing the segment length is chasing a symptom).
-Reading the 4 bytes at `0xB000278C` and asking where they came from separates them. Do that
-before touching either side. [OPEN]
+What survives is only what the walk itself derived:
+  - the translated address is `0xB0215310`; segment = bits 31-27 = `0x16` = 22, which matches
+    the walk's own `segment 22`;
+  - offset within the segment = `0xB0215310 AND 0x07FFFFFF` = `0x00215310` = ~2.08 MB;
+  - L1 index = bits 26-20 = 2, and entries 0-1 map only the first 2 MB.
+
+So the open question is why the domain reaches 2.08 MB into a segment with 2 MB mapped, and
+that is answered by decoding the FAILING instruction, not by chasing the stale operand. The
+bytes are already captured, with `P1` marking the failing instruction (`P1=0xB001D32C`, while
+`P`/`regs.PC` = `0xB001D333` - the usual P-runs-ahead gap):
+
+```
+CODE@0xB001D324: C4 B0 01 28 3C FE 24 51 >FD 20 C5 14 F4 00 0C 44 51 C6 13 FD 20 C4 B0 01
+```
+
+Decode from the `>` marker and read what the instruction addresses. [OPEN]
+
+Also still open, and cheaper: whether L1 entry 2 is EVER written during RUN. The first run
+could not say, because the ring saturated on reads. Re-run with the ring big enough to hold
+the whole run (18036 events measured) so no event is dropped and the read denominator is
+kept. [OPEN]
+
+## 8. The missing L1 entry is the tail of the loader's own DSEG - 43 pages short
+
+Lead from session nd500uc-47, checked here rather than adopted.
+
+**VERIFIED independently (file stat, not the claim):**
+`D:\ND\500\linkage-loader\linkage-load-h02.dseg` = **2,184,977 bytes**.
+ - pages needed at NBPG=2048: **1067**
+ - pages covered by L1 entries 0 and 1: 2 x 512 x 2048 = 2,097,152 = **1024**
+ - short by **43 pages** (87,825 bytes), and those 43 live exactly under L1 index 2.
+
+**VERIFIED here, and it is stronger than the size match:** the faulting offset is INSIDE the
+file, near its tail. Offset `0x215310` = 2,183,440, which is **1,537 bytes before EOF**. A
+wild pointer would have to land in the final 0.07% of the file by chance. The access is the
+loader reading its own data.
+
+**VERIFIED here - segment 22 IS the loader's segment** (nd500uc-47 correctly flagged this as
+the load-bearing unchecked step). It needs no new run: the FAILING INSTRUCTION is at
+`P1=0xB001D32C`, and `0xB001D32C >> 27` = 22. The code executing is itself in segment 22, so
+segment 22 is this domain's segment; `psn=12` behind `cap=0xC00C` is its DATA-side page table
+(`isInstruction=False`), i.e. the DSEG. One segment number cannot be two segments in one
+domain, so the size match is not a coincidence.
+
+**So the question flips again.** Not "why does the access go past the segment" - it does not
+go past anything, it reads the loader's own data. The question is **why the DSEG was mapped
+1024 pages when the file is 1067**. Note that 1024 pages is exactly TWO L1 entries, an
+exactly round stop at an L1 boundary, which is the shape of a limit rather than of an
+allocation that ran out.
+
+Two candidates, different culprits, and the DOM/DESCRIPTION-FILE entry separates them
+without booting anything:
+  - the descriptor declares the true 1067-page length and something truncates it to 2 entries
+    on the way to the page tables; or
+  - the descriptor itself declares 1024 and the file on the pack is simply longer than what
+    the domain was registered as.
+[OPEN]
+
+### 8a. The write question, closed as far as this instrument can close it
+
+Re-run with the ring at 65536: **81,668 events recorded, 65,536 shown, ZERO writes.** The
+read denominator is intact and large - 21,847 reads of entry 0, 5,459 of entry 1, 5,462 of
+entry 2 - so the watch demonstrably covers all three cells.
+
+State the limit exactly rather than rounding it to "never written":
+ - the ring is CLEARED when the watch arms at the first L1 fault, so this says nothing about
+   the writes that filled entries 0 and 1 - those happened earlier, by construction invisible;
+ - 16,132 of the 81,668 post-arm events still fell off the front.
+So the supported claim is: **no write reached the L1 table page in the last 65,536 events
+after the first fault**, which is consistent with SINTRAN never extending the mapping in
+response to 88 page-fault round trips - and is not the same sentence as "never written".
