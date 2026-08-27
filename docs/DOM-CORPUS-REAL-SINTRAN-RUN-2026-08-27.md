@@ -620,3 +620,65 @@ Discharged, not merely coherent.
 **WHAT THIS DOES NOT DO IS ANSWER 5d.** It disposes of the *coincidence* that made a lost-bit-15
 theory attractive - half an address happening to differ from a length by one bit - and it says
 nothing about what the two 32-bit cells hold or should hold.
+
+## 7. The L1 page table IS filled - the loader is running off the end of segment 22
+
+Measured 2026-08-28, linkage loader under real SINTRAN, classic lane. This replaces the
+working assumption "the L1 entry is never filled", which was never measured.
+
+**How it was aimed.** The PS_ADI walk now prints the address it read the decision from, and
+the watch is armed from that same derived address, so the instrument cannot be pointed at a
+different table than the subject. That is the fix for the PSTWATCH failure recorded in §5c:
+a watch aimed by hand reports true and irrelevant things forever.
+
+```
+L1TABLE=0x007F8800  pfnum=0xFF1  entry@0x007F8804  stride=2  readPFN=0x0  prot=0
+```
+
+`pfnum=0xFF1` is SINTRAN's own number: PSTWATCH caught it writing PST entry 12 = `0x8FF1`
+(bit 15 = flag, `0xFF1` = page). So the PST is read correctly and it places segment 22's L1
+table at ND-500 physical page `0xFF1` = byte `0x7F8800` = ND-100 physical `0xC18800`.
+
+**The address is backed.** `0x7F8804` is inside the 8 MB MPM (`DEFAULT_SHARED_MEMORY_SIZE`),
+so `RouteToMpm` reaches real memory. The zero is a genuine zero, NOT an unbacked read that
+returns zero and imitates an empty table. That possibility is closed.
+
+**The table contents, read off the wire:**
+
+| L1 index | ND-100 phys | halfword | verdict |
+|---|---|---|---|
+| 0 | `0xC18800` | `0x0FF7` | valid, L2 table at page `0xFF7` |
+| 1 | `0xC18802` | `0x0FF0` | valid, L2 table at page `0xFF0` |
+| 2 | `0xC18804` | `0x0000` | the faulting entry |
+
+Pages `0xFF7`, `0xFF1`, `0xFF0` are a coherent cluster of table pages at the top of ND-500
+physical memory - exactly the shape of a real allocation, not of garbage.
+
+**What this means.** L1 index = VA bits 26-20, so entries 0 and 1 map the first 2 MB of
+segment 22. The faulting address `0xB0215310` is offset `0x215310` = ~2.08 MB, one L2 table
+past the end of what is mapped. The failure is NOT broken page-table plumbing; it is a
+segment that is 2 MB long being accessed past its end, and 88 page-fault round-trips through
+real SINTRAN that do not extend it. A zero L1 entry behind a VALID capability is the
+documented swap-in request (ND-05.009.4 s4.3), so the request is being made correctly and
+is not being satisfied.
+
+**Instrument limit, stated so it is not over-read.** The ring recorded 18036 events and
+shows the last 4096, all reads (1365 x entry 0, 341 x entry 1, 342 x entry 2 - the walk
+re-reading on every fault, which is what proves the watch covers the cell). No write appears
+in that slice, but reads flooded the ring, so "entry 2 is never written during RUN" is NOT
+yet established - only "not written recently". A writes-only re-run settles it.
+
+### 7a. The next question, and why it is not the obvious one
+
+The trap reports `addr=0xB0215310` while the operand's own EA is `ea=0xB000278C`
+(`mode=PREINDEXED reg=1 disp=0`). Pre-indexed means the instruction first READS a pointer at
+`0xB000278C` - which is inside L1 entry 0 and therefore mapped - and then uses that pointer.
+So `0xB0215310` is the POINTER'S VALUE, not an address the compiler emitted.
+
+That splits the next carve in two, and the two need opposite fixes:
+  - the pointer is legitimate and segment 22 really should be longer than 2 MB (then the
+    defect is in what SINTRAN was told the segment size is, at PLACE time); or
+  - the pointer is garbage read out of a page that was itself never correctly filled (then
+    `0x215310` is meaningless and chasing the segment length is chasing a symptom).
+Reading the 4 bytes at `0xB000278C` and asking where they came from separates them. Do that
+before touching either side. [OPEN]
