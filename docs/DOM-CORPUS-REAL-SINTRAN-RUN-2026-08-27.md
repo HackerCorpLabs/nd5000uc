@@ -25,6 +25,48 @@ They share the servicer, the 5MPM message layout and the whole MON 60B command s
 | `PLACE-DOMAIN` | `[V]` (`725a1fb8f`) | blocked behind the swapper |
 | programs that RUN | `[V]` CPU-STAT, LED-FORTRAN-A01, LINKER-B01 | none |
 
+### 1b. THE ND-5000 SWAPPER STARTS - by NOT typing START-SWAPPER `[V]` 2026-08-27
+
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`: boot, login, `set-avail`, `@nd-500`,
+`define-swap-file swap-file:data`, `place-domain cpu-stat`, `run`. No `status`, no
+`START-SWAPPER`, no `GIVE-N500-PAGES`.
+
+| | with START-SWAPPER | short bring-up |
+|---|---|---|
+| `startSeen` | **0** | **1** |
+| `startMicfu` | 0B | **23B (3START)** |
+| `startTaken` | False | **True** |
+| monitor after it | every command STALLS | responsive |
+| MICFU traffic | watchdogs only | `1B:24 12B:1 23B:1 24B:1 31B:13` |
+
+`PLACE-DOMAIN` alone prints `> Loading Control Store` then `> Loading Swapper`, and the swapper
+then STARTS: 13 `PHYSWR` page writes, one MON 377B answered (`ansSWPFU=1B`), one restart taken,
+and it parks at `PC=0x08008255` - the SAME MON 377B site it reaches on the working ND-500 lane.
+
+**So the hang was a command nobody was supposed to type.** ND-60.136.04A 8.10.10.4 says of
+LOAD-SWAPPER "Normally, this is done automatically when the first ND-500 process is initiated by
+the monitor", and ND-30.003.7 calls the long form the ADVANCED start, for diagnosis. Credit to
+the peer session for the suggestion; it cost one run to rule in.
+
+> ### BOTH MY GENERATION HYPOTHESES ARE REFUTED - keep this, do not re-derive them
+> I had two candidates for the hang, each with a real argument behind it:
+> **MICFU 05 (3SWMESS)** - refused on the ND-5000 arm, and the peer measured SINTRAN posting it
+> 38 times per run on the ND-500 transport; and **MICFU 21B (3WREG)** - refused on the ND-5000
+> arm, whose own code comment calls it "the LOAD-SWAPPER blocker".
+>
+> **NEITHER APPEARS ANYWHERE IN THE RUN.** The MICFU histogram is `1B, 12B, 23B, 24B, 31B` and
+> nothing else. SINTRAN never posts 05 or 21B on this path at all, so no generation arm was
+> involved and changing one would have fixed nothing while looking like a fix.
+>
+> Both hypotheses were well-argued, mutually consistent with the evidence available, and wrong.
+> The only thing that separated them from the truth was refusing to edit before measuring.
+
+**WHAT IS STILL OPEN.** `place-domain` did not finish inside 300s and `run` added nothing but
+watchdogs (`1B` 24 -> 60), so the domain is not placed and CPU-STAT does not run on this lane
+yet. The swapper is parked on a MON 377B that gets no further restart. That is the next question,
+and it is a DIFFERENT one from the hang that is now closed.
+
+---
 ### 1a. On the octobus lane, `START-SWAPPER` HANGS THE MONITOR `[V]`
 
 Measured 2026-08-27 on the ND-5000 master pack (correct 262144-byte ND-5000 microcode on the
@@ -161,6 +203,60 @@ instructions execute and **nothing else**. It is a source of BANNER TEXT, not of
 
 ---
 
+## 3a. THE DEFECT THAT INVALIDATED THE FIRST RESULTS - fixed and verified `[V]`
+
+**Programs halted the moment they tried to PRINT.** Six halts in one corpus run, three different
+MON numbers, one reason string:
+
+```
+Reason: MON 2:  sink attached but call not taken (no active process message?)   x4
+Reason: MON 26: sink attached but call not taken (no active process message?)
+Reason: MON 75: sink attached but call not taken (no active process message?)   x2
+```
+
+`MON 2` is OutByte. (The reason string prints DECIMAL while the traces print octal - `26` is
+`32B`, `75` is `113B`. Worth knowing before concluding they are different calls.)
+
+`OnMonitorCall` guarded on `ActiveProcessMessageAddress` alone and declined the call when it was
+zero - but **that field is cleared by every answer**, so a running process legitimately has it at
+zero. The guard therefore refused calls the answer path immediately below it would have resolved
+from the per-process map without difficulty, and the CPU halted on the false return.
+
+Fixed in `e5bf290fd` (guard now asks `CanAnswerStopOnSomeMessage`, the same question the selector
+answers, and still returns false when nothing resolves anywhere) plus `94d6c3cd7` (the
+`MSG-RESCUE` log made to read the same field as the behaviour it reports).
+
+**VERIFIED on the lane that produced it:**
+
+| | before | after |
+|---|---:|---:|
+| halts | 6 | **0** |
+| CODE-COVERAGE `RUN marker` | -1 (false timeout) | **0 - its own banner** |
+| tests | failed | **2/2 passed** |
+| `MSG-RESCUE` fired | n/a | 3 |
+
+### The open question this raised, and its answer: THERE WAS NO MYSTERY `[V]`
+
+I claimed a restart-tail should have set the field and had not - "one specific unexplained
+transition". **Wrong.** All three rescues are identical in shape:
+
+```
+MON 2B argc=2 ... X5CPU=1 | [1] @0x08004F98=0x00000061 'a'    print one character
+  CONTEXT SAVE X5CPU=1 (monitor-call stop)
+  RESTART K=0 ... SWPFU=0x0001 SWPST=0x0061                    the ANSWER to that call
+  MSG-RESCUE MON 2B: ActiveProcessMessageAddress was 0 ...
+```
+
+That is CODE-COVERAGE printing its welcome ONE CHARACTER AT A TIME - the three rescues carry
+`'a'`, `' '` and `'m'`. Every rescue follows an ANSWER, which clears the field BY DESIGN. No
+restart-tail is involved anywhere.
+
+**How the wrong claim was produced:** by assembling a sequence from two separate greps of an
+append-only log instead of printing one region in order. That is the SECOND time in this session
+- the AUTOMAKE 113B analysis failed the same way and was corrected the same way. The tell is
+identical both times: being able to name WHICH events happened but not which FOLLOWED which.
+
+---
 ## 4. RESULTS ON THE REAL-SINTRAN LANE
 
 Each row is `Nd500_<name>_UnderRealSintran_RealCpu_Capture`. The two hard assertions in the shared
@@ -173,12 +269,12 @@ helper are what make a row mean anything:
 |---|---|---:|---:|---|
 | CPU-STAT | `[V]` prior | | 0 | runs |
 | LED-FORTRAN-A01 | `[V]` prior | | 0 | runs |
-| CONVERT-DOM-A03 | `[OPEN]` | | | |
+| CONVERT-DOM-A03 | **`[V]` prints** | 36 | 0 | **RUNS to its prompt** - callg family NOT yet exercised |
 | CAT-CAT5-B06 | **`[V]` prints** | 263 page faults serviced | 0 | **RUNS AND TERMINATES CLEANLY** |
 | PLANC-500-G00 | `[OPEN]` | | | |
 | NC-A06 | `[OPEN]` | | | |
 | AUTOMAKE-500-C00 | `[OPEN]` | | | |
-| CODE-COVERAGE | `[OPEN]` | | | |
+| CODE-COVERAGE | **`[V]` prints, matches nd500x** | 16 | 0 | **RUNS** - scored -1 only by a harness ordering trap |
 | LINKAGE-LOAD-H02 | `[OPEN]` | | | from the floppy |
 
 **Known blocker, not a new finding:** NC-A06 calls `MON 422B` (GSWSP), the same call that stops
@@ -208,6 +304,146 @@ ADDRESS advances while the PC stands still.
 
 This also settles the first half of the bring-up question on this lane: **the swapper starts
 and allocates**, with no error code. `START-SWAPPER` failing is an OCTOBUS-ONLY defect (section 1a).
+### 4b. AUTOMAKE-500-C00 `[V]` - SINTRAN never answers its MON 113B (GetCurrentTime)
+
+Reproduced FIVE times, byte-identical, so this is a defect and not flakiness. Read the log IN
+SEQUENCE - the ordered trace is the whole finding:
+
+```
+CONTEXT SWITCH X5CPU=0 -> 1 (P=0x0800B98F PS=10 CED=0)
+CONTEXT SAVE   X5CPU=1 P=0x0800BE6D (regs.PC=0x0800BE72 P1=0x0800BE6D retry=True) (trap stop)
+TRAP 46B pc=0x0800BE6D addr=0x08007A84   PTE not present, psn=12, segment 1, took=True
+MON 113B argc=1 ret=0x0800BE72 | UCODE-ROLE=Forwarded | [0] @0x08007A84=0x00000000
+CONTEXT SAVE   X5CPU=1 P=0x0800BE6D (regs.PC=0x0800BE6D P1=0x0800BE6D retry=False) (monitor-call stop)
+RESTART write-back: (empty)
+[nothing further - 600s of 3RMICV watchdogs]
+
+PROCESS-MESSAGE MAP: X5CPU=0->0x00420D30 X5CPU=1->0x00420E30 | loaded=1 | Active=0x00420E30
+```
+
+**`MON 113B` is `GetCurrentTime`** - `MCTAB` `005733B`, worker `CLOCK=040756`
+(`MON-CALL-INDEX.md` line 120).
+
+**What is CORRECT here, and it is most of the path.** The page fault at `0x08007A84` is the
+MON's own argument buffer, so the fault is the ordinary consequence of reaching for an argument
+that was not paged in; it was serviced (`took=True`). The call was then TAKEN - the
+`(monitor-call stop)` context save only happens on a taken call - and posted on the DOMAIN's own
+message `0x00420E30`, which the end-of-run map confirms. Our side did its job.
+
+**What is wrong: SINTRAN does not answer it.** No restart of any kind arrives for 600 seconds.
+
+The HALT that ends the run is a CONSEQUENCE, not the cause. The CPU is later woken without an
+answer, re-executes the `CALLG`, and re-issues `113B` at a moment when
+`ActiveProcessMessageAddress` has been cleared, so `OnMonitorCall` declines and
+`CpuND500.IndirectSegments.cs:206` halts honestly:
+
+```
+Reason: MON 75: sink attached but call not taken (no active process message?)
+```
+
+(`MON 75` decimal IS `113B` octal - the message prints decimal and the trace prints octal, which
+is worth knowing before concluding they are two different calls.)
+
+> ### A WRONG READING I PUBLISHED FIRST, kept so it is not re-derived
+> I read the ACTIVE-MSG trail and the MON exchange from two SEPARATE greps and assembled an
+> order that the log does not have. That produced a confident and wrong hypothesis: that
+> `3WMONCO` (the WRITE-monitor-continue variant, seen near the silence) was failing to deliver a
+> buffer write-back. The `3WMONCO` arm is fully implemented and its restart WAS taken.
+> **Two greps of one file are not a sequence.** Print the region once, in order, and read it.
+
+> NOT a candidate either: the `MON 422B` (GSWSP) gap. That one answers `K=1 / 1013B` - an ERROR
+> that ARRIVES. This is silence. An error reply and no reply are different failures with
+> different fixes.
+
+**Next measurement, and it is on the ND-100 side:** find out what SINTRAN does with a forwarded
+`113B`. Does `MCTAB[113B]` get entered at all, does `CLOCK` run, and does the answer path try to
+post a restart that never reaches the mailbox? Until that is measured the owner of this defect
+is `[OPEN]` - it is not established that it is ours.
+### 4c. BM-FILERE-B02 `[V]` - FREE SEGMENT NOT FOUND, and it is the PACK, not the emulator
+
+```
+place-domain bm-filere-b02
+> Loading Control Store
+> Loading Swapper
+> Allocating memory - 7116B pages
+"BM-FILERE-XX-B02:SEG"
+FREE SEGMENT NOT FOUND
+N500:
+run
+NO WELL DEFINED PROGRAM IN MEMORY
+```
+
+BM-FILERE is the ONLY multi-segment DOM in the corpus (DATA in segment 1, PROG in segment 2,
+entry `0x1000A2DC`). Placing it needs a SECOND ND-500 segment allocated, SINTRAN names the
+segment file it wants to make - `BM-FILERE-XX-B02:SEG` - and the pack has no free segment-table
+entry to give it. `RUN` then correctly reports no program in memory.
+
+**This is a pack configuration limit, not an emulation defect**, and the mailbox trace agrees:
+every message in the run is on `X5CPU=0`, the SWAPPER, which keeps working normally throughout.
+The domain never receives a `3START` because it was never placed. A run that produced no domain
+activity looks like a dead CPU until you read the line SINTRAN printed.
+
+Fix direction (untested, `[D]`): the pack registers `SCRATCH-DOMAIN` and `SCRATCH-SEG-01` in its
+description file, which is the scratch-segment machinery this path wants. Whether the shortfall
+is the segment TABLE being full or the scratch segment being absent is one
+`LIST-SEGMENT-TABLE-ENTRY ALL` away and has not been measured.
+### 4d. CODE-COVERAGE `[V]` - RUNS, and the `-1` was the INSTRUMENT
+
+Scored `RUN marker index = -1`, which reads as a stall. It is not one. The program was parked
+`stopMode=WAIT` on `MON 1B` (InByte - `MCTAB 005621B`, worker `YFGET=026576`) after 16 clean MON
+round trips, none answered by our C# layer. The moment the harness typed `exit` - satisfying that
+pending read - the whole thing came out:
+
+```
+Welcome to the code-coverage analyzer, version of DECEMBER 3, 1986 for ND-500
+This program will combine a DEBUGGER dump-log file and a
+source listing and produce a listing where the non
+executed statements are highlighted.
+Errors and remarks can be directed to OJH, M4.
+Program language:
+Unknown language
+Program language:
+```
+
+**Byte-for-byte what `nd500x` produces** - including consuming `exit` as the language answer and
+rejecting it. The program runs correctly under real SINTRAN.
+
+**THE TRAP, and it will hit other programs in this corpus.** `RunDomainUnderRealSintran` waits
+for a banner and NEVER TYPES ANYTHING after `RUN`. This program's output does not reach the
+console until its input read is satisfied. So the test waits for output that the program is
+withholding until you type, and types nothing - a deadlock between the instrument and the
+subject, scored as a defect in the subject.
+
+An earlier reading of this same run said the program "issues no output MON before its first
+read" and left the reason `[OPEN]`. That was right to leave open and the answer is ordinary:
+the output happens, it just arrives with the read.
+
+Most of this corpus is interactive - `Auto:`, `Program language:`, `FCOM:`, `NDL:`,
+`Give real as ASCII string:` - so this ordering must be fixed before any of their `-1` results
+mean anything.
+### 4e. CONVERT-DOM-A03 `[V]` runs - but the pairing below is NOT yet decided
+
+Same shape as CODE-COVERAGE: 36 clean MON round trips, none answered by our C# layer, then
+parked `stopMode=WAIT` on `MON 1B` (InByte). Its banner appears once the read is satisfied:
+
+```
+- Convert Domain, Version A03            January 24, 1989
+```
+
+**BUT ITS MON CENSUS THIS RUN IS `377B` x37 AND `1B` x1 - NOTHING ELSE.** It reached its first
+prompt and stopped. The 69 MON sites and `513B` x14 that make it the corpus's heaviest
+callg-family user are NOT exercised by simply starting it. So this run proves the DOM loads,
+executes and reaches its prompt on the real lane; it proves NOTHING about the callg family, and
+the CONVERT-vs-CAT control below is still undecided.
+
+To decide it the program has to be DRIVEN - fed a real CONVERT-DOMAIN command - not merely
+started. That is the same distinction as "the process is alive" vs "the process did the work".
+
+> METHOD NOTE. Grepping the log for the banner returned THREE hits and only ONE was the program.
+> The other two were the harness's own text - the `wait:` line and the `RUN marker index` line
+> both quote the marker string. Counting them would have turned one real result into three.
+> The plan document already records this exact failure once ("a grep over the whole log measured
+> MY OWN INPUT and reported it as a property of the program"). Check WHERE each hit is.
 **The pairing that makes CONVERT-DOM and CAT-CAT5 worth running together:** CONVERT-DOM is the
 heaviest `callg`-family user in the corpus (69 MON sites, 43 distinct, `513B` ×14); CAT-CAT5 has
 **zero** callg and no `511B/512B/513B/514B` at all. If CAT passes and CONVERT fails, the fault is in
