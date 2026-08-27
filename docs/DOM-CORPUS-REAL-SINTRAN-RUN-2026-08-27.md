@@ -559,12 +559,34 @@ reported address as the data the program wanted would send the next reader to th
 
 ### 5d. Open, and deliberately not answered here
 
- - `SWPFU=0`. The carve records `SWACTIVE=0` as the **fatal** GOSW slot (7.7.2). Whether this
-   zero is the same zero that used to produce 201B, and why it now spins instead of failing, is
-   unknown.
- - `0x00000800` read as a classic WORD address maps to byte `0x1000`, near the very bottom of the
-   window. The octobus fix landed on `0x00008800`. Whether `0x800` is correct on this lane or a
-   truncation of `0x8800` is **unverified**, and neither has been assumed.
+ - `SWPFU=0`. The carve records `SWACTIVE=0` as the **fatal** GOSW slot (7.7.2), which invites
+   linking the two. **Do not lean on it.** Zero is both "no function posted" and a legitimate slot
+   value, so this is the failed-read-versus-real-value trap again: the observation cannot
+   discriminate on its own and needs a second signal saying whether the post SUCCEEDED and zero is
+   the answer. The `unmapped`-versus-`zero` distinction already built into the state line is the
+   right instrument; until it is pointed at this, `SWPFU=0` is not evidence of anything.
+ - **CLOSED, 2026-08-28: `0x00000800` is probably not a base pointer at all.** The question was
+   framed as "is `0x800` the right base, or a mangled `0x8800`" - and the framing was the error.
+   There is exactly ONE `0x8800` in the whole run, and `0x0800` is a SEPARATE HALFWORD OF THE SAME
+   MESSAGE:
+
+       MSGBODY |00: FFFF FFFF 0001 0001 0000 0000 000C 0006 |08: 8800 0021 2400 0800 |16: 4800 ...
+                                                 MICFU=000C = 0o14 = RESIWR
+
+   Two different fields that coexist in one message were never one value before and after a mask,
+   so truncation (`0x8800` keeps its low bits and gives `0x8800`), unit conversion (a byte offset
+   `0x8800` as a word address would be `0x4400`) and "bit 15 was cleared" are all dead.
+   `0x800` is **exactly one ND-500 page** - `CpuND500.MMU.cs:39` `NBPG = 2048`,
+   `PAGE_OFFSET_MASK = 0x7FF`, PFNs derived as `dest >> 11` - and against the known offsets
+   (N5STA=2, SENDE=3, X5CPU=4, X5ACT=5, MICFU=6) index 9-10 reads as the ND-100 word address
+   `0x00212400`, the same family as `0x00210718`, with index 11 in the byte-count position. That
+   is a coherent one-page copy. `[D]` - the field positions past MICFU=6 are decoded against a
+   layout verified only for the first seven offsets, and a coherent-looking decode is how three
+   wrong conclusions started on 2026-08-27. Settle it from the RESIWR handler's own parameter
+   geometry, which the copy engine already encodes.
+   The live possibility is that reading a SIZE as a POINTER gives a list head at `0x800 + 0o44`
+   that is permanently uninteresting - the same livelock, with the defect one level up in what
+   that cell MEANS rather than in a bit lost on the way.
  - Who fills the L1 page table for segment 22, and why that never happens after the swapper's
    answer, is the next thing to carve.
 
