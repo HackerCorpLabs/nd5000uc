@@ -257,6 +257,68 @@ append-only log instead of printing one region in order. That is the SECOND time
 identical both times: being able to name WHICH events happened but not which FOLLOWED which.
 
 ---
+## 3b. LINKAGE-LOAD-H02 PLACES `[V]` - and the two things that were stopping it were both NAMES
+
+```
+place-domain (210319H02:FLOPPY-USER)LINKAGE-LOAD-H02
+> Loading Control Store
+> Loading Swapper
+> Allocating memory - 7116B pages
+N500:
+[SWAPMAP] mapped dom=0 progSeg=1 dataSeg=1 P=0x08000004
+          PSEG=0x0006F800+0x9800  DSEG=0x00024800+0x35800  (program+data MMU enabled)
+```
+
+Neither blocker was in the emulator. Both were how the domain was NAMED.
+
+**1. `ENTER-DIRECTORY` with a blank name.** Blank takes the directory name from the VOLUME LABEL,
+mounting it as `210319H02-XX-01D`, while the domain's own `DESCRIPTION-FILE:DESC` names its
+segments with the SHORT form. Read out of the floppy - 5 printable runs in 22528 bytes:
+
+```
+'@@LINKAGE-LOAD-H02'
+'(210319H02:FLOPPY-USER)LINKAGE-LOAD-H02'
+'(210319H02:FLOPPY-USER)SCRATCH-SEG-01'
+```
+
+**2. `NO SPACE IN DEFAULT DIRECTORIES` is not about space.** It means "not in your DEFAULT
+directories". `(FLOPPY-USER)X` names a USER and no DIRECTORY, so SINTRAN searches only the
+defaults - and the floppy is not one, even though it IS entered. The same run proves the mount:
+
+```
+DIR INDEX  0 : DISC-75MB-1   UNIT 0 : PACK-ONE
+DIR INDEX 40 : FLOPPY-DISC-1 UNIT 0 : 210319H02-XX-01D
+```
+
+**"Entered" and "searched by default" are different things**, and a listing that shows the mount
+is NOT evidence the name will resolve. Naming the directory fixes it, and the short form resolves
+against the label-mounted directory by SINTRAN's prefix matching - confirmed by SINTRAN's own
+`LIST-FILES` answering True for `(210319H02:FLOPPY-USER)LINKAGE-LOAD-H02`.
+
+Confirmed in passing: **`ENTER-DIRECTORY` ignores the name it is given and uses the label anyway**,
+exactly as the 2026-07-31 note warned. The `LIST-DIRECTORIES-ENTERED` step is kept precisely so
+the transcript records what it MOUNTED AS rather than what was asked for.
+
+### What still fails: RUN, on swapper `201B` `[V]`
+
+```
+*** FATAL SYSTEM ERROR ***
+ND-500(0) error:      Fatal error from Swapper
+ERROR CODE:           201B
+                      ND-500(0) CPU locked
+```
+
+9002 MON round trips through real SINTRAN, none answered by our C# layer, before it dies.
+
+**`201B` is already carved** and should not be re-derived: the swapper routine at `1000107011`
+walks a list in PHYSICAL memory (under `DMOF`), counts elements whose halfword at `+8` is 1, and
+reports internal code `0o201` when it counts NONE. So the question is which list is empty and who
+was supposed to fill it - not what the code means.
+
+Distinct from `200B`, which is the list-walk running PAST its limit word. Both are swapper
+internals; neither is "a hardware fault", which is a different namespace.
+
+---
 ## 4. RESULTS ON THE REAL-SINTRAN LANE
 
 Each row is `Nd500_<name>_UnderRealSintran_RealCpu_Capture`. The two hard assertions in the shared
@@ -267,15 +329,15 @@ helper are what make a row mean anything:
 
 | program | banner | MON round-trips | fake answers | verdict |
 |---|---|---:|---:|---|
-| CPU-STAT | `[V]` prior | | 0 | runs |
+| CPU-STAT | **`[V]` prints** | | 0 | **RUNS** |
 | LED-FORTRAN-A01 | `[V]` prior | | 0 | runs |
 | CONVERT-DOM-A03 | **`[V]` prints** | 36 | 0 | **RUNS to its prompt** - callg family NOT yet exercised |
 | CAT-CAT5-B06 | **`[V]` prints** | 263 page faults serviced | 0 | **RUNS AND TERMINATES CLEANLY** |
 | PLANC-500-G00 | `[OPEN]` | | | |
 | NC-A06 | `[OPEN]` | | | |
-| AUTOMAKE-500-C00 | `[OPEN]` | | | |
+| AUTOMAKE-500-C00 | **`[V]` prints** | | 0 | **RUNS** |
 | CODE-COVERAGE | **`[V]` prints, matches nd500x** | 16 | 0 | **RUNS** - scored -1 only by a harness ordering trap |
-| LINKAGE-LOAD-H02 | `[OPEN]` | | | from the floppy |
+| LINKAGE-LOAD-H02 | n/a | 9002 | 0 | **PLACES** from the floppy; RUN dies swapper `201B` |
 
 **Known blocker, not a new finding:** NC-A06 calls `MON 422B` (GSWSP), the same call that stops
 CPU-STAT's runtime init on an L-version pack — this SINTRAN answers `K=1 / 1013B` "illegal monitor
@@ -304,89 +366,80 @@ ADDRESS advances while the PC stands still.
 
 This also settles the first half of the bring-up question on this lane: **the swapper starts
 and allocates**, with no error code. `START-SWAPPER` failing is an OCTOBUS-ONLY defect (section 1a).
-### 4b. AUTOMAKE-500-C00 `[V]` - SINTRAN never answers its MON 113B (GetCurrentTime)
-
-Reproduced FIVE times, byte-identical, so this is a defect and not flakiness. Read the log IN
-SEQUENCE - the ordered trace is the whole finding:
+### 4b. AUTOMAKE-500-C00 `[V]` RUNS - and my MON 113B finding was WRONG
 
 ```
-CONTEXT SWITCH X5CPU=0 -> 1 (P=0x0800B98F PS=10 CED=0)
-CONTEXT SAVE   X5CPU=1 P=0x0800BE6D (regs.PC=0x0800BE72 P1=0x0800BE6D retry=True) (trap stop)
-TRAP 46B pc=0x0800BE6D addr=0x08007A84   PTE not present, psn=12, segment 1, took=True
-MON 113B argc=1 ret=0x0800BE72 | UCODE-ROLE=Forwarded | [0] @0x08007A84=0x00000000
-CONTEXT SAVE   X5CPU=1 P=0x0800BE6D (regs.PC=0x0800BE6D P1=0x0800BE6D retry=False) (monitor-call stop)
-RESTART write-back: (empty)
-[nothing further - 600s of 3RMICV watchdogs]
-
-PROCESS-MESSAGE MAP: X5CPU=0->0x00420D30 X5CPU=1->0x00420E30 | loaded=1 | Active=0x00420E30
+ND-500 - AUTOMAKE - Version C00  April 27, 1987
+RUN marker index = 0
 ```
 
-**`MON 113B` is `GetCurrentTime`** - `MCTAB` `005733B`, worker `CLOCK=040756`
-(`MON-CALL-INDEX.md` line 120).
+**RETRACTED: "SINTRAN never answers its MON 113B (GetCurrentTime)".** That was reproduced five
+times and written up here as a headline finding with a full trace behind it. It was still wrong.
 
-**What is CORRECT here, and it is most of the path.** The page fault at `0x08007A84` is the
-MON's own argument buffer, so the fault is the ordinary consequence of reaching for an argument
-that was not paged in; it was serviced (`took=True`). The call was then TAKEN - the
-`(monitor-call stop)` context save only happens on a taken call - and posted on the DOMAIN's own
-message `0x00420E30`, which the end-of-run map confirms. Our side did its job.
+What actually blocked AUTOMAKE was the shared-bridge halt in section 3a - `OnMonitorCall`
+declining a call because a field the previous answer had cleared was zero. `113B` was merely the
+LAST CALL BEFORE THE CPU STOPPED, and I read "last thing in the trace" as "the thing that failed".
+With the guard fixed, AUTOMAKE issues `113B` REPEATEDLY - it is a clock poll - and prints its
+banner.
 
-**What is wrong: SINTRAN does not answer it.** No restart of any kind arrives for 600 seconds.
+**The lesson is not "113B was fine", it is about the inference.** A trace that ENDS at call X
+tells you X was last. It does not tell you X was refused, and it does not tell you X caused the
+stop. Distinguishing those needs the stop REASON, which was available the whole time
+(`sink attached but call not taken`) and named a different call - `MON 2`, OutByte - in the same
+log I was quoting from.
 
-The HALT that ends the run is a CONSEQUENCE, not the cause. The CPU is later woken without an
-answer, re-executes the `CALLG`, and re-issues `113B` at a moment when
-`ActiveProcessMessageAddress` has been cleared, so `OnMonitorCall` declines and
-`CpuND500.IndirectSegments.cs:206` halts honestly:
+Five reproductions did not make it true. They reproduced the SYMPTOM faithfully and I attached the
+wrong cause to it every time.
 
-```
-Reason: MON 75: sink attached but call not taken (no active process message?)
-```
-
-(`MON 75` decimal IS `113B` octal - the message prints decimal and the trace prints octal, which
-is worth knowing before concluding they are two different calls.)
-
-> ### A WRONG READING I PUBLISHED FIRST, kept so it is not re-derived
-> I read the ACTIVE-MSG trail and the MON exchange from two SEPARATE greps and assembled an
-> order that the log does not have. That produced a confident and wrong hypothesis: that
-> `3WMONCO` (the WRITE-monitor-continue variant, seen near the silence) was failing to deliver a
-> buffer write-back. The `3WMONCO` arm is fully implemented and its restart WAS taken.
-> **Two greps of one file are not a sequence.** Print the region once, in order, and read it.
-
-> NOT a candidate either: the `MON 422B` (GSWSP) gap. That one answers `K=1 / 1013B` - an ERROR
-> that ARRIVES. This is silence. An error reply and no reply are different failures with
-> different fixes.
-
-**Next measurement, and it is on the ND-100 side:** find out what SINTRAN does with a forwarded
-`113B`. Does `MCTAB[113B]` get entered at all, does `CLOCK` run, and does the answer path try to
-post a restart that never reaches the mailbox? Until that is measured the owner of this defect
-is `[OPEN]` - it is not established that it is ours.
-### 4c. BM-FILERE-B02 `[V]` - FREE SEGMENT NOT FOUND, and it is the PACK, not the emulator
+### 4c. BM-FILERE-B02 `[V]` - CANNOT RUN: a companion file that exists nowhere
 
 ```
 place-domain bm-filere-b02
 > Loading Control Store
 > Loading Swapper
-> Allocating memory - 7116B pages
+> Allocating memory - 7116B pages          <- pages were NOT the shortfall; this SUCCEEDED
 "BM-FILERE-XX-B02:SEG"
 FREE SEGMENT NOT FOUND
-N500:
-run
-NO WELL DEFINED PROGRAM IN MEMORY
 ```
 
-BM-FILERE is the ONLY multi-segment DOM in the corpus (DATA in segment 1, PROG in segment 2,
-entry `0x1000A2DC`). Placing it needs a SECOND ND-500 segment allocated, SINTRAN names the
-segment file it wants to make - `BM-FILERE-XX-B02:SEG` - and the pack has no free segment-table
-entry to give it. `RUN` then correctly reports no program in memory.
+**The message is LITERALLY TRUE and names a FILE.** Not a table-full condition, and not a page
+shortage - both of which were guessed here before anyone decoded the DOM.
 
-**This is a pack configuration limit, not an emulation defect**, and the mailbox trace agrees:
-every message in the run is on `X5CPU=0`, the SWAPPER, which keeps working normally throughout.
-The domain never receives a `3START` because it was never placed. A run that produced no domain
-activity looks like a dead CPU until you read the line SINTRAN printed.
+`:SEG` is the ND Linker's "free segment" file type: one program+data segment pair in its own
+file, referenced by one or more `:DOM` files and matched by link key. Decoding BM-FILERE's own
+segment table (at `0x254`, 32 descriptors of 56 bytes) against CPU-STAT as a control:
 
-Fix direction (untested, `[D]`): the pack registers `SCRATCH-DOMAIN` and `SCRATCH-SEG-01` in its
-description file, which is the scratch-segment machinery this path wants. Whether the shortfall
-is the segment TABLE being full or the scratch segment being absent is one
-`LIST-SEGMENT-TABLE-ENTRY ALL` away and has not been measured.
+```
+CPU-STAT        slot1 PROG  ATT=0x10002000   LINKED_SEGMENT clear
+                slot1 DATA  ATT=0xE1002000   LINKED_SEGMENT clear    -> self-contained
+
+BM-FILERE-B02   slot1 PROG  ATT=0x00006000   LINKED_SEGMENT SET
+                slot2 DATA  ATT=0x00006000   LINKED_SEGMENT SET
+```
+
+On the two linked parts `LB` is not a file offset but a NAME-POOL INDEX, and `SZ` is not a size
+but the LINKKEY to match the target's LINKLOCK. The name pool spells out `BM-FILERE-XX-B02:SEG` -
+exactly what SINTRAN printed.
+
+**The file exists nowhere.** Scanned independently, driving the ndfs library directly rather than
+through a wrapper: 17 packs on `D:` opened, 2 correctly refused (BSD and Sun images, not ND),
+**zero files of type `:SEG` on any pack**, and exactly ONE BM-FILERE file in existence - the `.DOM`
+itself. `ND500-APPS\BM-FILERE-B02iles\` holds only `BM-FILERE-B02.DOM`.
+
+**VERDICT: "cannot run - missing artefact", NOT an emulator failure and NOT a pack that needs
+rebuilding.** The companion file was never captured. No amount of pack-building fixes it. Do not
+spend further corpus time on this program.
+
+> ### METHOD: TEST THE INSTRUMENT WITH A POSITIVE CONTROL BEFORE BELIEVING A ZERO
+> The first search for the `:SEG` file used a bundled scanner and returned nothing - which was
+> nearly reported as "it does not exist". The check that saved it: re-run the SAME scan for
+> **CPU-STAT**, a name known to be on those packs. That returned nothing too. So the zero was
+> about the INVOCATION, not the disk.
+>
+> A search that finds nothing is a statement about your method until you have shown the method
+> can find something. The numbers above are auditable for that reason - packs opened, packs
+> refused and named - rather than a bare "not found".
+
 ### 4d. CODE-COVERAGE `[V]` - RUNS, and the `-1` was the INSTRUMENT
 
 Scored `RUN marker index = -1`, which reads as a stall. It is not one. The program was parked
