@@ -501,3 +501,80 @@ started. That is the same distinction as "the process is alive" vs "the process 
 heaviest `callg`-family user in the corpus (69 MON sites, 43 distinct, `513B` ×14); CAT-CAT5 has
 **zero** callg and no `511B/512B/513B/514B` at all. If CAT passes and CONVERT fails, the fault is in
 the callg family and nowhere else.
+
+## 5. The linkage loader: 201B did not reproduce, and the failure moved to a page-fault loop
+
+Measured 2026-08-28, two consecutive runs, the second with the loader as the **only** test so that
+pack state written by earlier tests cannot explain it.
+
+### 5a. What is now ruled out
+
+    ND100MAP configured base=0x00000000 bytesPerUnit=2 windowBase=0x00420000
+    RIOM 0x00210718 -> mapped=0x00000E30 dest=0x080240BC hw=20
+    riom@0x08024144 = 0x00000800   globals@0x0802620C = 0x00000800
+
+That is the expected classic pair, and `0x00000E30` is the target the 2026-08-23 correction in
+`Nd500CpuProcessBridge.cs` names as correct. The base-pointer chain is healthy from PLACE-DOMAIN
+onward, not merely at the end. **The known 2026-08-23 window-base defect is not the cause here.**
+
+`ERROR CODE 201B` did not appear in either run. This is **NOT** recorded as a fix - nothing was
+changed that could have fixed it (a read-only report and a comment), and run-to-run
+nondeterminism is already documented for this family in
+`OCTOBUS-SWAPPER-HANDOFF-2026-07-25.md` 7.7.3. It is recorded as *did not reproduce, twice, one
+isolated*, and the earlier 201B stands as a real observation that currently cannot be reproduced.
+
+### 5b. What actually happens now
+
+13,086 real MON round trips, `answeredByCsharpEmulation=0`, CPU still at `stopMode=NONE`. The run
+never ends; it cycles. One complete cycle, read in order rather than assembled from greps:
+
+    loader  X5CPU=1  P=0xB001D32C  -> TRAP 46B, addr=0xB0215310, psn=12
+    context switch   X5CPU=1 -> 0
+    swapper X5CPU=0  P=0x08008255  -> MON 377B, restart K=0 SWPFU=0x0000 SWPST=0x000A
+    context switch   X5CPU=0 -> 1
+    loader re-executes the SAME instruction and faults at the SAME address
+    ... 88 times, faultSeq 13104, 13105, ...
+
+Every field is constant across the cycle: `SWPFU=0x0000`, `SWPST=0x000A`,
+`[3] @0x0802428C=0x0000000C`, and `HSWPI` alternating between exactly `0x00210718 -> 0x00420E30`
+and `0x00000800 -> 0x00001000`. The swapper asks the same question and receives the same answer
+forever.
+
+### 5c. The reason string, which corrects the obvious reading
+
+`PSTWATCH` shows SINTRAN **did** write PST entry 12 (four writes at `0x455018/19`, ending
+`0x8FF1`) and then nothing for the remaining 13,000 round trips. The tempting conclusion - "the
+PST entry is written and our MMU ignores it" - is **wrong**, and the full trap text says so:
+
+    reason=PS_ADI  L1 PTE not present: L1=2 (segment 22, cap=0xC00C, psn=12, isInstruction=False)
+    operand: mode=PREINDEXED reg=1 disp=0 B=0xB0002748 R=0x00000000 -> ea=0xB000278C
+
+It is an **L1 page-table entry**, not a PST entry, and `psn=12` names *which* segment's page table
+is being walked rather than the entry that is missing. `PSTWATCH` watches only the PST window
+`0x455000..0x455100`, so it could never have shown the L1 table either way - a clean case of an
+instrument that is structurally blind to the thing being asked about (taxonomy #8).
+
+Note also `addr=0xB0215310` in the trap is NOT the operand address `0xB000278C`. Treating the
+reported address as the data the program wanted would send the next reader to the wrong place.
+
+### 5d. Open, and deliberately not answered here
+
+ - `SWPFU=0`. The carve records `SWACTIVE=0` as the **fatal** GOSW slot (7.7.2). Whether this
+   zero is the same zero that used to produce 201B, and why it now spins instead of failing, is
+   unknown.
+ - `0x00000800` read as a classic WORD address maps to byte `0x1000`, near the very bottom of the
+   window. The octobus fix landed on `0x00008800`. Whether `0x800` is correct on this lane or a
+   truncation of `0x8800` is **unverified**, and neither has been assumed.
+ - Who fills the L1 page table for segment 22, and why that never happens after the swapper's
+   answer, is the next thing to carve.
+
+### 5e. Marker corrections - three in one night, all the same mistake
+
+`"NLL"` could never have matched a healthy run. The program's own startup text, read from the
+shipped `linkage-load-h02.dseg` dated 3 March 1988, is `ND-Linkage-Loader -  H.02`, with the
+prompt `Nll entered:`; `NLL` occurs there only as a command word. Likewise `"LED:"` was never
+going to appear from a program that paints a screen - LED emits
+`ESC[30;7;80l ESC[62;62h PL10 PL20 PL30 PL40 ESC[1;1H`.
+
+Each marker was a guess about what a program prints, made while the program itself sat on disk
+available to be read. **Read the artefact, do not guess the banner.**
