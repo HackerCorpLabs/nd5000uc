@@ -580,10 +580,29 @@ reported address as the data the program wanted would send the next reader to th
    `PAGE_OFFSET_MASK = 0x7FF`, PFNs derived as `dest >> 11` - and against the known offsets
    (N5STA=2, SENDE=3, X5CPU=4, X5ACT=5, MICFU=6) index 9-10 reads as the ND-100 word address
    `0x00212400`, the same family as `0x00210718`, with index 11 in the byte-count position. That
-   is a coherent one-page copy. `[D]` - the field positions past MICFU=6 are decoded against a
-   layout verified only for the first seven offsets, and a coherent-looking decode is how three
-   wrong conclusions started on 2026-08-27. Settle it from the RESIWR handler's own parameter
-   geometry, which the copy engine already encodes.
+   is a coherent one-page copy.
+
+   **`[V]` 2026-08-28 - discharged against the handler's own geometry, not against another
+   decode.** `Nd500MicrocodeServicer.cs` case 14B reads, byte-exact and microcode-verified:
+
+       destHi = word 7  (N500A)     destLo = word 8  (N500A_LO)
+       srcHi  = word 9  (STOPR)     srcLo  = word 10 (NUMPA)
+       nrbyt  = word 11 (MCNO, 0o13)
+
+   Applied to the measured body `... 000C 0006 | 8800 0021 2400 0800`:
+
+       destNd500 = 0x0006 << 16 | 0x8800 = 0x00068800     ND-500 destination
+       src       = 0x0021 << 16 | 0x2400 = 0x00212400     ND-100 word address
+       nrbyt     = 0x0800 = 2048                          exactly one page
+
+   **`0x8800` is the LOW HALFWORD OF THE DESTINATION ADDRESS `0x00068800`, and `0x0800` is the byte
+   count.** They are not the same number in two states, not related at all, and the one-bit
+   difference between them is a coincidence between a fragment of an address and a length. The
+   destination is page-aligned (`0x68800 & 0x7FF == 0`, page `0xD1`), which is the prediction this
+   decode had to satisfy and does.
+
+   This also disconnects it from the octobus base entirely: that `0x00008800` is a whole 32-bit
+   cell, while this `0x8800` is half of `0x00068800`.
    The live possibility is that reading a SIZE as a POINTER gives a list head at `0x800 + 0o44`
    that is permanently uninteresting - the same livelock, with the defect one level up in what
    that cell MEANS rather than in a bit lost on the way.
