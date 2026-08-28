@@ -73,15 +73,49 @@ path that started it.
 and **loads no trap-enable register either** - consistent with section 3, and it means our
 `OTE1/OTE2/MTE1/MTE2` at RUN time are whatever an earlier path left in them.
 
-**Prediction, not yet measured:** at the LINKAGE-LOAD double fault the mask `(OTE | MTE)` has the
+~~**Prediction, not yet measured:** at the LINKAGE-LOAD double fault the mask `(OTE | MTE)` has the
 page-fault bit set (trap 46B = 38 decimal = `OTE2` bit 6), we take the local-handler branch for a
-trap SINTRAN installed no handler for, and crash reading the vector. With the mask clear the gate
-refuses, the fault is reported to the ND-100, and the swapper gets asked for the page - which is
-what SINTRAN expects.
+trap SINTRAN installed no handler for, and crash reading the vector.~~
 
-The double-fault message now carries `OTE`, `MTE`, the combined mask and the trap number whose
-vector fetch faulted (`CpuND500.Trap.cs`), so the next classic-lane run answers this instead of
-repeating "double fault". **Until that run, the prediction is `[D]`, not `[V]`.**
+## 4a. THE PREDICTION IS REFUTED. Measured 2026-08-28, classic lane `[V]`
+
+The run happened. **The page-fault bit is NOT set** - `OTE=0x0000001FFC011800`, and bit 38 is clear,
+so the gate correctly refuses to handle `PGF` locally. That half of the reasoning was wrong.
+
+What the message actually said:
+
+```
+DOUBLE FAULT: PV at PC=0xB001C78D addr=0x00000030 (MMU read protection violation at 0x00000030)
+raised while fetching the THA vector for trap 12 (0o14). THA=0x00000000,
+OTE=0x0000001FFC011800 MTE=0x0000000008000000 (local-trap-enable mask 0x0000001FFC011800)
+```
+
+**Trap 12 is `DZ`, divide by zero - an IGNORABLE trap - and `THA` is ZERO.** `0 + 4*12 = 0x30`. The
+dispatch read low memory, took a protection violation on it, and that arrived while the first was
+still being dispatched.
+
+Three things had to line up, and the carve above got two of them right for the wrong trap:
+
+ 1. `OTE` bit 12 is set, enabling `DZ` locally. `OTE` is not in the context block (section 3), so
+    this is either the program's own `TE := SARG` or something left over. Undetermined.
+ 2. `THA` is zero. The harness says why on its own line: *"TOS=... LL=... HL=... THA=0x00000000
+    (all four from ctx 0x4C-0x58, which the microcode never reads)"*. We read a slot SINTRAN never
+    wrote.
+ 3. Nothing refused the fetch. The non-ignorable dispatch path guards `regs.THA != 0`; the
+    ignorable path and the domain-propagation path did not.
+
+**AND THE PROGRAM RAN.** `RUN marker index = 0` - LINKAGE-LOAD-H02 printed `ND-Linkage-Loader`
+under real SINTRAN before any of this. 31 page-fault records posted, 32 attempts, and the census
+reconciles. The crash is after the program is alive, not instead of it.
+
+Fixed in `GetTrapHandlerAddress` (RetroCore `CpuND500.MMU.cs`): a zero `THA` means the domain has
+no Start Address Vector, so it reports "no handler" without touching memory - one place, all three
+call sites. Test: `TestND500_NullTrapHandlerArea`, red-first, with a negative control that fails if
+the guard ever becomes unconditional.
+
+**`[OPEN]` - why `THA` is zero.** The guard stops the crash; it does not put the right value in
+`THA`. Those four registers live in the DIT for the running domain, not in the context block, and
+we load them from `ctx+0x58` anyway.
 
 `[OPEN]` - whether `D,TE` is the ONLY way TE is written. An external write (`W,EXT`/`EX,CTF`) could
 reach it without naming the destination field, and that sweep has not been done.
