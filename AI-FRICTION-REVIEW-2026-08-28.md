@@ -129,9 +129,27 @@ PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md
 ```
 
 Three plans, with **dates in the filenames** — so every new plan is a new file, and the pointer in
-CLAUDE.md is already stale by one. This is not a discipline failure; it is a naming convention that
-guarantees the failure. 08-18 08:41: *"reclean the plan … i hate seeung shiut like '42 taks 34
-done'"* — that half got fixed. The filename half did not.
+CLAUDE.md is already stale by one. 08-18 08:41: *"reclean the plan … i hate seeung shiut like '42
+taks 34 done'"* — that half got fixed. The filename half did not.
+
+> **CORRECTION, same day, from Ronny on reading this section — I had the cause wrong.**
+> *"for point #3, i ask about the plan because it doesnt show up below like it does now (19 tasks 11
+> done, 5 in progress, 3 open) — make sure you always show this and update this as things change"*
+>
+> The eight requests were **not** mostly about the plan file being hard to find. They were about the
+> **live task list not being maintained or surfaced** — the status counts simply were not there, so
+> asking was the only way to see state. The filename observation above is still true and still worth
+> fixing, but it is the *secondary* half, not the cause.
+>
+> **This is itself the review's thesis landing on the review.** I diagnosed a repeated question by
+> looking at the artifacts on disk (three plan files, a stale pointer) — a plausible mechanism that
+> predicted the observed behaviour — instead of at what he could actually see on screen. A mechanism
+> that explains the symptom is not evidence that it caused it; that is written down in
+> `verify-provenance-not-plausibility` and I did it anyway, in a document about not doing it.
+>
+> The real fix is R17 as revised: **keep the task list current with TaskUpdate as work happens, and
+> show the counts in every substantive reply.** Consolidating the plan files is a tidy-up that
+> follows, not the fix.
 
 ---
 
