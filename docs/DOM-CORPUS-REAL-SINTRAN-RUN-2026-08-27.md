@@ -1327,3 +1327,70 @@ the linkage loader. The log interleaves programs and tags each line (`[CPUSTAT]`
 ...); the tags are the only thing separating them. Caught by reading the context of the matched
 lines instead of trusting the count - a whole-file `uniq -c` over a multi-subject log is a
 confident number about the wrong population.
+
+## 16. Who maps the pages - answered, and it sharpens the question (2026-08-28)
+
+§15 ended with two candidates for what maps pages when the swapper's only dispatch is the
+no-paging fn 10: (1) the fn-10 carve is wrong, or (2) our own code maps them rather than SINTRAN.
+Candidate 2 is now settled, and the answer is **both, for different segments**.
+
+### Our tree has exactly one live page-table writer, and a name search misses it
+
+`CpuND500.MMU.cs:1254 WritePageTableEntry` has **no callers at all** - dead code. The growable path's
+`WritePte` is proven never to fire (`calls=13359 ok=0 noSlot=13359`, "NO growable segments
+registered at all"). On that evidence the tree has no live PTE writer.
+
+**That conclusion would have been wrong.** `CpuND500.Loader.cs MapExistingPhysicalRegion` writes
+PTEs with a raw `WritePhysical32(pageTableAddr + p * 4, pte)` and never touches the named function,
+so a search for `WritePageTableEntry` cannot see it. RULE #0b, exactly: the zero result was about
+the pattern. What caught it was reading the loader region the name search's own comment pointed at,
+rather than stopping at the count.
+
+### What it actually maps, measured in both runs
+
+`[SWAPMAP]` in the PASSING cpu-stat run:
+
+```
+InstallSwapperMapping: mapped dom=0 progSeg=1 dataSeg=1 P=0x08000004
+                       PSEG=0x0006F800+0x9800  DSEG=0x00024800+0x35800
+```
+
+And in the FAILING twelve-program run, every single occurrence:
+
+```
+  66 x  mapped dom=0 progSeg=1 dataSeg=1 P=0x08000004  PSEG=0x0006F800+0x9800 DSEG=0x00024800+0x35800
+   1 x  mapped dom=0 progSeg=1 dataSeg=1 P=0x08000011  (same regions)
+   2 x  (InstallSwapperMapping never ran)
+```
+
+**`progSeg=1` every time - the swapper's own segments, identical bases and lengths throughout.
+Segment 22 is never mapped by us, in either run.**
+
+### The conclusion
+
+ - `[V]` **We map segment 1 only** - the swapper, from regions derived out of SINTRAN's own page
+   tables, capped by `MapExistingPhysicalRegion` at 512 pages (single-level PS_ASI).
+ - `[V]` **We never map segment 22**, the linkage loader's own segment where all 13,359 faults land.
+ - `[D, by elimination - but the elimination is now complete]` **SINTRAN built segment 22's L1
+   table.** Our only two PTE writers are accounted for: one dead, one restricted to segment 1. That
+   agrees with §7's independent observation that the live L1 entries are halfwords written natively
+   by SINTRAN, and with the growable report's "NO growable segments registered at all".
+
+So THE GOAL is not compromised here: real SINTRAN is doing the user-segment paging. Good news, and
+it also removes the last reason to suspect our subtype byte of steering the outcome.
+
+### The question that replaces it
+
+SINTRAN mapped segment 22 and stopped at **exactly 1024 pages = 2 L1 entries x 512**, with L1 entry
+2 reading zero, while the segment is registered as 1067 pages. Two complete second-level tables and
+then nothing.
+
+That roundness is not by itself suspicious - §8's retraction stands, any prefix of a demand-paged
+segment ends on a boundary. What IS worth pursuing is the specific shape: **not a partial third
+table, but no third table at all.** A demand-paged segment stopping mid-L2 would leave a partly
+filled third table; stopping exactly at an L1 boundary is what a per-segment limit or a failed
+second-level-table allocation looks like.
+
+Next instrument: point §7's L1-table watch one level down, at the L2 tables, during a run that
+reaches the fault - and read whether SINTRAN ever attempts a third L2 allocation and fails, or
+never attempts one at all. Those two have different fixes and the watch separates them.
