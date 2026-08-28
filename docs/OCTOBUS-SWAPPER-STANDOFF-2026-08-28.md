@@ -223,6 +223,11 @@ wrong.
 
 ## 8. Both sides are waiting for the other, and neither is wrong `[V]` 2026-08-29
 
+> **PARTLY SUPERSEDED by section 9.** The measurements here stand; the phrase "parked at its
+> own wait point" and "stopped asking" do NOT. `0x08008255` is the instruction after a
+> `MON 377B`, so the swapper asked and is waiting to be RESTARTED. Read 8a with that
+> correction in mind - 9a replaces its open question.
+
 Re-ran the short bring-up with a denominator on the trap counter (see 8a for why that mattered).
 Every state line:
 
@@ -278,3 +283,57 @@ unfalsifiable-single-number shape, and the previous section's lead rested entire
 `TrapStopsAttempted` is now incremented before anything can refuse, so `attempted > posted` means
 dropped and `attempted = posted = 0` means never raised. It reads 0 and 0, which is what licenses the
 paragraph above — and would not have been safe to write from the old counter.
+
+## 9. `0x08008255` is the instruction AFTER a `MON 377B` — section 8 called it the wrong thing `[V]` 2026-08-29
+
+Disassembled. `PC = 0x08008255` is `0o1000101125` in the swapper listing
+(`NDInsight\SINTRAN\ND500\swapper\swapper-k01-pseg.asm`, line 10536):
+
+```
+1000101077: call $1777777777777000000377,$4,$1000225050,$1000440260,$1000440264,b.24 ; MON 377B
+1000101125: 322 010      if -k go $10        <- THE PC WE STOP AT
+1000101127: call $1000100674,$0
+```
+
+It is the instruction **immediately after a `MON 377B` call**, which is to say the swapper's
+**restart address**. On the ND-500 a monitor call IS a stop: the process parks, SINTRAN answers, and
+the process resumes at the address after the call. `P` runs ahead of the call for exactly this
+reason — the same `P` vs `P1` distinction that already bit this project.
+
+**So section 8 is wrong where it matters.** It said the swapper "is parked at its own wait point" and
+had "stopped asking". It has done nothing of the sort: **it asked, and it is waiting to be
+restarted.** The observation was right and the interpretation inverted the direction of the wait.
+
+Four independent readings agree that this is that call and not another one:
+
+| what the state line says | what the disassembly says |
+|---|---|
+| `ansMON=377B` | the call is annotated `MON 377B` |
+| `ansArgc=4` | the call passes `$4` arguments |
+| `ansP=0x08008255` | the instruction after the call is at `0o1000101125` |
+| `ansArg0=0x00000001`, `ansSWPFU=1B` | `SWPFU = LNEWSWAP = 1` |
+
+### 9a. The question that replaces section 8a
+
+Not *"why does our swapper never ask for the allocate"* — it is asking, and the answer it gets is
+what decides its next `SWPFU`. The `if -k go` on the very next instruction is the swapper reading the
+**K flag** out of SINTRAN's answer, which is the documented restart channel (`KFLIP` -> K,
+`FUNCV` -> `X1`).
+
+So: **we answered the MON 377B — `ansMON=377B`, `ansP=0x08008255` — and the CPU did not resume.**
+
+`swpfu[LNEWSWAP:2]` against `restarts=1/1` is the gap to chase: two monitor calls, one restart seen
+and taken. `[OPEN]`: for each `MON 377B` answered, was a restart offered, and was it taken? The
+servicer already carries `MonitorCallRestartsSeen` against `Taken` for exactly this shape of
+question; what is missing is the per-call pairing rather than a run total.
+
+### 9b. Twice in one night, and the same cause both times
+
+Section 5a claimed a node never completed; the histogram showed fourteen completions. Section 8
+claimed the swapper stopped asking; the disassembly showed it asking and waiting. Both were
+confident readings of a real measurement, and both inverted the direction of the thing measured.
+
+The common cause is not carelessness about the data — it is **naming a state before reading the code
+that produces it**. `stopMode=WAIT` at a PC says nothing about WHY until you know what instruction
+that PC belongs to, and one grep of the listing settled it. The project rule already says this:
+go and read the code, do not derive.
