@@ -1452,3 +1452,64 @@ Two limits were checked and neither binds:
 
 So the 1024 boundary is not the swap file and not our loader's cap. It is two full second-level
 tables, and what governs that is still unnamed.
+
+## 18. A PREDICTION, written before the run landed (2026-08-28)
+
+The message-block watch is running as this is written. Recording what it should show *first*,
+because a prediction can be refuted and a post-hoc reading of a trace cannot - the whole reason
+several earlier readings in this document had to be retracted.
+
+### What SINTRAN actually hands the swapper
+
+`5ACTSWAPPER` (`MP-P2-N500.NPL:144762`), on a page fault:
+
+```
+145006   AD:=CMSGTOSW; *AAX HSWPI; STDTX      % swapper msg HSWPI := ADDRESS of the faulting msg
+145011   SWACTIVE; *AAX SWPFU-HSWPI; STATX    % SWPFU := SWACTIVE
+145014   X:="N500DF".X500DF; *AAX X5SWO
+145017   CMSGTOSW; T:=5MBBANK; *STDTX         % and the same address into the CPU datafield
+...
+145045   *AAX TRAPN; LDATX                    % No, trap (pagefault)
+145047   A=:D/\377; *STATX                    %   <- TRAPN written back masked to its LOW byte
+145052   A:=D SHZ -10                         %   <- high byte becomes SWPST
+145054   X:=SWMSG; *AAX SWPST; STATX
+145057   A:=6; *AAX NUMPA-SWPST; STATX        % "Par #2 & par #3 will be written into"
+145062   A:=0=:D; *AAX FUNCV-NUMPA; STDTX
+145071   3MONCO; *MICFU@3 STATX
+```
+
+**It copies no fault fields at all.** It passes the swapper the *address* of the faulting
+process's message (`HSWPI`), plus `SWPST` derived from TRAPN's high byte. So the swapper must read
+the LA, the physical segment and the status word **itself, out of the faulting message, over the
+5MPM** - which is precisely the region this watch covers, and those reads arrive on Port B with no
+`pc=` tag.
+
+This also confirms from the source what §14 measured from the decoder: **the value at `0o22` is
+never examined by SINTRAN on the ND-100 side.** And it explains the TRAPN-masking already recorded
+here - `A=:D/\377` is the write that erases the reason from the message once served.
+
+### The prediction
+
+ 1. **Reads of the DOMAIN's message block (`0x420E30 + offset`) will appear on Port B**, made by
+    the swapper after each fault. If NO reads of that block appear, then the swapper never looks at
+    the fault record and the entire fault-record layout - LA offset, segment, subtype - is
+    irrelevant to the outcome. That would be the single most useful result available, and it would
+    close several threads at once.
+ 2. **Which offsets are read decides a live defect.** Our 46B path writes the LA at `0o17-0o20`
+    (bytes `+0o36..+0o41` from the block base). The 44B record was MEASURED to carry the LA at
+    `0o21-0o22` instead, proven when SINTRAN printed the failing reference as "24 10B" - the MMS
+    status word decoded as an address.
+    - Reads at `0o17-0o20` -> our placement is right, and the LA is not the problem.
+    - Reads at `0o21-0o22` -> **we have been handing the swapper the physical segment number and
+      the status halfword as the fault address on all 13,359 faults.** It would then page in a
+      nonsense address forever, which matches the observed refault-at-one-address signature
+      exactly.
+ 3. **`0o22` should be read by the swapper or by nobody.** If nothing anywhere reads it, the
+    subtype thread (§12-§14) closes for good.
+
+### The failure mode to guard against when the data lands
+
+If the block shows only WRITES and no reads, that is OUR writer, not SINTRAN - the watch captures
+both sides of the same RAM. The discriminator is the `pc=` tag: ND-100-originated accesses carry
+one, ND-500 Port B accesses do not. Reading a write of ours as evidence about SINTRAN would be the
+same self-hit that §7's PSTWATCH produced.
