@@ -225,15 +225,41 @@ word and memory word that runs through this machine.
 Four consecutive words in this very routine are context-block reads:
 
 ```
-0o14021  AA=6 MARG=0x5C
-0o14022  AA=6 MARG=0x50
-0o14023  AA=6 MARG=0x60
-0o14024  AA=6 MARG=0x58
+0o14021  AA=6 MARG=0x5C  MemOp=0   address only
+0o14022  AA=6 MARG=0x50  MemOp=9   RD,POF  - a READ
+0o14023  AA=6 MARG=0x60  MemOp=2   WR,POF  - a WRITE
+0o14024  AA=6 MARG=0x58  MemOp=9   RD,POF  - a READ
 ```
 
 `AA=6` is the context-relative base. So the ND-5000 microcode reads `ctx+0x50` and `ctx+0x58` too -
 just not in `CNTXTLOAD`. **"Not restored at context-load time" and "never read" are different
 claims, and only the first one was ever true.** The harness printed the second.
+
+**Take the direction from the `MemOp` field, not from the shape of the routine.** An earlier draft
+of this section called all four of these reads, because they sit in a run of near-identical words.
+`0o14023` is a WRITE. `MemOp` 2/4/7 are the write ops and 9/11/12/13/14/15 the reads, per the CPU's
+own decode in `CpuND5000.cs`.
+
+## 7. What `CNTXTSAVE` actually writes `[V]`
+
+Same method, applied to the save side (`0o14666`-`0o14741`), filtering for `AA=7`, `Adact=1`,
+`MemOp=2`. Asserted in `CntxtSave_WhichContextSlotsAreWritten_RawDecodeDump`, with a positive
+control so an empty or mis-parsed set cannot pass as "absent".
+
+**Written:** `0x04`, `0x08` … `0x40` (contiguous, step 4), `0x44`, `0x5C`, `0x60`, `0x6C`, `0x70`.
+
+**NOT written:** `0x48`, `0x4C`, `0x50`, `0x54`, `0x58`.
+
+RetroCore's `SaveProcessContextBlock` writes `PS` at `0x48`, `TOS` at `0x4C`, `LL` at `0x50`, `HL`
+at `0x54` and `THA` at `0x58` — **five slots the ND-5000 leaves alone.** Four of them have no known
+consumer yet. The fifth does: **`TRAP_GEN1` (`0o13514`-`0o13517`) copies `ctx+0x54` into the stop
+message as the first status word**, so a value we put there is reported to SINTRAN as machine
+status. That would present as SINTRAN misreading a trap rather than as us writing a slot.
+
+Nothing breaks while our own save and load are the only users - they round-trip consistently. It
+surfaces the first time a real ND-5000 trap report reaches real SINTRAN, which is the octobus lane
+once the ACCP is alive. Tracked as its own task; **not fixed here**, because the classic lane uses
+`0x54` as its `HL := LL` hole and `0x60` as `AM#14`, so any change has to be generation-gated.
 
 That makes the corrected statement simple, and it is now in the harness line itself: on the classic
 lane the context chain saves and restores these slots; on the ND-5000 the context load skips them
