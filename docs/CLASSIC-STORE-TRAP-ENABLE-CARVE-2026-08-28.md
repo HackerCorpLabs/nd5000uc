@@ -123,3 +123,60 @@ reach it without naming the destination field, and that sweep has not been done.
 `[OPEN]` - which of the five `FZRO D,TE` sites sit on a process-start path. `007567` is clearly on
 the trap-report path; `010011`/`010041`/`010070`/`010133` sit among words using `SARG` and
 `EXFUNC=12`, which reads like macro-instruction bodies, but that has not been carved.
+
+---
+
+## 5. THA IS `AL#7`, AND IT *IS* IN THE CLASSIC CONTEXT BLOCK `[V]` (2026-08-28, later the same day)
+
+Section 3 found no `TE` slot in the classic save/load chain and that is still true. It is easy to
+carry that over to `THA` as well - I did, and opened a task on it. **`THA` behaves the opposite way,
+and the classic microcode reads and writes it exactly where our loader does.**
+
+There is no `THA` mnemonic in this store at all; the register is `AL#7`. Proof, from the vector
+fetch itself:
+
+```
+011622/ B,AM#21 D,AM#33 ... EXFUNC=12 ... ,2      AM#33 := AM#21 shifted left 2   (trapnum * 4)
+011623/ ALU,A+B A,AL#7 B,AM#33 D,DP               DP := AL#7 + trapnum*4          <- the vector address
+```
+
+`AL#7` is the trap-handler-area base. It has **four** A-source uses and **two** writers in the whole
+store, and two of those are the context chain:
+
+| addr | word | role |
+|---|---|---|
+| `000467` | `ALU,BDIR D,AL#7 ORB JMP 12472` | a macro instruction loading THA |
+| `000505` | `ALU,ADIR A,AL#7 ORD MEM,RD1 ...` | a macro instruction reading it |
+| `010411` | `ALU,ADIR A,AL#7 D,AM#20 POPRET` | **context SAVE, slot at ctx+0x58** |
+| `010451` | `ALU,ADIR A,AM#20 D,AL#7 POPRET` | **context LOAD, slot at ctx+0x58** |
+| `011623` | `ALU,A+B A,AL#7 B,AM#33 D,DP` | the vector fetch |
+| `011640` | `ALU,A+B A,AL#7 B,BM#10 D,AM#33` | second vector-table use |
+
+Walking the save chain from `010363` one word per slot gives: `0x00` P, `0x04` L, `0x08` B, `0x0C`
+R, `0x10`-`0x1C` X1-4, `0x20`-`0x2C` A1-4, `0x30`-`0x3C` `AL#0`-`AL#3`, `0x40` S1, `0x44` `AL#16`,
+`0x48` `AL#17`, `0x4C` `AM#7`, `0x50` `LL`, **`0x54` a hole** (`010410` stores nothing; the load side
+`010450` discards it and `010462` derives `HL := LL`), **`0x58` `AL#7`**, `0x5C` `AM#15`, `0x60`
+`AM#14`. The load chain at `010423`-`010457` mirrors it word for word.
+
+That is the same map our loader uses, and it agrees independently with the manual's context
+displacements 23B-26B. Two derivations from different sources landing on the same offsets.
+
+### Why this matters more than the fact itself
+
+The harness prints, on **every** lane:
+
+```
+[START] TOS=... LL=... HL=... THA=... (all four from ctx 0x4C-0x58, which the microcode never reads)
+```
+
+**That parenthesis is a B30 fact printed unconditionally, and on the classic lane it is FALSE.** The
+ND-5000's `CNTXTLOAD` reads `0x00`-`0x48`, `0x5C`, `0x60`, `0x6C`, `0x70` and genuinely skips
+`0x4C`-`0x58`; the classic store does not. One shared routine, two generations, and a note true of
+one of them printed as though it were true of both.
+
+It cost a wrong task: I read that line next to `THA=0x00000000` and concluded we were loading THA
+from a slot nobody writes. We are not - on this lane. **A zero THA there means the process genuinely
+had no trap handler area**, which is a legitimate state with its own trap number (`T_THM`, 45B), and
+the correct response is the "no handler" answer the guard now gives.
+
+The open question that remains is the ND-5000 one, and only that.
