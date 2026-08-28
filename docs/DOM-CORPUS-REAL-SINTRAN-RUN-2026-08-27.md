@@ -1705,3 +1705,62 @@ comment-only commit; and (c) the crash surviving a stash of my own edits.
 Flagged because it is the same defect this document keeps finding in its own reasoning: a true fact
 attached to a claim it does not support. The stamp is real, my reading of it reached one step too
 far.
+
+## 21. SINTRAN declares the FULL 1067 pages - the length hypothesis is dead (2026-08-28)
+
+Asked the machine, with a question that has no radix in it (`LIST-SEGMENT-TABLE-ENTRY ALL`, which
+identifies by name). SINTRAN's own physical segment table:
+
+```
+Phys. segment no.:.... 13B   (in use)
+Segment name: ........ (210319H02-XX-01D:FLOPPY-USER)LINKAGE-LOAD-H02:PSEG
+Logical segment no.:.. Program segment 26B
+Segment type:......... Reentrant program
+Swapped on:........... Original file
+Segment size in pages: 75B
+
+Phys. segment no.:.... 14B   (in use)
+Segment name: ........ (210319H02-XX-01D:FLOPPY-USER)LINKAGE-LOAD-H02:DSEG
+Logical segment no.:.. Data segment 26B
+Segment type:......... Copy exclusively data
+Swapped on:........... Swap file no.: 0
+Segment size in pages: 2053B
+```
+
+**`2053B` octal = 1067 decimal.** SINTRAN declares the segment at its full length.
+
+**§19's remaining candidate is REFUTED.** "SINTRAN believes the segment is 1024 pages, so a fault
+past the end is a legitimate refusal" was the one reading that fitted every prior observation. It
+is wrong: SINTRAN knows the segment is 1067 pages, receives a correct fault report for an address
+inside that range (§19), and still never installs the third L1 entry (§17).
+
+### Every identifier cross-checks - in octal
+
+| SINTRAN says | octal | decimal | matches |
+|---|---|---|---|
+| Phys. segment | `13B` | 11 | census `psn=11`, the instruction side |
+| Phys. segment | `14B` | 12 | census `psn=12`, where all 13,359 faults land |
+| Logical segment | `26B` | 22 | the faulting segment, `P1 >> 27` |
+| DSEG size | `2053B` | 1067 | the file's own page count |
+| PSEG size | `75B` | 61 | - |
+
+That table is the reason to trust this reading: five independent numbers, each derived from a
+different place, all agreeing once read as octal. Read as decimal, none of them line up.
+
+### What this run also produced
+
+The run ended `*** FATAL SYSTEM ERROR *** ND-500(0) error: Fatal error from Swapper, ERROR CODE:
+201B` (marker index 1, test exit 0) instead of the usual RUN timeout - i.e. **task #61's 201B
+reproduced here**. The fault census is the same shape as always, just shorter because the run ended
+sooner: 946 records, of which `subtype=7B ... faults=939 distinctAddr=1 worstRepeat=939` at the same
+`0xB0215310`. Same defect, reported by a different exit path. Whether the added monitor command
+perturbed the timing or the outcome simply varies is `[OPEN]` - one repeat would say.
+
+### The next question, now much narrower
+
+The DSEG is `Swapped on: Swap file no.: 0`, so its pages come from the swap file. The only swap
+listing in the run is from BEFORE placement and shows the whole file free (`3720B` = 2000 pages,
+against 1067 needed - not short). **What is not yet measured is how much the swap file actually
+allocated to phys. segment `14B` after placement.** If that allocation is 2000B (1024) rather than
+2053B (1067), the boundary is in the swap allocation, not in the segment declaration - and that is
+one `LIST-SWAP-FILE-INFO 0` issued after PLACE-DOMAIN instead of before it.
