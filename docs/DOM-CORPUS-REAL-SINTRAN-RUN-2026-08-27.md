@@ -724,10 +724,18 @@ segment 22 is this domain's segment; `psn=12` behind `cap=0xC00C` is its DATA-si
 domain, so the size match is not a coincidence.
 
 **So the question flips again.** Not "why does the access go past the segment" - it does not
-go past anything, it reads the loader's own data. The question is **why the DSEG was mapped
-1024 pages when the file is 1067**. Note that 1024 pages is exactly TWO L1 entries, an
-exactly round stop at an L1 boundary, which is the shape of a limit rather than of an
-allocation that ran out.
+go past anything, it reads the loader's own data. The question is **why only 1024 of the
+1067 pages are mapped**.
+
+RETRACTED 2026-08-28, my own wording: this section first said the round number is "being
+imposed somewhere", and section 8's original text called 1024 "the shape of a limit rather
+than an allocation that ran out". Both smuggle in an imposer. nd500uc-47 made the same move
+with the word "truncation" and retracted it; the plain reading is that SINTRAN registers
+1067 and pages the segment in ON DEMAND, so two live L1 entries is simply how far paging has
+got - not a cap. **A partially-paged segment and a truncated one look identical from the
+fault**, and neither of us checked which before naming it. The roundness is explained
+without any limiter: L1 entries are 1 MB each, so any prefix of a demand-paged segment ends
+on a round boundary.
 
 Two candidates, different culprits, and the DOM/DESCRIPTION-FILE entry separates them
 without booting anything:
