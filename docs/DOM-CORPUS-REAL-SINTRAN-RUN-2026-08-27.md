@@ -893,3 +893,68 @@ The general lesson, which is now three-for-three on this task: **an instrument t
 nothing is making a claim about itself until something independent shows it can report
 something.** The poison value, the read denominator on the L1 watch, and the
 calls = ok + noSlot + mapFail cross-check are all the same device.
+
+## 11. The full fault-information chain, driven and read (2026-08-28) [V]
+
+§10a left one thing open: both SC14 seeds skipped the `PF_PS` chain (`013055`-`013100`), which is
+where the remaining fault-information slots — including the `MARG=037` one — are written. That is
+now driven and measured.
+
+### The gate, read off the raw microwords
+
+Two gates stand between `MMS_LIX` and `PF_PS`, and both sit under the B30 **one-word condition
+delay** (a word's `COND` tests the flags the PREVIOUS word left):
+
+```
+013044  SC5 := SC14 AND 0o30000000000   (= 0xC0000000, bits 31:30)
+013045  SC5 := SC5 XOR 0xC0000000
+013046  COND,MZRO INVSEQ -> PF_NORM     tests the flags 013045 left
+013051  SC5 := SC14 AND 0o03700000000   (= 0x1F000000, bits 28:24)
+013052  SC5 := SC5 XOR 0o00600000000    (= 0x06000000)
+013053  COND,MZRO -> PF_PS              tests the flags 013052 left
+```
+
+So `PF_PS` is taken exactly when `SC14 AND 0x1F000000 == 0x06000000`, with bits 31:30 clear.
+Seed `SC14 = 0x06000000`. That is the whole answer, and it was not guessable from the label
+names — `PF_NORM` and `PF_PS` are adjacent in the listing, which is the same adjacency trap that
+has already produced two wrong claims on this project.
+
+### What the chain actually writes
+
+Four runs, all green (`MmsPageFaultPathTests`, 2/2):
+
+| seed | path | register-file writes |
+|---|---|---|
+| `SC14=0xC0000000` | direct arm `013047/50`, no `PF_NORM` | `013050: SRF[0o35]` |
+| `SC14=0x00000000` | `PF_NORM`, straight to the join | none |
+| `SC14=0x06000000, SC7=0` | `PF_PS` -> `PF_PS_DATA` -> `PF_PS_DOM` -> `PF_PS_LA` | `013062: SRF[0o35]`, `013100: SRF[0o37]` |
+| `SC14=0x06000000, SC7=1` | `PF_PS` -> (skips DATA/DOM) -> `PF_PS_LA` | `013060: SRF[0o35]`, `013100: SRF[0o37]` |
+
+**The fault-information field set is two slots: `0o35` and `0o37`.** Every arm writes `0o35`; only
+the `PF_PS` chain reaches `0o37`, which `013100` fills with `SC5 + SC7` after the four-step
+rotate/shift at `013070`-`013077` assembles it. Both slot numbers come from `MARG` immediates
+(`MARG=035` at `013047`/`013055`, `MARG=037` at `013065`) — the field `MICRO-5800-B30.md`
+mis-renders, so these are only trustworthy because the machine decoded them, not the listing.
+
+**`SC7` is the instruction-side / data-side discriminator.** `013056` runs SC7 through the ALU and
+does nothing else; `013057`'s branch tests the flags it left. Measured: `SC7 = 0` takes the `DMM`
+(data) arms, `SC7 != 0` takes `013060`'s `A,IMM,PS` (instruction) arm. The control run says the
+two seeds walked genuinely different paths, so this is the routine branching and not the seeding.
+
+### What this run does NOT establish
+
+ - **The VALUES in `0o35` and `0o37` are stub artifacts, not fault information.** The MMS sources
+   the chain reads (`DMM,PHS`, `IMM,PS`, `DMM,PS`, `DMM,DOM`, `DMM,ADOM`) are unseeded in this
+   harness, so `0o37` came out `0x76` and `0x36`. The slot numbers and the path are the finding;
+   the numbers are not.
+ - **Why the `SC7=0` run reached `PF_PS_DOM`.** `013057` computes `SC14 AND BM25` for `013062`'s
+   branch, and with `SC14 = 0x06000000` a bit-25 mask should be non-zero, which would fall through
+   to `013063` (`DMM,ADOM`) instead. The machine took the branch. Either `BM25` is not bit 25 in
+   this numbering or the delay lands differently than read here — `[OPEN]`, and it does not affect
+   the slot result, which is identical on both arms.
+
+### The open item this feeds
+
+The comparison that matters is still ahead: decode the page-in request our side posts for one of
+the 88 live faults and check it against this field set. We now know what the machine builds and
+where it puts it, which is the half that was missing.
