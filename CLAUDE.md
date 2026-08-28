@@ -31,7 +31,12 @@
   bus/octobus.** A run where our C# `SintranEmulation` answers the MON calls **DOES NOT COUNT** and
   must never be reported as progress toward it (this happened 2026-08-24). Before believing any
   "the program runs" claim, ask WHO ANSWERED THE MON CALLS.
-  **THAT QUESTION NOW HAS A FILE — `MON-PATH-LEDGER.md`. Look it up; do not re-read the servicer.**
+  **THAT QUESTION NOW HAS A FILE, AND A TEST THAT KEEPS IT HONEST. Look it up; do not re-read the
+  servicer:** `E:\Dev\Repos\Ronny\RetroCore\Emulated.HW\ND\CPU\ND500\Servicer\MON-PATH-LEDGER.md`
+  — it lives in RetroCore, beside the code it describes and the build that enforces it, because a
+  document enforced by a test belongs in the repo whose test enforces it.
+  `TestND500_MonPathLedgerIsComplete` FAILS if a MICFU path has no row, if a row names a member that
+  no longer exists, or if the servicer has a `case` arm the ledger does not declare.
   All 22 `N5MicroFunction` members, keyed on MICFU octal + enum name. The status that matters is not
   FAKED, it is **CONDITIONAL**: `3MONCO` (24B) and `3WMONCO` (26B) forward to the attached CPU when
   `ProcessHost` accepts the restart, and fall back to a canned answer when it does not — and the two
