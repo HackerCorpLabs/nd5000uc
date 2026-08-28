@@ -1513,3 +1513,68 @@ If the block shows only WRITES and no reads, that is OUR writer, not SINTRAN - t
 both sides of the same RAM. The discriminator is the `pc=` tag: ND-100-originated accesses carry
 one, ND-500 Port B accesses do not. Reading a write of ours as evidence about SINTRAN would be the
 same self-hit that §7's PSTWATCH produced.
+
+## 19. The message watch: prediction vs result (2026-08-28)
+
+The run landed. Checking it against §18's prediction, which was committed before the data existed.
+
+### The record we post is CORRECT in every field
+
+Values written into the domain block's fault record, read straight out of the trace:
+
+```
+0x420E4E : B0    0x420E4F : 21    0x420E50 : 53    0x420E51 : 10     -> 0xB0215310
+0x420E52 : 00    0x420E53 : 0C                                       -> 0x000C = 12
+0x420E54 : 00    0x420E55 : 07                                       -> 0x0007 = 7
+```
+
+ - `0o17-0o20` = **`0xB0215310`** - the faulting logical address, exactly the known one.
+ - `0o21` = **12** - the physical segment, matching `PST[12] = 0x8FF1` from §7.
+ - `0o22` = **7** - data-side subtype, matching `where=0xE` from the census.
+
+**So the fault report is well-formed and truthful.** That closes the possibility that we hand the
+swapper a nonsense address. The defect is not in what we post.
+
+### Scoring the prediction
+
+ 1. **"Port B reads of the domain block will appear" - CONFIRMED.** Of 172 reads of each
+    fault-record byte, **84 arrive on Port B** (no `pc=`), i.e. from the ND-500 side. The swapper
+    does read the fault record. The strongest possible result - "nobody reads it" - did not occur.
+ 2. **"Which offsets are read decides a live defect" - NOT DISCRIMINATING, and the prediction was
+    poorly designed.** All eight bytes are read exactly 172 times each. A uniform count across the
+    whole record is a BLOCK read, not selective field access, so offset counts cannot reveal which
+    word the reader treats as the address. The 44B-style mis-slotting is neither confirmed nor
+    refuted by this instrument - and since the LA we write is demonstrably correct, it is moot.
+ 3. **"`0o22` is read by the swapper or by nobody" - the swapper reads it**, along with everything
+    else in the block. It is read; whether it is USED remains `[OPEN]`, and a block read cannot say.
+
+### A correction to my own guard
+
+§18 said the `pc=` tag would separate our writes from SINTRAN's. **It does not.** `pc=` separates
+**ND-100-side from ND-500 Port B** accesses - and our servicer runs synchronously inside the ND-100
+emulation, so its writes are stamped with an ND-100 PC exactly like SINTRAN's. The tag answers
+"which processor", never "which piece of ND-100 software". The Port-B half of the split is still
+sound, and that is the half the conclusion rests on.
+
+### Sampling caveat
+
+The ring kept the last 65,536 of **9,238,252** recorded events, so the 172/84/83 counts are a TAIL
+SAMPLE, not run totals. They establish that these accesses happen and in what proportion near the
+end; they are not a census. Nothing above depends on the absolute numbers.
+
+### Where this leaves it
+
+Combining with §16 and §17: SINTRAN receives a **correct** fault report naming the right address in
+the right segment, on all 13,359 faults, and never writes the L1 entry that would extend the
+mapping. The record is not the problem, our mapping code is not involved, the swap file is not
+short, and the subtype is read but the ND-100 side never examines it.
+
+The remaining candidate that fits every observation: **SINTRAN believes the segment is 1024 pages
+long.** A fault past a segment's declared end is a legitimate refusal - it would produce exactly
+this pattern, a correct report answered without any mapping change, forever. 1024 pages is 2 MB
+exactly, and the DSEG is 2,184,977 bytes, so a length held as 2 MB would be short by the precise
+amount observed.
+
+Next: read the segment descriptor SINTRAN holds for this domain - the declared page count - rather
+than the registration we believe was requested. Those are different numbers and only one of them
+governs.
