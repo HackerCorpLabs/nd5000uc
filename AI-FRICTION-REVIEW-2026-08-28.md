@@ -292,9 +292,21 @@ mechanism, and it would have been **wrong**, in three distinct ways that only re
 
 So the rule is narrower than §1 states it: **a mechanism beats a rule when the check is mechanical
 — does a row exist, is this symbol referenced, did the build fail. When the judgement is semantic,
-the mechanism is the hazard and reading is the only method.** The tell is whether the thing being
-checked has a single unambiguous right answer. "Every enum member has a ledger row" does. "Every
-occurrence of this English word means the same thing" does not.
+the mechanism is the hazard.** The tell is whether the thing being checked has a single unambiguous
+right answer. "Every enum member has a ledger row" does. "Every occurrence of this English word
+means the same thing" does not.
+
+**But "reading is the only method" was too coarse, and `nd500uc-47` sharpened it into the form worth
+keeping.** The job splits into three phases, and only the middle one resists tooling:
+
+> **Mechanical discovery → semantic decision → mechanical verification.**
+> The tool finds the sites and checks the result; a person reads the sites.
+
+That is what the sweep actually did: `grep` enumerated 327 sites (discovery), each was read and 1
+false positive plus 13 grammar breaks were caught (decision), and the diff was then checked
+mechanically for **0 doubled names and 0 non-comment lines touched** (verification). Abandoning
+tooling because the middle phase needs judgement would have lost both ends — and the verification
+end is what proves the judgement was applied consistently across all 327.
 
 ### Not recommended
 
