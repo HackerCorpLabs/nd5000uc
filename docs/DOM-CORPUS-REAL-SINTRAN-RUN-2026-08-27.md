@@ -1861,3 +1861,47 @@ the OS had allocated and checking them against our own geometry** - `ceil(1067/5
 built 2, while `ceil(1067/1024) = 2` matches. That needed no new run: it was in a census taken hours
 earlier and read wrongly. The prompt to re-read it was the neighbouring session pushing back on a
 framing this document had already retracted once and then re-adopted.
+
+### 22a. CORRECTION: the loader prints its banner and then CRASHES - I overstated this
+
+**I told the ND-500 session and this document that the loader "reached its command loop, printed,
+and parked on InByte waiting for input", i.e. essentially working. That was wrong.** I inferred it
+from the tail of a trace read WHILE THE RUN WAS STILL GOING - the last instruction was a MON
+trampoline call - and did not wait for the run's own end-state report.
+
+The confirming run's end state, from the harness rather than from a mid-run trace:
+
+```
+parked on a terminal read (MON 1B) - prod #1 sending a bare CR
+ND-Linkage-Loader -  H.02   3. March      1988 Time: 16:48
+[after RUN] ND-500 PC=0x08008255 P1=0xB001C78D stopMode=CRASHED
+[GROWABLE] GrowSegmentOnFault calls=32 ... lastMiss: dom 0 seg 22 (L1=0 L2=36)
+[PFCENSUS] page-fault records posted: 31  [buckets reconcile]
+```
+
+So the real sequence is: the program starts, parks on a terminal read, the harness prods it with a
+bare CR, it prints its banner - and then it **crashes**. Trap-stops 30 and 31 (`pc=0xB001646F`,
+`pc=0xB001C78D`) were posted and have **no ANSWER line after them**, and there were **32** fault
+attempts against **31** posted records, the 32nd at segment 22 L1=0 L2=36 - an ordinary low page,
+nothing to do with the split.
+
+**What stands, and what does not:**
+
+ - `[V]` The split fix is right. Census reproducible byte-for-byte across two runs, `subtype=7B`
+   absent, every bucket `worstRepeat=1`, and the ND-500 session's CONVERT-DOM regression clean with
+   zero protect violations.
+ - `[V]` The banner prints - a genuine first, and the test asserts on the program's own identity
+   line, so the PASS is real.
+ - `[V]` **No 201B in either post-fix run.** (Note: a naive `grep 201B` matches 3 times per run - all
+   of them the string `201B-chain` in our OWN diagnostic line. The actual `*** FATAL SYSTEM ERROR ***
+   / ERROR CODE: 201B` does not appear. Nearly reported the opposite.)
+ - `[X]` "Essentially working / at its prompt" - RETRACTED. It crashes after the banner.
+
+**A NEW blocker, not the old one.** The program now gets far enough to print, then dies on a page
+fault at an ordinary page with two traps outstanding. That is a different defect from the index
+split and must not be folded into it. The test passing is not evidence against this: it asserts on
+the banner, which is reached before the crash.
+
+**The method lesson, and it is the same one this document keeps recording:** a mid-run trace tail is
+not an end state. I had the harness's own end-of-run report available and reported from the trace
+instead, because the trace said what I hoped. Waiting nine minutes would have cost nothing.
