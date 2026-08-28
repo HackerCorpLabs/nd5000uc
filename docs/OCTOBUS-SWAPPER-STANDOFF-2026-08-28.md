@@ -72,23 +72,70 @@ Step 6 then hands it work, and the node at `SWPPING` carrying `MICFU=3SWMESS` is
 
 **So the stall is not in loading or starting the swapper. It is in the work handoff afterwards.**
 
-## 5. `[OPEN]` — the one question that decides whose defect this is
+## 5. ANSWERED — `SWPPING` is ND-100 bookkeeping, and our walk is right to skip it `[V]`
 
-Our walk skips both nodes because `N5STA` is not `ToNd500(1)`. Two readings, needing opposite fixes:
+Carved from `E:\Dev\Ronny\NDInsight\SINTRAN\NPL-SOURCE\NPL\MP-P2-N500.NPL`, which is the ND-100 side
+of this conversation. Every writer and every reader, by line:
 
- - **Correct as-is.** Those are ND-100-side bookkeeping blocks in SINTRAN's own status space, and
-   the ND-500 is not supposed to touch them. Then the missing step is further back and the standoff
-   is a symptom.
- - **Our defect.** SINTRAN expects the ND-500 to consume a `SWPPING`/`3SWMESS` node, and skipping it
-   is why nothing progresses.
+**`SWPPING` (6) is written in exactly three places, all into a PROCESS's message, never into SWMSG:**
 
-Note our servicer declares `3SWMESS` (05) understood **only** on the ND500 generation — on ND-5000
-the B30 dispatches it to `MSG_ILLEG` — but we never reach that arm, because the walk skips the node
-before any MICFU dispatch. So the generation gate has never been exercised here and cannot be the
+| line | routine | what it means |
+|---|---|---|
+| `133645` | `SWMESS`, `SWFUN = MSWSTART` | the process that typed START-SWAPPER is now "using the swapper" |
+| `134107` | `SWMESS`, `SWFUN = MSWSWAIT` | restart-swapper-and-wait, after an allocate-page |
+| `145022` | `5ACTSWAPPER` | `X:=MSGTOSW; SWPPING` — the page-faulting process handed to the swapper |
+
+**`PSWWAIT` (7) is written in exactly ONE place:** `135747` `SWPD4: PSWWAIT; X:=SWMSG; CALL
+WN5STATUS  % Mark swapper free`. It is written into `SWMSG` and nothing else. So **SWMSG sitting at
+`PSWWAIT` is a receipt that `SWPD4` ran** — the swapper announced its completion and was marked
+free. That is not an inference; nothing else in the file can produce that value.
+
+**`SWPPING` is cleared by the ND-100 too:** `133747` (`X:=5MMESSAGE; ANSWER` — "restart proc. that
+started the swapper"), and `136446` in `INLDATREADY` (`IF A=SWPPING THEN ... % Restart process`).
+
+**No ND-500-side actor reads or writes `SWPPING` anywhere.** The value lives in SINTRAN's own
+swapper-state space (5, 6, 7, 0o15), which is disjoint from the ND-500 statuses (0-4) the microcode
+understands. So the first reading in the old section 5 is the right one:
+
+> **Our chain walk skipping a `SWPPING` node is CORRECT, not a defect.** The missing step is further
+> back, and the standoff is a symptom.
+
+The generation gate is settled too, and settled as irrelevant: our servicer declares `3SWMESS` (05)
+understood only on the ND500 generation, and the B30 dispatches it to `MSG_ILLEG` — but the walk
+never reaches any MICFU dispatch for this node, so that arm has never run here and cannot be the
 cause.
 
-**Do not guess between the two.** The next carve is what writes and what clears `SWPPING` on the
-ND-100 side, and whether any ND-500-side actor is expected to.
+### 5a. What this rules IN, and the trap that nearly hid it
+
+Between the `SWPPING` write at `133645` and the `ANSWER` at `133747` sit two guarded calls:
+
+```
+133733             X:=SWMSG
+133734             CALL SLOCK;   GO FAR N500ERR
+133736             CALL XTER500; GO FAR N500ERR      % Stop nd-500
+133740             CALL ITO500XQ; CALL SUNLOCK       % Insert swapper-mess. in ex-queue
+133742   SWME1:    CALL XACTRDY
+133747             X:=5MMESSAGE; ANSWER; GO FAR XEILSTAT   % Restart proc. that started the swapper
+```
+
+**`N500ERR` (`134247`) PRINTS NOTHING** — `*IOF; CALL WN5STATUS; CALL XRSTARTALL; ...; GO MONEN`.
+A silent exit there leaves the requester parked at `SWPPING` forever with a clean console. So
+"nothing was printed after `> Loading Swapper`" is **not** evidence that the tail completed. That is
+the RULE #0b shape again: an absent message is a fact about the printer, not about the machine.
+
+But it is ruled OUT by the receipt: `XTER500` is *before* `ITO500XQ`, so an error exit there means
+the swapper message never enters the execution queue, the swapper never runs, `SWPD4` never runs,
+and `SWMSG` cannot be at `PSWWAIT`. It is. **So the MSWSTART tail did reach `133747` and did write
+`ANSWER`.**
+
+Which leaves exactly one account standing: the node we observe at `SWPPING` with `MICFU = 3SWMESS`
+is a **later, second** `MSWSTART` that has not completed — the only writer that leaves that pair.
+`5ACTSWAPPER` cannot be it (it overwrites `MICFU` with `3MONCO` at `145071`); `MSWSWAIT` cannot be
+it (it restores `OLDMI` into `MICFU` at `134100`).
+
+**The measurement that settles it**, and it needs no new instrument: the chain-visit ring already
+records `N5STA` before and after every visit. Read the `3SWMESS` node's status history in order and
+count how many times it enters `SWPPING`, and whether any of them reaches `ANSWER(3)`.
 
 ## 6. The method note, which cost more than any single answer here
 
