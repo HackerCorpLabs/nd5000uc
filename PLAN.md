@@ -1,8 +1,8 @@
 # PLAN
 
-**Next:** finish the MON-ledger enforcing test (#62), then re-run the LINKAGE-LOAD capture to read
-the `lastDoubleFault` string that now exists (#44) — both blocked until `nd500uc-47` commits the
-naming sweep it currently has 57 files open on.
+**Next:** re-run the CLASSIC-lane LINKAGE-LOAD capture and read the `lastDoubleFault` string that
+now exists (#44). The octobus lane cannot answer this one — `nd500uc-47` measured it stalling
+earlier, inside recover-domain, so it never reaches the program at all.
 
 ---
 
@@ -29,9 +29,18 @@ ND-100**, with every MON call **FORWARDED over the bus/octobus**.
 **A run where our C# `SintranEmulation` answers the MON calls DOES NOT COUNT.** Before believing any
 "the program runs" claim, ask **WHO ANSWERED THE MON CALLS?**
 
-That question now has a file: **`MON-PATH-LEDGER.md`** — all 22 MICFU paths, keyed on octal + enum
-name. Look it up rather than re-reading the servicer. The guard is also mechanical:
-`EmulatedMonPathMarker.Count` must be **0**, and the harness asserts it.
+That question now has a file, and it lives in RetroCore beside the code it describes and the test
+that enforces it:
+
+```
+E:\Dev\Repos\Ronny\RetroCore\Emulated.HW\ND\CPU\ND500\Servicer\MON-PATH-LEDGER.md
+```
+
+All 22 MICFU paths, keyed on octal + enum name. Look it up rather than re-reading the servicer.
+`TestND500_MonPathLedgerIsComplete` fails if a path has no row, if a row names a member that no
+longer exists, or if the servicer has a `case` arm the ledger does not declare. The guard on a live
+run is separate and mechanical: `EmulatedMonPathMarker.Count` must be **0**, and the harness asserts
+it.
 
 ---
 
