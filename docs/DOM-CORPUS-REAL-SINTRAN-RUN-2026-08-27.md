@@ -1648,3 +1648,43 @@ crash is reported to Ronny and to the neighbouring session instead.
    It is unverified code and marked as such.
  - The §19 question it was built to answer - does SINTRAN's own segment table declare 1024 pages or
    1067 - is still unanswered, and cannot be answered until the harness completes a run again.
+
+### 20a. ROOT CAUSE of the PLACE-DOMAIN crash: a build collision, not a defect (2026-08-28)
+
+The neighbouring session answered the question in §20 in one round, and the answer retires the
+blocker as a code problem entirely.
+
+**It is a shared-OUTPUT collision, not a shared-SOURCE one.** Both sessions work in one checkout,
+so they also share `Emulated.Tests\bin\Debug\net9.0\` and every assembly copied into it. While my
+capture runs were executing, the other session was building the same projects; its build failed at
+that moment with **MSB3027 / MSB3021 - "Could not copy ... The file is locked by: testhost"**. A
+half-copied assembly loaded by a running test host is precisely the shape observed here: exit 255,
+no managed exception, no dump, and the harness's own unhandled-exception hook silent - because the
+failure is in the loader, below any handler.
+
+**Confirmed from this side, without building anything:** `Emulated.Tests\bin\Debug\net9.0\
+Emulated.HW.dll` carries timestamp **11:12:52**, LATER than my own last build at ~11:03. Another
+session had rebuilt into the output directory my runs execute from. That is the collision, visible
+as a file stamp.
+
+**My own contribution, which I raised rather than accepted their apology for.** `dotnet
+build-server shutdown` is **user-scoped, not project-scoped**: it kills the MSBuild nodes and
+VBCSCompiler for the whole user, including another session's in-flight build. I ran it at least
+three times today, once immediately before the 10:31 build that produced the first crash. Both
+sessions were doing this to each other. The project rule to finish with it is right for a solo
+session and is a hazard with co-tenants.
+
+**Why the evidence pointed at timing all along:** the source did not change between the last good
+run and the first crash - the only commit in that window was comment-only (verified by the other
+session with `git show ... | grep -v '^[+-]\s*//'` returning nothing). §20 recorded "timing, not
+content" as the leading candidate for exactly this reason.
+
+**The correction this forces to §20's framing:** §20 called this a BLOCKER on the measurement
+thread. It is not - there is nothing to fix in the emulator. The run needs to be repeated with the
+two sessions not building concurrently, and the §19 question (does SINTRAN's table declare 1024
+pages or 1067) is still simply unanswered rather than unanswerable.
+
+**Standing method change, both sessions agreed:** before a long capture run, rebuild and CHECK THE
+OUTPUT DLL TIMESTAMPS MOVED before trusting the run. A "Build succeeded" that was a no-op is
+indistinguishable in the log from a real build - the other session lost a cycle running tests
+against a 20-minute-old binary for that exact reason.
