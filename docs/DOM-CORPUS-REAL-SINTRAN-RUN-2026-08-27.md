@@ -1394,3 +1394,61 @@ second-level-table allocation looks like.
 Next instrument: point §7's L1-table watch one level down, at the L2 tables, during a run that
 reaches the fault - and read whether SINTRAN ever attempts a third L2 allocation and fails, or
 never attempts one at all. Those two have different fixes and the watch separates them.
+
+## 17. SINTRAN never installs the third L1 entry - with the control that makes it believable
+
+§16 asked whether SINTRAN attempts a third second-level table and fails, or never attempts one.
+The data to answer it was already captured; it did not need a new run.
+
+### The measurement
+
+In the L1 table page window (ND-100 phys `0xC18800`-`0xC19000`), across the whole failing run:
+
+```
+reads  inside the L1 window: 200704
+writes inside the L1 window:      0
+```
+
+SINTRAN re-reads that page 200,704 times - the walk re-reading the entry on every one of the
+13,359 faults - and **never writes it once**.
+
+### The control, because "zero writes" is exactly how this instrument lies
+
+A zero count is a claim about the recorder until something proves the recorder can produce a
+non-zero. It can:
+
+```
+all writes in the same log:        744, every one at 0x455xxx (the PST window)
+all writes in the passing cpu-stat log:  22, likewise in the PST window
+```
+
+Same trace object, same run, writes captured and reported - just not in the L1 window. So the zero
+is about the subject, not the instrument. This is the check that §10a's register-file diff and §7's
+read-denominator were both missing versions of, and it is now routine here.
+
+### What it establishes, and what it does not
+
+ - `[V]` **No third L1 entry is ever installed.** L1 index 2 stays zero for the entire run; nothing
+   writes the page that would record a third second-level table.
+ - `[V]` The mapping stops at exactly 2 L1 entries = 1024 pages and never advances, while the walk
+   keeps consulting it 200k times.
+ - **`[OPEN]` - and this is the part the window cannot see:** "SINTRAN tried to allocate a third L2
+   table and the allocation failed" and "SINTRAN never tried" produce *identical* evidence here.
+   Both end in no write. Separating them needs a watch on the allocation path (swap-file / page-table
+   allocator), not on the table being allocated into.
+
+The blind spot is worth naming because it is the same shape as the confound in §13: two hypotheses
+that differ in mechanism and agree on every observable this instrument can reach. Choosing between
+them by preference rather than by a new observable is how the previous wrong answer on this task got
+made.
+
+### Where the boundary is NOT
+
+Two limits were checked and neither binds:
+
+ - The swap file is `3720B` pages = **2000 pages**, against 1067 needed. Not short.
+ - `MapExistingPhysicalRegion`'s 512-page single-level cap is ours and applies only to segment 1,
+   which §16 established is the only segment we map. It cannot be what stopped segment 22.
+
+So the 1024 boundary is not the swap file and not our loader's cap. It is two full second-level
+tables, and what governs that is still unnamed.
