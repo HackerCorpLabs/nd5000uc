@@ -279,6 +279,23 @@ the question is actually being asked.
 - **R12 (reference-math float oracle)** — still worth building; the 08-08 trigger was you having to
   ask *"did you align that with normal math?"*
 
+### Where the "mechanism over rule" thesis does NOT hold — recorded because it is a real limit
+
+R19 is the counterexample, and it turned up the same day. A `sed` across `classic` is the obvious
+mechanism, and it would have been **wrong**, in three distinct ways that only reading catches:
+
+- **`ClassicHalfwordTables`** names a TABLE FORMAT (the 14-bit halfword PTE), not a machine. It had
+  to become `Nd500HalfwordTables`, not a machine name.
+- **`"the classic in-place shift a packed string right by one byte"`** — here "classic" means
+  *textbook*, nothing to do with the ND-500 at all. Swept, caught in review, reverted.
+- **13 grammar breaks**: "a classic machine" became "a ND500 machine".
+
+So the rule is narrower than §1 states it: **a mechanism beats a rule when the check is mechanical
+— does a row exist, is this symbol referenced, did the build fail. When the judgement is semantic,
+the mechanism is the hazard and reading is the only method.** The tell is whether the thing being
+checked has a single unambiguous right answer. "Every enum member has a ledger row" does. "Every
+occurrence of this English word means the same thing" does not.
+
 ### Not recommended
 
 More documents. The document count went **up** this period while the same six frictions recurred.
