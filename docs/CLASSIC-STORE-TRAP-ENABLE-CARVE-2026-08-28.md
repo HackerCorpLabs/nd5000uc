@@ -206,13 +206,36 @@ and inconsistent with our shared loader keeping a `THA` register for that lane.
 trap generator reports to SINTRAN as status - a trap report carrying `HL` where a status word
 belongs. Not measured; it is the first thing to check when this is picked up.
 
-### What is NOT verified here, and must be before any code changes
+### Now raw-decoded, and the displacement holds `[V]` - with one correction
 
-I did **not** re-execute `014012` or read its `MARG` out of the raw `MICRO-5800-B30.DATA`. The `0x36`
-displacement is the deep dive's `[V]`, taken on its authority. That file itself documents a render
-bug of exactly this shape one section later - `TRAPSET` at `015075` prints as `IX*2 ORCON=0x08` while
-the raw MARG is `0x48` - so a displacement read from a listing is precisely the value not to trust
-twice. Decoding it needs the `Microword` field decoder, which needs a build.
+The `0x36` was a citation when this section was written, so it got decoded from the raw store rather
+than trusted twice. `TrapEn1_HandlerTableBase_RawDecodeDump` (ND-5000 microcode tests) asserts it:
 
-**Do that first.** The classic half of this file was carved from microwords and is `[V]`; this half
-is a citation, and the two should not be quoted in the same breath.
+```
+0o14011  AA=2 AB=1 MARG=0x36 AdArti=1 Adact=1        <- composes DPA = DIT + 0x36
+0o14012  MemOp=12 Dest=17                            <- the read itself
+```
+
+**`0x36` is confirmed. The ADDRESS in the write-ups is one word off:** the DIT read is composed at
+`0o14011` and the memory operation lands at `0o14012` - the same one-word separation between address
+word and memory word that runs through this machine.
+
+### And the same dump refutes the "never reads" claim on the B30 as well `[V]`
+
+Four consecutive words in this very routine are context-block reads:
+
+```
+0o14021  AA=6 MARG=0x5C
+0o14022  AA=6 MARG=0x50
+0o14023  AA=6 MARG=0x60
+0o14024  AA=6 MARG=0x58
+```
+
+`AA=6` is the context-relative base. So the ND-5000 microcode reads `ctx+0x50` and `ctx+0x58` too -
+just not in `CNTXTLOAD`. **"Not restored at context-load time" and "never read" are different
+claims, and only the first one was ever true.** The harness printed the second.
+
+That makes the corrected statement simple, and it is now in the harness line itself: on the classic
+lane the context chain saves and restores these slots; on the ND-5000 the context load skips them
+but the trap path reads them anyway, and `TRAP_GEN1` reports `0x54`/`0x60` to SINTRAN as the two
+status words.
