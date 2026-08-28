@@ -830,3 +830,58 @@ slot numbers and values. The established recipe is in `MailboxClrKickTests` - se
 `cpu.State.Mpc` to the entry, wrap `IMicroMemory` in a recording decorator, tick with a
 bounded budget, and treat an unimplemented microword as a finding that names the next thing
 to implement. [OPEN - that test is the next piece of work]
+
+### 10a. EXECUTED - what the real microcode does with a zero L1 entry
+
+Test: `Nuget\HackerCorpLabs.Emulation.CPU.ND5000\tests\MmsPageFaultPathTests.cs`. Green.
+
+**[V] The classification.** Entering the L-index arm `MMS_LIX` (013035) reaches `TRAP_PGF0`
+(013430) and NEVER reaches `PROTVIOL` (013036) or `MMS_ERROR` (013102). So a zero L1 entry
+is a page fault that builds a request. The dispatch-table reading in section 10 is confirmed
+by execution, not by adjacency of labels - which is the failure mode that has bitten this
+project before.
+
+**[V] One field slot, confirmed by running rather than reading.**
+
+```
+CS 13050: SRF[0o35] DEADBEEF -> 00000000
+```
+
+CS 013050 is `A,DMM,PHS ... D,RF1`: it reads the PHYSICAL-SEGMENT MMS register and writes it
+through `RFA1` into **SRF slot 0o35**. The rendered listing gives `MARG=035` for the word
+that sets `RFA1`, and MARG is exactly the field `MICRO-5800-B30.md` mis-renders - so this is
+the case where the machine had to be asked. It agrees. The VALUE is zero only because this
+stub has no MMS state; the SLOT is the measurement.
+
+**[V] The branch is real.** The two SC14 seeds walk different paths: bits 31:30 SET skips
+`PF_NORM` and takes 013047/013050 (the DMM,PHS write above); bits CLEAR goes through
+`PF_NORM` (013051). A control that could not tell them apart would mean the run described
+the seeding, so this is asserted rather than assumed.
+
+**[OPEN] The rest of the field set.** The CLEAR seed reached `PF_INFO_OK` without any
+register write, so it took 013054 straight to the join and skipped the `PF_PS` chain
+(013055-013100) where the remaining slots - including the `MARG=037` one - are written.
+Driving it down that branch needs SC14/SC5 seeded to represent a real PS-type fault. That is
+the next piece.
+
+#### Three instrument defects, each of which reported a confident nothing
+
+Recorded because all three are the same shape and it is the shape that wastes days.
+
+1. **Memory-only recording**: reported `0 memory writes, 0 memory reads` for the whole path.
+   True and useless - the chain writes the REGISTER FILE (`D,RFA1`/`D,RF1`), not memory. An
+   empty log looked exactly like "the routine does nothing".
+2. **A diff of the register file**: still reported ZERO changes, because the file and the
+   stub both start at zero and a write of zero over zero is invisible to a diff. Fixed by
+   poisoning every cell with `0xDEADBEEF` first, at which point the single real write
+   appeared immediately. Same family as "a failed read and a real value are
+   indistinguishable".
+3. **The discrimination control compared the wrong quantity** - the final Mpc. Both branches
+   converge on `TRAP_PGF0` BY DESIGN, so a routine that discriminates perfectly still ends at
+   one address; it printed "did not discriminate" while `PF_NORM` was plainly visited by one
+   seed and not the other. It now compares the visited PATHS and passes.
+
+The general lesson, which is now three-for-three on this task: **an instrument that reports
+nothing is making a claim about itself until something independent shows it can report
+something.** The poison value, the read denominator on the L1 watch, and the
+calls = ok + noSlot + mapFail cross-check are all the same device.
