@@ -1256,3 +1256,74 @@ This does not change the practical conclusion, because our emulator's `MM_PFZ1=0
 bucket are OUR OWN encoding on both sides of the comparison - the value we latch and the value we
 map from are the same constant. Where it WOULD bite is any claim about what real hardware puts on
 the wire, which is precisely the claim the subtype-routing theory needs.
+
+## 15. The swapper dispatch census - and a question it opens (2026-08-28)
+
+§14 left `[OPEN]` what the swapper does with the fault record. Following that: the swapper's
+function table (`swapper-k01-handlers.md`) marks **fn 10 `MSWPFAULT` as reaching no paging
+primitive and no MON 377B**. The handlers that actually page in are fn 8 (connect/page-in, RPHS),
+fn 22 (page-in working set, RPHS) and fn 28 `MSWDO` (perform swap, RPHS).
+
+So: which functions are actually dispatched? The harness already samples the request block, so this
+is a tally of an existing field (`DISP@0x240B8`), not a new instrument.
+
+### Whole 12-program run
+
+```
+DISP  count   handler (from the carved function table)
+0x0A   2490   10  MSWPFAULT - page-fault notification/accounting  (no paging, no MON)
+0x00    378    0  MSWFI - free/finish one segment slot
+0x18     89   24  create/define a segment descriptor
+0x0F     28   15  mirror of fn 14 (detach)
+0x05     26    5  initialize/activate swapper working set
+0x03     26    3  release a range of segments/pages
+0x09     17    9  allocate+link a segment
+0xFFFFFFFF 1      sentinel
+```
+
+**Functions 8, 22 and 28 - every one of the RPHS page-in handlers - are never dispatched. Not once,
+in any of the twelve programs.**
+
+### The control that stops this becoming a wrong conclusion
+
+That looked like the answer: the swapper is told about faults and never told to page anything in.
+Then the passing run:
+
+```
+=== DISP in the PASSING cpu-stat-only run ===
+     64   0x0A   (and nothing else)
+```
+
+**CPU-STAT passes while dispatching fn 10 and NOTHING ELSE** - and its fault census shows 142
+faults including two buckets of 62 faults over 62 distinct addresses each, which is pages being
+successfully mapped and the program walking forward.
+
+So an fn-10-only dispatch pattern is what a **working** run looks like. The absence of fn 8/22/28
+is normal, not pathological, and the failing run's fn-10 dominance is not an anomaly either. The
+hypothesis dies here. (The failing run shows more distinct codes only because it runs twelve
+programs; per-program, `0x0A` dominates for every one of them, passing and failing alike.)
+
+### The question this opens, which is worth more than the hypothesis it replaced
+
+If fn 10 does no paging and no MON, **what maps the 62 pages in the passing run?** Two candidates,
+and they have very different consequences:
+
+ 1. The `no paging / no MON` carve of fn 10 is wrong. It is derived from a call-tree reachability
+    scan, which can miss an indirect call - the same class of instrument that has under-reported
+    here before.
+ 2. The pages are not being mapped by the swapper at all, but by something on our side of the
+    seam. That would matter a great deal, because THE GOAL is that real SINTRAN does this work -
+    and "who actually mapped the page" is the same question as "who answered the MON call".
+
+`[OPEN]`, and deliberately not guessed. Candidate 2 is the one to test first, because it is
+cheap - the page-in write has to happen somewhere, and a watch on the L2 table page during a
+PASSING run says immediately whether the writer is SINTRAN or us. That is the same instrument
+already built for the L1 table in §7, pointed one level down.
+
+### Method note
+
+The first tally I ran was over the whole log and would have attributed twelve programs' traffic to
+the linkage loader. The log interleaves programs and tags each line (`[CPUSTAT]`, `[LINKAGELOADER]`
+...); the tags are the only thing separating them. Caught by reading the context of the matched
+lines instead of trusting the count - a whole-file `uniq -c` over a multi-subject log is a
+confident number about the wrong population.
