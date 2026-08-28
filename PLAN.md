@@ -1,8 +1,11 @@
 # PLAN
 
-**Next:** re-run the CLASSIC-lane LINKAGE-LOAD capture and read the `lastDoubleFault` string that
-now exists (#44). The octobus lane cannot answer this one — `nd500uc-47` measured it stalling
-earlier, inside recover-domain, so it never reaches the program at all.
+**Next:** #67 — carve where the CLASSIC store really gets `THA` and `TE`, then stop reading them
+from context slots `0x4C`-`0x58` that the microcode never touches. A program that installs a trap
+handler still cannot receive a trap, because `THA` is zero rather than pointing at its vector table.
+
+**Landed 2026-08-28:** LINKAGE-LOAD-H02 runs to its own `Nll:` prompt under real SINTRAN, MON path
+`forwarded=95 realRoundTrips=93 answeredByCsharpEmulation=0`.
 
 ---
 
