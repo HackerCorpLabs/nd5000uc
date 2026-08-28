@@ -1,9 +1,11 @@
 # PLAN
 
-**Next (this session owns the ND-5000 / OCTOBUS lane):** #56 — carve what writes and what clears
-`SWPPING` on the ND-100 side, and whether any ND-500-side actor is expected to consume a
-`SWPPING`/`3SWMESS` node. That one question decides whether the octobus stall is our defect or a
-symptom of a missing step further back. Evidence and the five refuted claims:
+**Next (this session owns the ND-5000 / OCTOBUS lane):** #56 — read the chain-visit ring in order
+and count how many times the `3SWMESS` node enters `SWPPING`, and whether any of them reaches
+`ANSWER(3)`. No new instrument is needed; the ring already records `N5STA` before and after every
+visit. Blocked only on a free slot in `Emulated.Tests` — two attempts died on the shared tree, not
+on our code (a torn read of the peer's harness file mid-save, then `Emulated.Tests.dll` locked by
+their testhost). Evidence and the five refuted claims:
 `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`.
 
 **LANE SPLIT, 2026-08-28 (Ronny):** this session is the **ND-5000 / octobus** session — RouteB, the
@@ -19,6 +21,24 @@ prefix of the longer, so a filename mix-up maps directly onto a lane mix-up.
    protocol. The stall is in the work handoff afterwards, not in the bring-up.
  - The octobus lane finally records WHO answered its monitor calls: `seen=1 taken=1`, forwarded to
    the CPU. `MonPathReport()` had existed for weeks with no caller.
+ - **`SWPPING` is ND-100 bookkeeping and our chain walk is RIGHT to skip it.** Three writers, all
+   into a process message, none on the ND-500 side; `PSWWAIT` has exactly one writer (`SWPD4`) and
+   is therefore a receipt that the swapper announced. The `3SWMESS` generation gate never runs here
+   and is not the cause.
+ - **#68: the ND-5000 context save now leaves `ctx+0x48..0x58` alone.** Swept all 16384 microwords:
+   **0 writes, 5 reads** of those slots through the context base. They are inputs the microcode
+   CONSUMES (`CNTXTLOAD` at `0o14777`; `MSG_UNIX5RE` and `MSG_UNIX5REL` read the `0x54`/`0x58`
+   pair), not status it reports — which retracts this project's own earlier `TRAP_GEN1` account.
+   Writing `0x54` had also been blinding the slot-22 report built to read it.
+
+## Still open on the ND-5000 lane
+
+ - **#68 leftovers, both deliberate.** `ctx+0x6C` and `0x70`: CNTXTSAVE writes them and we write
+   nothing — uncarved, and inventing a value is worse than leaving a slot untouched. And the CLASSIC
+   store diverges too (skips slot 22 at `010410`, saves THA at `0x58` at `010411`), left unchanged
+   because the peer is mid-run on that lane.
+ - **#59** — the SHORT octobus bring-up, skipping START-SWAPPER entirely.
+ - **#50 / #51** — microword oracle divergences and the sweep diff extension.
 
 ---
 
