@@ -35,7 +35,7 @@ indistinguishable*. The servicer says so itself, at the 3MONCO arm:
 | **CONDITIONAL** | REAL on one path, canned on another — usually "if `ProcessHost != null` and the CPU accepts". **The dangerous class: indistinguishable from success at the caller.** |
 | **DECLINED-BY-DESIGN** | Answers `5ERANSWER(4)`, because the real hardware also refuses. A refusal that matches hardware is correct behaviour, not a gap. |
 | **ABSENT** | No arm and/or no enum member. The default arm **throws** rather than answering — deliberate, see §3. |
-| **UNVERIFIED** | Listed for completeness; this session did not read the arm line by line. **Not a status claim.** |
+| **UNVERIFIED** | Listed for completeness; the arm was not read line by line. **Not a status claim.** *(No row carries this any more — all 22 were read on 2026-08-28. Kept in the vocabulary because the honest thing to do with a new MICFU is mark it UNVERIFIED rather than guess.)* |
 
 Generation matters: several arms behave differently for `Nd500Generation.ND500` and the ND-5000, and
 a status that is silent about generation is a status that is wrong for one of them.
@@ -51,8 +51,8 @@ running in the RetroCore tree, unlike line numbers.
 |---|---|---|---|---|---|
 | `01` | `ReadMicroVersion` | yes | yes | **REAL** | servicer — answers version + CPU-parameter halfword. The watchdog heartbeat; a burst of these means time passed, nothing more. |
 | `05` | `MessageToSwapper` | — | — | **DECLINED-BY-DESIGN** | answers `5ERANSWER`, matching the real microcode (dispatches to `MSG_ILLEG`). |
-| `10` | `DataMemoryRead` | UNVERIFIED | REAL | **REAL** (ND-5000) | servicer — `PerformOctobusBlockCopy`, real bytes moved. |
-| `11` | `DataMemoryWrite` | UNVERIFIED | REAL | **REAL** (ND-5000) | servicer — real block copy. |
+| `10` | `DataMemoryRead` | NOT MODELLED | REAL | **CONDITIONAL (generation)** | ND-5000: `PerformOctobusBlockCopy`, real bytes moved. **ND500: not handled** — the arm's ND500 branch covers only `PhysicalRead`, so 10B falls through to `understood = false` and answers `5ERANSWER`. In-source comment: *"IMEMRD and friends still unmodelled on classic"* — so this is a GAP, not a refusal that matches hardware. Verified 2026-08-28. |
+| `11` | `DataMemoryWrite` | NOT MODELLED | REAL | **CONDITIONAL (generation)** | mirror of `10` — ND-5000 real block copy; ND500 unmodelled, answers `5ERANSWER`. Verified 2026-08-28. |
 | `12` | `CacheControl` | yes | yes | **REAL** | servicer — answered; the hardware's cache op has no emulated state to change. |
 | `13` | `ResidentRead` | yes | yes | **REAL** | servicer. |
 | `14` | `ResidentWrite` | yes | yes | **REAL** | servicer. Previously DROPPED silently as an unknown MICFU — a fixed gap, kept here as the reason the default arm now throws. |
@@ -68,10 +68,10 @@ running in the RetroCore tree, unlike line numbers.
 | `27` | `FileTransfer` | — | — | **DECLINED-BY-DESIGN** | `5ERANSWER`, matching hardware. |
 | `30` | `PhysicalRead` | REAL | REAL | **REAL** | ND-500: real PST walk (microcode `011433B`, shares `TryResolvePhysicalSegmentAddress` with PHYSWR). ND-5000: `PerformOctobusBlockCopy`. |
 | `31` | `PhysicalWrite` | REAL | REAL | **REAL** | mirror of `30` (microcode `011453B`). |
-| `34` | `Mono` | yes | yes | **UNVERIFIED** | answered (`understood = true`); arm not read line by line this session. On the ND-5800 this is instruction-memory read, **not** a mon-call variant. |
+| `34` | `Mono` | ANSWER-ONLY | **REAL** | **CONDITIONAL (generation)** ⚠ | **A NAMESPACE COLLISION, verified 2026-08-28.** `3MONO` = 0o34 on the ND500 *and* `IMEMRD` = 0o34 in the B30 octobus copy family. ND-5000: dispatches to a real direction-fixed block copy (`PerformOctobusBlockCopy`, addrA -> addrB), proven byte-exact by the microword CPU's IMEMWR/IMEMRD round-trip. **ND500: `understood = true` and NOTHING ELSE — answered without any work done.** |
 | `35` | `InstructionMemoryWrite` | not modelled | REAL | **CONDITIONAL (generation)** | ND-5000 real copy; ND-500 arm explicitly `understood = false` — *"IMEMRD and friends still unmodelled on classic"*. |
-| `44` | `ReadPRegister` | yes | yes | **UNVERIFIED** | answered; arm not read line by line this session. |
-| `36` (IMEMRD) | **no enum member** | — | — | **ABSENT** | there is no `InstructionMemoryRead`. A request would reach the default arm and **throw**. |
+| `44` | `ReadPRegister` | stub | stub | **FAKED** ⚠ | **Verified 2026-08-28: the entire arm is `understood = true; break;`.** It is named "read the P register" and it reads nothing, returns nothing, and touches no message field — it just answers ANSWER(3). Any caller asking the ND-500 for its P register is told the request succeeded and gets whatever was already in the slot. This is the clearest FAKED path in the table. |
+| — | *(no `InstructionMemoryRead` member)* | — | — | **not a hole** | **CORRECTION 2026-08-28.** An earlier version of this table claimed "36B IMEMRD is ABSENT and would throw". That was wrong twice over: IMEMRD is **0o34**, which IS handled — as the `Mono` member, above — and decimal 36 is `ReadPRegister` (0o44). I had read a decimal enum value as an octal MICFU. There is no missing instruction-memory-read path. |
 
 ### The two entries to check first when asking "who answered the MON calls?"
 
