@@ -1764,3 +1764,40 @@ against 1067 needed - not short). **What is not yet measured is how much the swa
 allocated to phys. segment `14B` after placement.** If that allocation is 2000B (1024) rather than
 2053B (1067), the boundary is in the swap allocation, not in the segment declaration - and that is
 one `LIST-SWAP-FILE-INFO 0` issued after PLACE-DOMAIN instead of before it.
+
+### 21a. RETRACTION (again) of "mapping stops dead at 1024" - and the contrast that replaces it
+
+**I retracted the limit framing in section 8 and then wrote it again in section 21.** "Mapping stops
+dead at 1024 pages = 2 L1 entries" is a claim about a LIMIT; two live L1 entries and a zero third is
+equally consistent with the third simply never having been supplied. The neighbouring session caught
+the relapse and was right to. It is on the do-not-reopen list in `ND500UC\docs\PLAN.md` precisely
+because both sessions have adopted and abandoned it once already.
+
+**What the same census actually shows, and it is better than either framing.** Within ONE run and
+ONE segment (psn=12):
+
+```
+subtype=10B side=data where=0xF psn=12  faults=2    distinctAddr=2  worstRepeat=1
+subtype=7B  side=data where=0xE psn=12  faults=939  distinctAddr=1  worstRepeat=939
+```
+
+ - `where=0xF` is **zero SECOND-level PTE** - the first-level entry existed, the page below it did
+   not. Two of these, at two different addresses, **each faulting exactly once and never again**.
+ - `where=0xE` is **zero FIRST-level PTE** - no second-level table exists for that megabyte. 939 of
+   these, all at one address, forever.
+
+**So the paging machinery demonstrably works.** A fault that needs a page inside an existing
+second-level table is answered and does not come back. A fault that needs a NEW second-level table
+is answered and comes back forever. That is not a size limit and not an absence of requests - the
+request is made 939 times. It is a specific failure to create a second-level table, with everything
+either side of it functioning.
+
+This also answers "does anything ever request the third entry": **yes, 939 times.** The fault IS the
+request, it names the correct address (verified on the wire in section 19), and SINTRAN answers it
+`K=0` - success - without creating the table. The open question is therefore not whether it was
+asked but **what SINTRAN believes it did when it answered K=0**, which is the same conclusion the
+ND-500 session reached from the swapper side (`SWPFU=0x0000 SWPST=0x000A` constant across every
+repetition).
+
+Recorded with the contrast rather than the conclusion, because the contrast is measured and the
+conclusion is not.
