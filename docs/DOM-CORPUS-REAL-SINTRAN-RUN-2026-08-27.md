@@ -1578,3 +1578,73 @@ amount observed.
 Next: read the segment descriptor SINTRAN holds for this domain - the declared page count - rather
 than the registration we believe was requested. Those are different numbers and only one of them
 governs.
+
+## 20. BLOCKER: the linkage-loader harness now dies during PLACE-DOMAIN (2026-08-28)
+
+The measurement thread is stopped by a hard process kill, and it is NOT caused by anything in this
+document's changes. Recording it with what is established and what is not.
+
+### Symptom
+
+`Nd500_LinkageLoader_UnderRealSintran_RealCpu_Capture` exits **255**, killing the test host outright.
+The progress log stops at exactly 2301 bytes, three runs in a row, at the same line:
+
+```
+=====[ place-domain (210319H02:FLOPPY-USER)LINKAGE-LOAD-H02 ]===== (wait: N500:)
+```
+
+A healthy run prints, right after that line:
+
+```
+> Loading Control Store
+> Loading Swapper
+> Allocating memory - 7116B pages
+N500:
+```
+
+The ND-500 trace file is **172 bytes - the header only** - so the ND-500 CPU never executed a single
+instruction. The crash is on the ND-100 side, inside PLACE-DOMAIN.
+
+### What is ruled out, by experiment not by argument
+
+ - **Not my harness edit.** The `list-segment-table-entry` query was stashed, the harness rebuilt at
+   HEAD, and the test re-run: **identical crash, identical 2301 bytes.** (Its statement position
+   already made it implausible, but position arguments are exactly what has had to be retracted
+   repeatedly here, so it was tested.)
+ - **Not the SCAL fix.** That was committed AFTER the first two crashes and was never in the builds
+   that produced them.
+ - **Not disk space.** `D:` has 4.2 TB free.
+ - **Not pack corruption.** The pack image is dated 27 Aug and the harness attaches from an
+   in-memory byte copy, so runs do not write back to it.
+ - **Not the neighbouring session's ND-500 commits, on timing.** `b26a1be3e` (the ND-500 BIT-index
+   fix) landed at 10:11 and the msgwatch run built and PASSED after it at 10:14. `e47a696f5` landed
+   at 10:54, after the first two crashes. Neither brackets the transition.
+
+### What is known about the kill
+
+**The harness's own unhandled-exception hook never fires.** It writes `[UNHANDLED ...]` plus a stack
+trace to the progress log and there is no such line, so the process died WITHOUT a managed unhandled
+exception. That points at a stack overflow, an OOM the runtime could not report, or a FailFast -
+none of which produce a test failure, only a dead process. `--blame-crash` attached its dump utility
+and produced no dump.
+
+### What changed between the last success and the first failure
+
+Last success: msgwatch run, built ~10:13, ran 10:14-10:22, completed normally (exit 1, the ordinary
+marker timeout). First failure: built ~10:31, ran 10:33. **In this repo the working tree is SHARED
+with another active session**, so a build picks up whatever that session has in flight, committed or
+not - which means "what changed" is not answerable from my own history alone. That is the leading
+candidate and it is `[OPEN]`.
+
+### Why this is not being bisected here
+
+Bisecting would mean checking out older revisions of shared files **in a tree another session is
+actively working in**, which would disrupt their work. That is not a call to make unilaterally. The
+crash is reported to Ronny and to the neighbouring session instead.
+
+### State left behind
+
+ - The `list-segment-table-entry` query is **committed but NEVER EXERCISED** - no run has reached it.
+   It is unverified code and marked as such.
+ - The §19 question it was built to answer - does SINTRAN's own segment table declare 1024 pages or
+   1067 - is still unanswered, and cannot be answered until the harness completes a run again.
