@@ -1688,3 +1688,20 @@ pages or 1067) is still simply unanswered rather than unanswerable.
 OUTPUT DLL TIMESTAMPS MOVED before trusting the run. A "Build succeeded" that was a no-op is
 indistinguishable in the log from a real build - the other session lost a cycle running tests
 against a 20-minute-old binary for that exact reason.
+
+#### 20b. Correction to 20a's evidence (2026-08-28)
+
+20a cited `Emulated.Tests\bin\...\Emulated.HW.dll` stamped **11:12:52** as confirmation of the
+collision. **That stamp cannot be evidence for these crashes: it POSTDATES all three of them**
+(builds at 10:31, 10:39 and ~11:03). It was the neighbouring session building at 11:12 in order to
+run the capture test from its own clean tree - identified, not a mystery third party.
+
+What the stamp actually shows is the weaker, still-useful fact that **concurrent builds into the
+shared output directory do happen**, which is the mechanism. The evidence for the specific crashes
+remains: (a) the other session's `MSB3027`/`MSB3021` "file is locked by: testhost" build failures
+at 10:31-10:33, the mirror image of my exit-255s; (b) no source change in the window except a
+comment-only commit; and (c) the crash surviving a stash of my own edits.
+
+Flagged because it is the same defect this document keeps finding in its own reasoning: a true fact
+attached to a claim it does not support. The stamp is real, my reading of it reached one step too
+far.
