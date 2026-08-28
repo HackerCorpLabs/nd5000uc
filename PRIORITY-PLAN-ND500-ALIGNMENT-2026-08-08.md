@@ -1,150 +1,205 @@
-# Priority plan: aligning every ND-500(0) CPU, the MON emulation, ACCP and the ND-100 hosts
+# Priority plan — ND-500(0) alignment
+
+> **ENTRY POINT IS `PLAN.md`** (no date in the name, so the pointer cannot go stale).
+> This file is the cross-core alignment track.
+> Outstanding work lives in `PLAN.md` and the task list; this file keeps the measurements
+> and the refuted theories, which is what stops a closed question being re-opened wrongly.
 
 **Full path:** `E:\Dev\Ronny\ND5000UC\PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md`
-**Date:** 2026-08-08
-**Built from these handoffs (all read in full):**
-- `E:\Dev\Repos\Ronny\RetroCore\DOCS\ND500_COMPILE_BYTE_EXACT_HANDOFF_2026-08-04.md`
-- `E:\Dev\Ronny\NDInsight\SINTRAN\ND5000\HANDOFF-ACCP-E2-PRIORITY-PLAN-2026-08-04.md`
-- `E:\Dev\Repos\Ronny\RetroCore\Nuget\_shared\docs\ND5000-TRANSCENDENTAL-COS-FIXED-EXP-HANDOFF-2026-08-04.md`
-- `E:\Dev\Ronny\NDInsight\SINTRAN\ND5000\HANDOFF-ACCP-CONTROL-STORE-MODEL-CORRECTED-2026-08-04.md`
+**Cleaned:** 2026-08-18 (done work stripped out; only open todos remain).
+
+## DONE means (the bar this whole plan aims at)
+
+1. **MON calls work END TO END through REAL SINTRAN** (Ronny, 2026-08-18): a program running on the
+   microword ND-5000 (`CpuND5000`) makes a segment-31 MON call → it travels the mailbox/octobus into
+   the **REAL booted ND-100 SINTRAN monitor code** → SINTRAN services it and returns the **correct
+   values** → the ND-5000 CPU **resumes and keeps executing** with those values. A no-op / recording
+   MON sink in a unit test is NOT this - it only proves the CPU reaches a MON. The acceptance test is
+   the integrated boot (real ND-100 + SINTRAN + microword CPU over octobus).
+2. **We can load DOM code into a NEW domain** via the `nd-500-mon` path (PST + DIT + capabilities +
+   code/data in mapped pages) and run it under real MMS translation - THEN its MON calls satisfy (1).
+
+Nothing is "done" until both hold. CPU-side synthetic-domain milestones (load, run, reach a MON) are
+progress and a fast dev harness, NOT the finish line - the finish line has real SINTRAN in the loop.
+
+## Where things stand right now (what already works — don't re-do)
+
+- Boot to `SINTRAN III RUNNING` with the microword ND-5000 attached over octobus; ACCP/mailbox,
+  CS-load, STARTMIC, `MSG_START` load-and-run.
+- **Swapper runs under real MMS translation.** Fetch-side (caps-via-PS root cause) and data-side
+  (all virtual data-access paths) both fixed this session. CPU.ND5000 suite 690 pass / 0 unexpected.
+- MON-call seam (`CALLG` seg-31 → `MonitorCallSink` → park → service → resume) + the octobus service
+  loop; a real `cpu-stat.dom` loads and marches its MON sequence — but **flat (MMS off)**, not yet in
+  a mapped domain.
+- 3-core instruction oracle (nd500x C == NuGet C# == microword) green on integer + float except the
+  known divergences in P3 below.
 
 ---
 
-## 1. The pieces being aligned
+## P1 — Swapper green under MMS  ← CURRENT
 
-| # | Piece | Where | State |
-|---|---|---|---|
-| 1 | nd500x C functional CPU + machine + MON | WSL `~/repos/nd500x` (NOT verified on this box yet) | Reference oracle. Compiles+links HELLO. instruction_validation 100% green |
-| 2 | Legacy C# `Emulated.HW` ND-500 CPU + MON | `E:\Dev\Repos\Ronny\RetroCore` (legacy tree, branch `ethernet-ii-controller-fixes`) | Compile is byte-exact with nd500x. LINK broken (LINKER-B01, PC 0xB004E762) |
-| 3 | RetroCore NuGet functional CpuND500 | `RetroCore\Nuget\HackerCorpLabs.Emulation.CPU.ND500` (path NOT verified) | Canonical corpus generator per memory. MON state vs legacy NOT measured |
-| 4 | Microword CpuND5000 (real B30 microcode) | `RetroCore\Nuget\HackerCorpLabs.Emulation.CPU.ND5000` + docs here in ND5000UC | 7 reds: EXP, Entt/Rett, BothEngines/StartThenMonitorCall, lregbl/lcntxt |
-| 5 | ACCP high-level emulation | RetroCore octobus path (`NDBusOctobus`, station) | Working: boot to IDLE, mailbox, load-and-run |
-| 6 | ACCP low-level, real 68000 + octo.bin | `RetroCore\Nuget\HackerCorpLabs.Emulation.Machines.Accp` | 141/141. Control-store model corrected. StartMicroprogram missing |
-| 7 | ND-100 host, C# | RetroCore ND100Machine + octobus | Boots SINTRAN, drives ND-5000 |
-| 8 | ND-100 host, C | `E:\Dev\Emulators\ND\nd100x` (verified exists) | Later: integrate with the aligned ND-500 pieces |
+The swapper is the first program the machine runs; getting it to its steady state proves fetch +
+data + MON all work under translation.
 
-**UNVERIFIED (marked per the rules):** rows 1 and 3 paths, and how far the NuGet CpuND500's
-MON layer diverges from the legacy one. Phase 0 measures these; nothing later builds on a guess.
+- [ ] **1.0** CAP THE BOOT PROBE. With the data-path fix the swapper runs far more real code per
+  bounded pump, so the full boot now runs 2h+ and holds the CPU/HW DLLs locked (blocking all other
+  builds). Add a tick/pump cap + a "how far did P get" report so a confirming boot TERMINATES and is
+  usable. (The uncapped boot was killed 2026-08-18; the fix is unit-validated, so this is about making
+  the integration check practical, not re-finding the fix.)
+- [ ] **1.1** Confirm (via the capped boot) the swapper advances past the old `Mpc=0o220 / P=0x080081B2`
+  OOB. Fix already unit-validated (690 pass) + the killed boot ran ~2h with NO early throw (a crash
+  throws + logs fast), which is positive evidence; the capped boot makes it a clean confirmation.
+- [ ] **1.2** If a new boundary appears: reproduce it in the **synthetic domain** (seconds), route that
+  path through `TranslateData`, re-run the unit suite, then re-boot.
+- [ ] **1.3** Swapper reaches steady state: its self-announce **MON 377B** is serviced end-to-end and
+  it settles into its idle/service loop instead of stalling.
 
-## 2. The two big decisions — DECIDED 2026-08-08
+## P2 — MON round-trip through REAL SINTRAN  ← THE DONE BAR
 
-- **D1 — canonical home for MON emulation: legacy `Emulated.HW`.** Every MON fix lands there
-  first (byte-exact + 1963 green tests + the frame-log rig live there); the NuGet port catches
-  up via P3.2 with ported tests, not by hope.
-- **D2 — this session starts on the Phase 0 sweep** (all four measurements before anything else).
+The acceptance test has real ND-100 SINTRAN in the loop. The CPU-side pieces (2.a/2.b) are a fast
+harness that proves the machine reaches a MON; the bar (2.c/2.d) is SINTRAN servicing that MON and the
+CPU resuming with correct values.
+
+- [x] **2.a (CPU-side, DONE 2026-08-18)** `SyntheticDomain` boot-free harness: multi-page ASI mapping +
+  load a real `cpu-stat.dom` into a MAPPED domain (PSEG→code, DSEG→data via caps) and run under MMS to
+  its first MON (011B), parked by a stub sink. Proves load+run+reach-MON on the microword CPU. NOT the
+  round-trip - the sink is a stub. (`SyntheticDomainEndToEndTests`; suite 692 pass / 0 unexpected.)
+- [ ] **2.b** `MSG_START`/context-load path into a mapped domain (plan 6.3): build the context block +
+  drive `MSG_START` so a domain starts the way `nd-500-mon` starts it, not via direct latch-poking.
+- [ ] **2.c ← THE BAR: real SINTRAN services the MON.** In the integrated boot (real ND-100 + SINTRAN,
+  microword CPU over octobus), a program's segment-31 MON call is delivered by mailbox to SINTRAN's
+  ND-500 monitor, SINTRAN runs the REAL handler, writes the answer, re-activates the CPU, and the
+  microword CPU RESUMES with correct values. First target = the swapper's **MON 377B** (P1.3); then a
+  user DOM's MON sequence. This needs the **capped boot (P1.0)** to be iterable.
+- [ ] **2.d (NLL-P3/P4/P5)** Load + run a real user program (NLL, then cpu-stat) to correct output
+  under that booted SINTRAN; NLL + swapper together; consolidate into an integration test + commit.
+
+## P3 — Instruction-oracle divergences (parallel lane, alignment backbone)
+
+- [ ] **3.1** Work the ~246 remaining 3-way divergences + 31 trap-bit misses: float trap bits
+  (FO/FU/IVO on MULAD paths), packed-decimal Z flag (both functional cores wrong), DIVF longpath
+  100/10. Use real-hardware datapoints where the datapoint requests already flag it.
+- [ ] **3.2** Extend the sweep diff to `B/R/L/TOS/HL/LL/THA` (coordinated baseline move so it doesn't
+  churn the corpus).
+- Rule: microword-on-real-B30 is the authority unless a real-hardware datapoint says otherwise; fix
+  the functional cores (C **and** C#) to match.
+
+## P4 — MON functional-lane small deltas (parallel lane)
+
+- [ ] **4.1** Segment>31 rejection (C rejects, C# doesn't — `TODO(segment-range)`) and the 412B
+  already-mapped error code (`TODO(error-code)`). Ship each with a ported test + frame-log parity.
+
+## P5 — ND-100 host C integration (only AFTER P2 is green)
+
+- [ ] **5.1** Define the nd100x C ↔ ND-500/5000 core seam. Premature before the C# path proves the
+  protocol; candidates exist (nd500x already has the machine model).
+
+## P6 — Full-contract test suite ("seed every input, assert every output")
+
+Motivation: EVERY frame-op bug found 2026-08-21 (INIT-B not set, ENTM-TOS not set, ENTS/ENTM
+StackOverflow trap not raised, IFKRET broken by an un-seeded K flag) was the SAME shape — a partial
+implementation of a fully-documented instruction contract, hidden by a test that checked only a
+SUBSET of the outputs (X/A/E banks + Z/C/S/O, never B/R/L/TOS/K/traps). The fix is to test the FULL
+contract, sourced from the manual (the functional core's `Instructions\CALL\*.cs` / `CONTROL\Init.cs`
+transcribe ND-500 Ref ch.13 and cite the section). Method note: memory `method-full-contract-testing`.
+
+### What a "frame-contract test" IS (so it needs no guessing on arrival)
+
+A frame-contract test runs ONE frame macro-instruction on the microword `CpuND5000` from a fully
+seeded state and asserts EVERY output the manual's "Operation:" block names — the frame-base `B`, the
+link `L`, the top-of-stack `TOS`, the K flag, and the frame-header memory cells the instruction writes
+(`PREVB`=B+0, `RETA`=B+4, `SP`=B+8, `AUX`=B+12, `N`=B+16, args=B+20+). Not a subset. The harness is in
+`CPU.ND5000\tests\FrameContractTests.cs`:
+
+```
+CpuND5000 cpu = NewCpu(out mem);           // loads real MICRO-5800-B30.DATA, Mpc = NoopEntry (130)
+cpu.Regs.P = pc; cpu.Regs.B = oldB;         // seed the documented INPUTS
+cpu.Regs.Srf[10] = tos;                     // TOS home on the microword is SRF[10] (no TOS register)
+cpu.Regs.PendingCallReturn = ret;           // an ENT* requires a preceding CALL (else it ISEs)
+cpu.Regs.PendingCallArgCount = n; cpu.Regs.PendingCallArgAddresses[i] = ...;
+mem.Write(oldB + 8, 4, newB);               // old B.SP -> becomes newB for ENTS/ENTSN
+LayCode(mem, pc, new byte[]{ opcode, ... }); // + NOOP(0x03) at any RET/branch TARGET so its prefetch is clean
+cpu.StepOneMacroInstruction();  // prime (fetch)
+cpu.StepOneMacroInstruction();  // retire
+// then Assert.That every documented output.
+```
+
+Seed VALUES come from the passing conformance vectors (resolve the corpus via
+`Nd500xCorpusSweepTests.CorpusPath()`; e.g. `ENTS_StackDemand_0x20`, `ret_To2000`, `Ifkret_KeySet`).
+Contract SOURCE is the functional core file, which cites the Ref section:
+
+| instr | opcode | file (Instructions\...) | Ref | contract (documented outputs) |
+|---|---|---|---|---|
+| INIT | 0xDC | CONTROL\Init.cs | 13.9 | B=bottom; TOS=bottom+total; [B+8]SP=bottom+main; [B+0]PREVB=0; [B+4]RETA=0; L=0 |
+| ENTS | 0xB8 | CALL\Ents.cs | 13.10 | newB=[oldB+8]; PREVB=oldB; RETA=ret; SP=newB+demand; AUX=0; N=argc; B=newB; L=ret; **STO if newB+demand>=TOS** |
+| ENTSN | 0xBA | CALL\Entsn.cs | 13.10 | as ENTS but **N=min(actual,max)**; only first N args copied |
+| ENTM | 0xDF | CALL\Entm.cs | 13.10 | B=bottom; PREVB=oldB; RETA=ret; SP=bottom+main; AUX=0; N=argc; L=ret; **TOS=bottom+total**; saves old TOS at [oldB+8]; **STO if main>=total** |
+| RET | 0x80 | CALL\Ret.cs | 13.11 | B=[oldB+0]PREVB; L=[oldB+4]RETA; P=RETA; **K:=0** |
+| RETK | 0x81 | CALL\Retk.cs | 13.11 | same restore; **K:=1** |
+| RETD | 0x82 | CALL\Retd.cs | 13.11 | P:=L; B UNCHANGED (leaf, no frame) |
+| IFKRET | 0x9D | CALL\Ifkret.cs | 13.11 | if K=1: RET restore but K STAYS 1; if K=0: nothing (B unchanged) |
+| CALL | 0xC3 | CALL\Call.cs | 13 | L:=return addr; arm PendingCallReturn; P:=target; **B UNCHANGED** |
+
+- [x] **6.1** Frame lifecycle contract-locked in `FrameContractTests.cs` — 9 passing full-contract
+  regression locks (`Ents_FullFrameContract`, `Entsn_ArgCap_Contract`, `Entm_FullFrameContract`,
+  `Ret_FullContract`, `Retk_FullContract`, `Retd_FullContract`, `Ifkret_KeySet_TakesReturn`,
+  `Ifkret_KeyClear_NoReturn`, `Call_LeavesBUnchanged_ArmsReturn`; INIT already locked in
+  `SwapperInstructionDiagTests.Init_ConsumesInlineAddressOperand_NoDesync`) + 2 `[Explicit]` known-gap
+  DETECTORS that fail-as-designed (`Ents_StackOverflow_Trap_KnownGap`, `Entm_SetsTos_KnownGap`). Full
+  ND5000 suite 702/2 green (the 2 red = the pre-existing Entt/Rett trap-frame, unrelated).
+- [x] **6.2a** ENTM `TOS := bottom+total` — **DONE 2026-08-21**. The microword's TOS home is `SRF[10]`;
+  the ENTM stand-in now writes it, strictly improving oracle alignment (the functional golden already
+  carries this value). Detector `Entm_SetsTos_KnownGap` → renamed `Entm_SetsTos_Contract`, now `[Test]`
+  (green). Sweep baseline unchanged (match=23957 / diverge=1424 — no regression).
+- [ ] **6.2b** ENTS/ENTM StackOverflow (STO) trap when `newB+demand >= TOS` — **BLOCKED on the corpus
+  emitting per-vector TOS (see 6.4).** The sweep replays the microword with `SRF[10]=0` on all but the
+  ~12 tos-carrying vectors, so a gate keyed on `newB+demand >= TOS` would fire on EVERY unseeded ENTS
+  vector, take the no-frame early return, and diverge B/L/RAM from the golden (whose functional TOS was
+  seeded high). A `skip-STO-when-SRF[10]==0` guard is a plausible-WRONG hack (TOS=0 is a legitimate
+  limit) and is rejected. Detector `Ents_StackOverflow_Trap_KnownGap` stays `[Explicit]` and now carries
+  the full blocked-reason in its doc comment; it seeds SRF[10] explicitly so it is the right home to
+  validate the gate once the sweep can carry TOS.
+- [~] **6.3** Extend the same full-contract treatment to the remaining ENT/RET variants and CALLG.
+  - **DONE 2026-08-21**: `Retb_FullContract` + `Retbk_FullContract` (two-byte opcodes 0xFE1C/0xFE1D) —
+    lock the buddy-block return linkage (B:=PREVB, L:=RETA) and the RET-vs-RETK-style K polarity.
+    FrameContractTests now 12 green + 1 [Explicit] STO detector.
+  - **Already covered**: ENTT/RETT carry the known-red hard-fail detectors
+    (`Entt_TrapFrame_CannotBeDriven_HardFail`, `Rett_TrapReturn_CannotBeDriven_HardFail`) — the microword
+    cannot drive a trap frame yet; these are the gap markers.
+  - **Remaining**: ENTB, ENTF, ENTFN (not in the microword's TryHandleFrameOp switch — need gap
+    detectors sourced from functional Entb/Entf/Entfn.cs) and CALLG.
+- [ ] **6.4** Layer-1 multiplier — make the differential oracle compare the FULL architectural state so
+  gaps surface automatically: the sweep now seeds K and diffs B/R/L/TOS/HL/LL/THA (#51/6 done), so
+  finish by extending `MacroOracleState` to TOS/HL/LL/THA and making the nd500x generator emit the
+  complete final state per vector (today only 206/40082 carry `b`, 12 carry `tos` — the corpus itself
+  is under-specified). NOTE: B/R/L/TOS divergences on TAKEN-BRANCH vectors are prefetch artifacts, not
+  bugs — see memory `nd5000-sweep-shared-memory-pollution`.
+
+## Deferred by design — real gaps, do NOT fake
+
+- **Entt / Rett trap-frame** (the two known-red tests): need the 50-arg trap-register frame designed
+  from in-trap-handler context. Honestly red; not on the critical path.
+- **ACCP `0x03` byte / `0x330000` gate / `0x330001` bits**: need the Octobus Driver Programming Guide
+  (DVT 15 Oct 1986) or a second card's ROM. Parked; becomes top priority if either turns up.
 
 ---
 
-## Phase 0 — Ground truth (cheap, sizes everything, no judgement calls)
+## Standing rules (apply everywhere)
 
-Everything here is mechanical measurement. Do it before believing anything below.
+- Build/test SINGLE projects with `/p:UseSharedCompilation=false` (full-solution builds OOM); assert
+  the build exit code before believing any test number (stale-DLL trap); finish with
+  `dotnet build-server shutdown`. A running boot holds the CPU/HW DLLs locked — don't rebuild them
+  mid-boot.
+- Frame-log diff first; full instruction trace only range-gated around the divergence.
+- A probe that cannot tell its two hypotheses apart is not evidence; a green suite proves the outcome,
+  not the reason. Delete diagnostics after use.
+- Microcode addresses are OCTAL; read raw `MICRO-5800-B30.DATA` for SARG/MARG/ORCON/SCAL, never the
+  rendered `.md`.
 
-- **0.1** Verify nd500x location + that both frame-log oracles still run (C: `ND500X_FRAMELOG`,
-  C#: `ND500_FRAME_LOG`). One HELLO compile each, diff, expect only the 73 benign RET hunks.
-- **0.2** Rebuild the ACCP runtime counters against a **verified-good build** — the quoted
-  numbers came from a stale DLL (build had failed on `DfToD`). Reconfirm 8 addressed writes,
-  0/0/8 latch/staging/ring.
-- **0.3** ACCP E2-P1: read the 46 `cmpi.b #imm,D0` immediates → the full command-byte map.
-  Re-checks the 16 named from the ND-100 carve; turns "~30 unknown" into a named list.
-- **0.4** Measure the MON gap: list which MON handlers exist in legacy `Emulated.HW` vs the
-  NuGet CpuND500 vs nd500x's ndmonlib. Specifically: do 412B FSCNT auto-assign and 73B
-  SMAX-at-CLOSE exist outside legacy? This is the input to decision D1.
+## Reference (not todos)
 
-## Phase 1 — Microword CPU: close the closable reds
-
-Owner: microcode track (this repo + `HackerCorpLabs.Emulation.CPU.ND5000`).
-
-- **1.1** EXP 1.0. Defect contained in `EXPF` @025702–025717 + `FWRITE_X` @027451. The
-  same-word IMUL(84) override was tried and REVERTED — do not repeat it. Trace where the
-  IMUL product is delivered (which later AAPSYNC word reads it) between @025703 and the
-  @025710 `D,SRF16`, or confirm `k+1` from @025702 `CRYF,ONE` feeds the IMUL operand. Method:
-  execute on the real B30 store and trace, raw microwords from `MICRO-5800-B30.DATA` (never
-  the .md for SARG/MARG/ORCON/SCAL).
-- **1.2** lregbl / lcntxt: get verified IMAP metadata for those opcodes.
-- **1.3** Entt / Rett stay honestly red until the 50-arg trap-register frame is designed.
-  Not on the critical path; do not fake it.
-
-## Phase 2 — The instruction oracle (the alignment backbone)
-
-This is what "align all the CPUs" concretely means: one corpus, three cores, zero unexplained
-divergences.
-
-- **2.1** Wire the functional-swapper oracle: functional CpuND500 vs microword CpuND5000,
-  register+flag compare per instruction. This directly turns the BothEngines /
-  StartThenMonitorCall reds green and gives every future microword fix a safety net.
-- **2.2** Fold the microword core into the nd500x instruction_validation corpus as the third
-  column (nd500x C == NuGet C# already 0/46643).
-- **2.3** Work the known 3-way divergences with real-hardware datapoints where needed:
-  packed-decimal Z flag (BOTH functional cores wrong — microword may be right), DIVF
-  longpath 100/10, float FO/FU threshold (datapoint request already written).
-- **2.4** Per-divergence tie-breaker rule: microword-on-real-B30 is the authority unless a
-  real-hardware datapoint says otherwise; fix the functional cores to match, both C and C#.
-
-## Phase 3 — MON alignment + the LINK (functional-emulator lane)
-
-Blocked on D1 only for where fixes land, not for starting.
-
-- **3.1** Fix the LINK: LINKER-B01 never banners, runs away at PC 0xB004E762 (segment 22).
-  Use exactly the compile method: `ND500_FRAME_LOG` both sides, strip CRLF, diff to first
-  divergence, then range-gated trace. First unmeasured suspect: the `:JOB` auto-files.
-  Oracle: `HELLO:DOM` md5 `9ebe3f6ee899b4fa8bbb545020cdad50`, 5,810,117 instructions in C.
-- **3.2** Port the two proven MON fixes (412B auto-assign, 73B SMAX-at-CLOSE) to whichever
-  siblings phase 0.4 shows lack them — with the existing tests ported alongside.
-- **3.3** Align the small deltas: segment>31 rejection (C rejects, C# doesn't —
-  `TODO(segment-range)`), the 412B already-mapped error code (`TODO(error-code)`).
-- **3.4** Standing rule: every future MON change ships with the same frame-log parity check
-  against nd500x, so byte-exact never silently regresses.
-
-## Phase 4 — ACCP: make the real 68000 card drive the shared microword CPU
-
-The HLE-vs-lowlevel alignment. Owner: octobus/ACCP lane.
-
-- **4.1** Implement `IControlStoreSink.StartMicroprogram` against the shared CpuND5000.
-  Explicit goal from the handoff: it is the ONLY thing between here and the card passing its
-  own start/stop selftest (pass = word[6] of `0x001144F0` reads `0x0100`).
-- **4.2** ONE model for microprogram start: `0x0017` (68000 path) and octobus STARTMIC/ARMA
-  (HLE path) must drive the same mechanism — two models of one register is exactly the defect
-  the control-store correction was about.
-- **4.3** E2-P2: carve the unnamed handlers, ordered by what SINTRAN actually sends (capture
-  real command traffic from a boot first; no numeric sweep). **No estimate exists for this on
-  purpose — do not invent one.**
-- **4.4** E2-P3: lock each carved name in `AccpCommandChannelTests` as you go, per handler.
-- **4.5** E2-P4: dated carve doc into `NDInsight\SINTRAN\ND5000\`; do NOT edit
-  `ACCP-COMPLETE-REFERENCE.md` (another agent's live file).
-- **4.6** Parked, not forgotten: the `0x03` byte (needs the Octobus Driver Programming Guide
-  DVT 15 Oct 1986 or a second card's ROM — becomes top priority if either turns up), what the
-  `0x330000` gate selects, the `0x330001` bits.
-
-## Phase 5 — End-to-end: the ND-100 hosts
-
-- **5.1** C# end-to-end gate: RetroCore ND100Machine boots SINTRAN, ND-500 monitor loads and
-  runs a real program on the **microword** CpuND5000 over octobus — first with HLE ACCP, then
-  the same run with the real 68000 card doing control-store load + start (4.1/4.2 output).
-  Same program, same result, is the HLE==lowlevel proof.
-- **5.2** nd100x C integration: define the seam (how the C ND-100 talks to an ND-500/5000
-  core) only AFTER 5.1 is green. Candidates exist (nd500x already has the machine model);
-  choosing is premature before the C# path proves the protocol.
-
-## Dependencies in one picture
-
-```
-Phase 0 (measure)  ──┬─→ Phase 1 (microword reds) ──┐
-                     ├─→ Phase 2 (oracle) ←─────────┘  (2 wants 1.1 but can start now)
-                     ├─→ Phase 3 (MON + LINK)          (independent lane)
-                     └─→ Phase 4 (ACCP)                (independent lane)
-Phase 2 + 4 ─→ Phase 5.1 (C# end-to-end) ─→ Phase 5.2 (nd100x)
-```
-
-Phases 1+2, 3, and 4 are three parallel lanes (matches the existing session-lane setup).
-Phase 5.1 is the convergence gate; 5.2 waits for it.
-
-## Standing rules carried over from the handoffs (apply everywhere)
-
-- Frame-log diff first, full trace only range-gated around the divergence.
-- Assert the build succeeded before believing any test number (stale-DLL trap, twice now).
-- A probe that cannot tell its two hypotheses apart is not evidence.
-- A green suite proves the outcome, not the reason — counters that name the path do.
-- Check for a hard-coded immediate before believing a printed number was computed.
-- Delete diagnostics after use.
-- On this box: build/test single projects with `/p:UseSharedCompilation=false` (full-solution
-  builds OOM), and finish with `dotnet build-server shutdown`.
+- **MMU / domain setup recipe** (PST/PSTE modes, capabilities-on-the-process-segment, DIT layout,
+  translation, context block, enable latches, and every refuted theory): memory note
+  `nd500x-mmu-translation-model.md` + `CPU.ND5000\docs\MMU-REGISTER-CROSSCHECK.md` §4.
+- **Synthetic-domain harness** (the fast inner loop): `CPU.ND5000\tests\SyntheticDomainEndToEndTests.cs`
+  (`SyntheticDomain` builder + fetch and data-side end-to-end tests).

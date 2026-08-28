@@ -37,8 +37,14 @@
   `ProcessHost` accepts the restart, and fall back to a canned answer when it does not — and the two
   are **indistinguishable from SINTRAN's side**, which just sends another one. Settle it with the
   pair `MonitorCallRestartsSeen` vs `MonitorCallRestartsTaken`; `Seen > Taken` IS the gap.
-- Current master plan: `PRIORITY-PLAN-2026-08-24-REAL-SINTRAN-DOM.md` (run-a-program track).
-  `PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md` still owns the cross-core alignment track.
+- **THE PLAN IS `PLAN.md`. No date in the name, ever — that is the point of it.** It opens with a
+  one-line `Next:`, holds OUTSTANDING work only, and points at the dated `PRIORITY-PLAN-*.md` files,
+  which are kept as EVIDENCE RECORDS (what was measured, what was refuted) rather than to-do lists.
+  A dated plan filename means every new plan is a new file and every pointer to it eventually lies —
+  which is why "what is the plan?" had to be asked about eight times in three weeks.
+  **The live item-level record is the TASK LIST, and its counts must be shown in every substantive
+  reply** (Ronny, 2026-08-28: *"it doesnt show up below like it does now (19 tasks 11 done, 5 in
+  progress, 3 open) - make sure you always show this and update this as things chnage"*).
 - /loop re-arm: at most 2 minutes while actively iterating on a task. Longer only when genuinely
   waiting on something slow, and say so in the reason.
 - Questions to Ronny must be SELF-CONTAINED: restate the context in the question itself. Never

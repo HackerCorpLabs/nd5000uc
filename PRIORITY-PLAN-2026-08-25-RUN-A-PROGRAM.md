@@ -1,5 +1,10 @@
 # PRIORITY PLAN — run a real program under real SINTRAN (2026-08-25)
 
+> **ENTRY POINT IS `PLAN.md`** (no date in the name, so the pointer cannot go stale).
+> This file is current phase detail and evidence for the run-a-program track.
+> Outstanding work lives in `PLAN.md` and the task list; this file keeps the measurements
+> and the refuted theories, which is what stops a closed question being re-opened wrongly.
+
 Supersedes the run-a-program half of `PRIORITY-PLAN-2026-08-24-REAL-SINTRAN-DOM.md` (kept as the
 evidence record and correction log — read it before re-opening any closed question there).
 The cross-core alignment track still belongs to `PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md`.
