@@ -1,1 +1,50 @@
 docs/MC/RetroCommander.exe
+
+# ── SINTRAN / ND-500 run artifacts dropped in the REPO ROOT by the test harnesses ──
+#
+# WHY THIS EXISTS: `git status` at this root was 894 lines, 864 of them untracked emulator
+# output (.TXT/.DATA/.PROG/.SYMB/...). That is not untidiness - it actively endangers the
+# shared-tree rule. Two sessions work in this one checkout and the rule is "stage only your
+# exact files, never `git add -A`". A 900-line status makes that rule impossible to verify by
+# eye and makes an accidental sweep of another session's work-in-progress much likelier.
+# Measured 2026-08-28; see AI-FRICTION-REVIEW-2026-08-28.md finding N3.
+#
+# EVERY PATTERN IS ROOT-ANCHORED WITH A LEADING SLASH, AND THAT IS LOAD-BEARING.
+# `.DATA`, `.LABE` and `.TEXT` are also the extensions of the MICROCODE GROUND TRUTH -
+# docs/MC/MICRO-5800-B30.DATA, docs/MC/5800-30.TEXT and friends, which are tracked and are the
+# source GROUND-TRUTH.md points every carve at. A bare `*.DATA` would hide new ones. The
+# leading slash confines each pattern to this directory only, so docs/MC/ is untouched.
+# Verified before writing: no tracked file lives at the repo root except .md, LICENSE and
+# the dotfiles (`git ls-files | grep -v /`).
+#
+# If you ever need to keep one of these at the root, `git add -f <path>` still works.
+
+/*.TXT
+/*.DATA
+/*.LABE
+/*.TEST
+/*.EXT
+/*.SYMB
+/*.PROG
+/*.BRF
+/*.LIST
+/*.MODE
+/*.BPUN
+/*.OUT
+/*.DOM
+/*.PSEG
+/*.DSEG
+/*.NRF
+/*.DEFS
+/*.VTM
+/*.BATC
+/*.PLNC
+/*.INCL
+/*.IMPT
+/*.ERR
+/*.XCOM
+/*.CNFG
+/*.PLIB
+/*.T
+/A.T
+/.SYMB

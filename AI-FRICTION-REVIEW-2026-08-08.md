@@ -1,5 +1,11 @@
 # AI-session friction review — what keeps going wrong, and what to change in the repos
 
+> **SUPERSEDED IN PART — see `AI-FRICTION-REVIEW-2026-08-28.md`** for the 2026-08-09 -> 08-28
+> period. That review reports which of R1-R13 below actually got built (most of them), which
+> frictions recurred anyway despite having a rule, and why the recommendations changed shape
+> from "write it down" to "make it fail a build". R5 (the real-vs-faked ledger) is still the
+> highest-value unbuilt item from this document.
+
 **Full path:** `E:\Dev\Ronny\ND5000UC\AI-FRICTION-REVIEW-2026-08-08.md`
 **Date:** 2026-08-08
 **Source:** the 5 largest session transcripts for this project (`~\.claude\projects\E--Dev-Ronny-ND5000UC\`,
@@ -140,3 +146,67 @@ turns / open — wrong-turns section mandatory).
 A big process framework or more agents. The failures were nearly all *knowledge location* and
 *discipline enforcement* problems; the fixes above are one file or one script each. The existing
 skill/handoff/memory system is doing the heavy lifting and just needs these gaps plugged.
+
+---
+
+## 4. Addendum 2026-08-09 — full seven-session read (confirms §1, updates §3)
+
+The 2026-08-08 review above was SAMPLED. On 2026-08-09 all seven session transcripts
+(`~\.claude\projects\E--Dev-Ronny-ND5000UC\*.jsonl`, ~135 MB) were read in full by five parallel
+read-only agents, one per large transcript. The result **confirms F1–F8** — nothing new invalidates
+them, and every one recurred in more than one session. So this is a fossil record that holds up.
+
+### Status of the §3 recommendations (what got built)
+- **R1 PATHS.md — DONE** (task #17). **R2 test.ps1 — DONE** (task #18). **R3 mcread — DONE**
+  (task #19). **R6 DIAGNOSTICS.md + R7 CLAUDE.md lines — DONE** (task #20). Plus **R8 named
+  CS-address constants — DONE** (task #25).
+- **R4 (inter-session mailbox / LANES.md) — STILL OPEN.** Less urgent now: the multi-session split
+  was itself partly a fiction (see R11 below).
+- **R5 (real-vs-faked ledger) — STILL OPEN.** Recommended.
+
+### New / sharpened findings from the full read
+- **F3 has a specific, repeated shape: "green" read from narrative, never from the exit code.**
+  In the 2026-08-09 alignment marathon the background suite exited **code 1 on 25 consecutive runs**
+  and was called "green (only the 3 known reds)" every time. Root cause the wrapper does NOT yet
+  fix: these suites carry **permanent deliberate-red tests**, so the run's exit code is *always* 1 —
+  which is exactly why a reader falls back to stdout. The R2 build-exit guard does not help the
+  *test* exit here. → **R9**.
+- **F1/RULE#0 has a second face: unverified CONVENTIONS promoted to fact, not just paths.** A whole
+  loop was spent writing CARVER-REQUEST / HANDOFF docs to a "separate microword-CPU session that
+  owns CpuND5000" — a lane split that came from a memory note, never verified. Ronny: *"what do you
+  think this llm is? maybe its you that owns it."* You own all three emulators; there is no separate
+  team or session. → **R11**.
+- **Handoff-to-self sprawl.** Long autonomous `/loop` stretches emit CARVER-REQUEST/HANDOFF markdown
+  aimed at a "next session" that is the same agent — `git status` shows ~23 untracked such files at
+  repo root. The docs multiply instead of the work finishing. → **R13**.
+
+### New recommendations (continue the R-series; R1–R8 are taken)
+- **R9 — Known-red baseline in test.ps1 (kills the "always exit 1" trap).** A checked-in
+  `known-red.txt` per test project + a shared `scripts\Assert-KnownRed.ps1` the wrapper calls after
+  the run: parse the TRX, compute `unexpected = failed − known-red` and `missing = known-red not
+  run`, exit 0 **iff** `unexpected` is empty. Turns a permanently-1 exit into a real pass/fail signal
+  that cannot be read from stdout. Absent/empty baseline → falls back to raw exit code with a printed
+  note (no fabrication of a red set that wasn't measured). *Implemented 2026-08-09 for the ACCP suite
+  (baseline captured by a real run); the ND500 + ND5000 baselines are wired but await a real run to
+  populate.*
+- **R10 — GROUND-TRUTH.md carve-source map (kills the guess-vs-carve habit, the single most common
+  correction).** One table: *for claim X, the truth is Y, obtained by Z.* microcode field → raw
+  `MICRO-5800-B30.DATA` via `mcread`; ND-500 struct → NDIX `pcb.h`; float expected value →
+  reference-math helper (R12), never a hand-check. Makes "carve, don't guess" a lookup, not a virtue.
+- **R11 — Correct the ownership memory notes + add OWNERSHIP.md (kills convention-as-fact).**
+  `nd5000-session-coordination.md` was collapsed 2026-08-09 to drop the "separate session owns
+  CpuND5000 — DO NOT EDIT their files" framing (kept the ST1 layout + Track-B design digest);
+  `OWNERSHIP.md` now states the verified topology: you own all three emulators, edit any of them,
+  shared-tree hygiene (`git add <exact paths>`) is the ONLY real constraint. *Done 2026-08-09.*
+- **R12 — Reference-math float oracle helper in the test corpus.** A helper that computes the true
+  IEEE value so any "corpus wrong / engine right" float claim is auto-checked, not eyeballed. Ronny
+  had to force this by hand: *"did you align that with normal math?"*
+- **R13 — Handoff-to-self gate.** Standing CLAUDE.md rule (added 2026-08-09): do NOT author a
+  CARVER-REQUEST / HANDOFF to "the next session" during an active `/loop` — do the work or stop; and
+  handoff docs live under `docs\handoffs\`, not scattered at repo root. *Done 2026-08-09.*
+- **R14 — Radix guard for CS-address literals.** Extend R8: a tiny unit test asserting every
+  hardcoded CS/microcode-address constant is tagged octal, so the "327 octal read as decimal" trap
+  can't silently return a plausible-but-wrong routine.
+
+**Highest leverage of the new set: R9, R11, R13** — each shuts down a friction seen in *every*
+session, and each is one file or one script.
