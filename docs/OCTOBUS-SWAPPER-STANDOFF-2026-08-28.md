@@ -107,6 +107,11 @@ cause.
 
 ### 5a. What this rules IN, and the trap that nearly hid it
 
+> **SUPERSEDED 2026-08-28 by section 7a - the conclusion below is WRONG.** The node reached
+> `ANSWER(3)` fourteen times; it is not "a second MSWSTART that never completed". Kept
+> because the reasoning is sound and only the evidence was short: it rested on a 400-entry
+> ring that could not see the early walks. That is what the uncapped histogram fixed.
+
 Between the `SWPPING` write at `133645` and the `ANSWER` at `133747` sit two guarded calls:
 
 ```
@@ -152,3 +157,66 @@ histogram fail in **different directions**, so their agreement meant something.
 
 **The test before quoting agreement: ask what each instrument CANNOT see. If the answer is the same
 for both, it is one instrument wearing two hats.**
+
+## 7. The short bring-up settles it: the stall is NOT about START-SWAPPER `[V]` 2026-08-28
+
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, run against `DOMS-CSFIX.IMG` (the only
+pack carrying both the 262144-byte ND-5000 control store and CPU-STAT + SWAP-FILE +
+DESCRIPTION-FILE). No `START-SWAPPER`, no `STATUS` — just `define-swap-file` then `place-domain`,
+which is the NORMAL path: `ND-60.136.04A` 8.10.10.4 says the swapper load "is done automatically
+when the first ND-500 process is initiated by the monitor".
+
+```
+ND-5000: place-domain cpu-stat
+> Loading Control Store
+> Loading Swapper
+                       <- stops here, no "> Allocating memory", no prompt
+OUTCOME: nd-500=OK place-domain=STALL run=STALL startMessagesSeen=1
+```
+
+**So the hypothesis this test was built to check is REFUTED.** Its own comment offered two outcomes;
+this is the second one: *"it fails -> the hang is real and independent of START-SWAPPER, and we have
+learnt that at the cost of one run instead of a debugging session."* Both paths stop at the same
+place, after `> Loading Swapper`.
+
+### 7a. What the ND-500 side actually did — and it did everything asked
+
+The per-node status histogram (uncapped, so it answers "did it EVER", unlike the ring):
+
+```
+chain nodes visited: 421, not-answered: 306 (of which TAKEN-pending-stop: 2), served: 115
+  @0x0042BE30 lastMICFU=0o0  : free=117                                  <- NEVER CHANGED
+  @0x0042C130 lastMICFU=0o1  : ToNd500=100 ANSWER=2                      <- 3RMICV watchdog
+  @0x00428D30 lastMICFU=0o23 : ToNd500=2 ANSWER=2 PSWWAIT=83             <- SWMSG, 3START
+  @0x00428E30 lastMICFU=0o5  : ToNd500=15 ANSWER=14 SWPWAIT=1 SWPPING=85 <- requester, 3SWMESS
+```
+
+**RETRACTS section 5a.** That section argued the node parked at `SWPPING` had to be "a second
+MSWSTART that never completed". It reached `ANSWER(3)` **fourteen times**. The `SWMESS` tail runs,
+and runs repeatedly; the final `SWPPING` is a park after many successful cycles, not evidence of a
+tail that never finished. The reasoning was sound and the conclusion was wrong, because it was built
+on a ring that could not see the early walks — which is the whole reason the histogram now exists.
+
+Everything the ND-500 was asked to do, it did: 115 served, `SWMSG` answered twice and marked free,
+the requester answered fourteen times.
+
+### 7b. Where it actually stops, stated as narrowly as the evidence allows
+
+On a working lane the next line after `> Loading Swapper` is `> Allocating memory - 7116B pages`.
+The allocation runs through `LALLOPAGE`, which sets `PSW1WAIT` into `SWMSG` (`MP-P2-N500.NPL:136513`).
+
+**`SWMSG` never held `PSW1WAIT` — not once in 421 visits.** So the allocation never started. The
+swapper is loaded, announced and marked free at `PSWWAIT` (83 observations), and SINTRAN then never
+hands it the allocate work.
+
+That is step 6 of the protocol again — `5ACTSWAPPER` hands work ONLY on `PSWWAIT`, and `SWMSG` IS at
+`PSWWAIT` — but now reached from the ordinary `place-domain` path with none of the advanced commands
+involved. **`[OPEN]`: what 5ACTSWAPPER is waiting for before it posts the allocate.**
+
+### 7c. A blind spot in the new instrument, recorded rather than left to be rediscovered
+
+The histogram records `N5STA` as read BEFORE each node is served. `TAKEN-pending-stop` counted 2, yet
+no node ever shows `WAITING(2)` — because a node that is moved to `WAITING` and resolved between two
+walks is never OBSERVED in that state. The counts do not contradict each other; they measure
+different instants. Anyone reading "no node was ever WAITING" as "no start was ever taken" would be
+wrong.
