@@ -31,6 +31,12 @@
   bus/octobus.** A run where our C# `SintranEmulation` answers the MON calls **DOES NOT COUNT** and
   must never be reported as progress toward it (this happened 2026-08-24). Before believing any
   "the program runs" claim, ask WHO ANSWERED THE MON CALLS.
+  **THAT QUESTION NOW HAS A FILE — `MON-PATH-LEDGER.md`. Look it up; do not re-read the servicer.**
+  All 22 `N5MicroFunction` members, keyed on MICFU octal + enum name. The status that matters is not
+  FAKED, it is **CONDITIONAL**: `3MONCO` (24B) and `3WMONCO` (26B) forward to the attached CPU when
+  `ProcessHost` accepts the restart, and fall back to a canned answer when it does not — and the two
+  are **indistinguishable from SINTRAN's side**, which just sends another one. Settle it with the
+  pair `MonitorCallRestartsSeen` vs `MonitorCallRestartsTaken`; `Seen > Taken` IS the gap.
 - Current master plan: `PRIORITY-PLAN-2026-08-24-REAL-SINTRAN-DOM.md` (run-a-program track).
   `PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md` still owns the cross-core alignment track.
 - /loop re-arm: at most 2 minutes while actively iterating on a task. Longer only when genuinely
