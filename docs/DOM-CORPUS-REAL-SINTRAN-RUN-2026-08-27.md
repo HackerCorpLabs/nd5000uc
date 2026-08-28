@@ -1133,3 +1133,126 @@ That is the honest state: the signature is real and unique, and the mechanism be
 `[OPEN]`. Separating the two needs an intervention, not another observation - and the previous
 intervention of this exact shape was reverted as wrong, which is why it is not being made
 unilaterally.
+
+## 14. What the page-fault subtypes actually mean (2026-08-28)
+
+There are **two different code sets**, one layered on the other, and this project has been sliding
+between them. Naming them separately is most of the answer.
+
+### Layer 1 - the HARDWARE where-code (this is what our emulator latches as MMWHERE)
+
+`[V]` from the CURRENT NDIX-C source, `kernel/MASTER/machine/icb.h`, the `erx_HW` block that
+describes the ND-5000 MMU status register:
+
+```c
+#define MMREQ   0xc000  /* request type */
+#define MMWHERE 0xF     /* where the fault occured */
+#define PVALTAC 0x1     /* violation on ALT access */
+#define PVWVIOL 0x2     /* write protect violation */
+#define MMINST  0x40    /* fault on I-channel access */
+#define PFZPST  0xD     /* 0 in PST entry for page fault */
+#define PFZ1    0xE     /* 0 in 1st level page table for page fault */
+#define PFZ2    0xF     /* 0 in 2nd level page table for page fault */
+```
+
+So, plainly:
+
+| code | meaning |
+|---|---|
+| `0xD` | the **PST entry** read back zero |
+| `0xE` | the **1st-level page-table (index) entry** read back zero |
+| `0xF` | the **2nd-level page-table entry** read back zero |
+| `+0x40` | the fault was on the **I-channel** (instruction fetch), not data |
+| `0x1` / `0x2` | ALT-access violation / write-protect violation (protection, not page fault) |
+
+Our `CpuND500.MMU.cs` constants `MM_PSTZ=0xD`, `MM_PFZ1=0xE`, `MM_PFZ2=0xF`, `MM_INST=0x40` are
+**exactly this set** - so what we latch is the real hardware encoding, not an invention.
+
+Independent agreement from `ND-05.020.01` (ND-5000 Hardware Description), which enumerates the same
+three conditions as MMS nanostates rather than as codes: state 4 PSCAPT *"The PST entry contains
+zero. Page fault"*; state 6 CAPIT *"The index-entry contains zero. Page fault"*; and the same test
+again at the second indexing level. Three zero-tests, three codes, same order.
+
+**So our live fault - `where=0xE` - means: the first-level page-table entry for that address read
+back zero.** Which is precisely what a segment paged in only as far as 1024 of its 1067 pages
+looks like. The census bucket's name and the known condition are the same fact.
+
+### Layer 2 - the CLASSIC MESSAGE subtype (what we post at message offset 0o22)
+
+`[V]` values, read straight out of `CONT-STORE-10611.LISTING.TXT` (the immediates are OCTAL):
+
+```
+011140/ ALU,OR A,XD,SARG B,AM#27 D,AM#27 TYP,HW JMP SLOW2 11170,6     data
+011141/ ...                                            JMP SLOW2 11170,7     data
+011142/ ...                                            JMP SLOW2 11146,10    data
+011143/ ...                                            JMP SLOW2 11211,106   instruction
+011144/ ...                                            JMP SLOW2 11211,107   instruction
+011145/ ...                                            JMP SLOW2 11211,110   instruction
+```
+
+Six codes: `6`/`7`/`10B` data, `106B`/`107B`/`110B` instruction, i.e. **+100B = instruction side**
+(and `100B = 0x40`, the same side bit as layer 1). Note the jump targets differ - `10B` goes to
+`11146`, the other two to `11170` - which is the engine split already recorded in §12.
+
+**The mapping from layer 1 to layer 2 is still `[D]`.** The selector at `011126`-`011131` picks the
+code from `DSTS0` bit 4 and `DCINHLL` bits 27 and 6 - hardware inputs with no writer anywhere in
+the store - not by branching on which table level came back zero. Our writer assumes the two sets
+run in the same escalating order (`D->6`, `E->7`, `F->10B`). That is plausible and unproven.
+
+### A trap I nearly published
+
+NDIX also contains a clean-looking enumeration that would have named the layer-2 codes outright:
+
+```c
+#define PFZPSTD 0     /* 0 in PST for data page fault */
+#define PFZPF1D 1     /* 0 in 1st level PT for data page fault */
+#define PFZPF2D 2     /* 0 in 2nd level PT for data page fault */
+#define PFZPSTI 0100  /* ... instruction page fault */
+```
+
+Same shape as the classic codes, same `+0100` side bit - and it disagrees with the microcode by a
+constant 6. **It is a DELETED REVISION.** It lives only in `SCCS/s.icb.h`, wrapped in `D 28`/`E 28`
+delete markers, and `grep` outside the SCCS files finds no `pf_info` or `PFZPSTD` anywhere. An
+SCCS history file reads like ordinary source and silently interleaves every revision ever made, so
+a plain grep of it returns superseded definitions with no signal that they are dead.
+
+**Rule for this repo: never quote `NDIX-C/kernel/.../SCCS/s.*` - read the file without the `s.`
+prefix.** The surviving definitions are layer 1 above.
+
+### The consequence for the subtype-routing theory
+
+SINTRAN's own level-12 trap decoder (`MP-P2-N500.NPL:135320` `TRAPDECODER`) does this and nothing
+more: read `TRAPN`; if `>53` unknown-trap; **if `=46` page fault** -> refuse if the faulting process
+IS the swapper -> stamp `MSWPFAULT SHZ 10 + D` into `TRAPN` -> `CALL 5ACTSWAPPER`.
+
+**It never reads offset 0o22.** The subtype does not steer anything on the SINTRAN side at level 12.
+So the §12 theory - that sending `10B` instead of `7` would route the fault to an engine that can
+resolve it - is about routing *inside the real classic microcode*, which is exactly the part we
+replace. On our lane the message goes straight to SINTRAN, which discriminates only on `TRAPN=46`.
+That substantially weakens the theory, and it is a reason to be glad the mapping was not changed on
+it. `[V]` for what the decoder reads; `[OPEN]` for what the swapper does with 0o22 downstream - the
+swapper carve calls its `MSWPFAULT` handler bookkeeping that does no paging, but that name is
+`INFERRED`, not carved.
+
+### Caveat on the NDIX evidence (Ronny, 2026-08-28)
+
+**NDIX is not stock SINTRAN.** It reaches the machine through `MON 600` and needs a specially-built
+SINTRAN, so anything read out of the NDIX kernel describes what NDIX expects, and can differ from
+what a stock-SINTRAN machine presents. That applies to the whole of layer 1 above, so grade it
+carefully rather than treating a C header as the machine:
+
+ - **The three CONDITIONS are independently confirmed and do not rest on NDIX at all** - zero PST
+   entry, zero index entry at the first level, zero index entry at the second level, in that order,
+   are enumerated as MMS nanostates 4 / 6 / (repeat) in `ND-05.020.01`, which is hardware
+   documentation. `[V]`
+ - **The numeric assignment `0xD`/`0xE`/`0xF` to those three conditions rests on NDIX alone.** The
+   manual names the conditions without numbering them. So this is one source, from a kernel with a
+   non-standard OS seam. Downgrade to `[V, single source - NDIX]` and treat a disagreement with a
+   stock-SINTRAN observation as evidence against the numbering, not against the machine.
+ - The layer-2 classic codes (`6`/`7`/`10B`, `+100B`) do NOT depend on NDIX - they are read out of
+   the classic microcode image itself. Unaffected by this caveat.
+
+This does not change the practical conclusion, because our emulator's `MM_PFZ1=0xE` and the census
+bucket are OUR OWN encoding on both sides of the comparison - the value we latch and the value we
+map from are the same constant. Where it WOULD bite is any claim about what real hardware puts on
+the wire, which is precisely the claim the subtype-routing theory needs.
