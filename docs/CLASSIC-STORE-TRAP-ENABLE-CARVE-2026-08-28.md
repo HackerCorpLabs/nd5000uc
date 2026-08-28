@@ -180,3 +180,39 @@ had no trap handler area**, which is a legitimate state with its own trap number
 the correct response is the "no handler" answer the guard now gives.
 
 The open question that remains is the ND-5000 one, and only that.
+
+---
+
+## 6. THE ND-5000 SIDE IS DIFFERENT IN KIND, NOT IN OFFSET `[V from the deep dive, not re-executed]`
+
+The classic answer (section 5) must not be ported across, and the reason is sharper than "different
+offsets". On the B30 the trap handler table base **is not a context-block register at all**. From
+`ND5000-ND100-MESSAGE-PROCESSING-REFERENCE-2026-08-23.md` section 3.2, the DIT enable walk:
+
+```
+014012  TRAP_EN1: SC6 := [DIT+0x36] (handler table base);
+        SC3 := trapno*4 ; DPA := SC6 + trapno*4            [V]
+014031  TRAP_START: READ the handler address, P := it
+```
+
+So the ND-5000 reads the handler table base **out of the DIT, fresh, at trap-dispatch time**. There
+is nothing for a context load to restore, which is consistent with `CNTXTLOAD` skipping `0x4C`-`0x58`
+and inconsistent with our shared loader keeping a `THA` register for that lane.
+
+**And `0x54`/`0x60` are not unused on the B30 either - they are read, by a different routine.**
+`TRAP_GEN1` at `013514`-`013517` copies `ctx+0x54` into the stop message as the first status word and
+`ctx+0x60` as the second `[V]`. Our `SaveProcessContextBlock` writes `HL` at `0x54` and `CAD` at
+`0x60`. On the ND-5000 lane that means we may be writing our register values into the two slots the
+trap generator reports to SINTRAN as status - a trap report carrying `HL` where a status word
+belongs. Not measured; it is the first thing to check when this is picked up.
+
+### What is NOT verified here, and must be before any code changes
+
+I did **not** re-execute `014012` or read its `MARG` out of the raw `MICRO-5800-B30.DATA`. The `0x36`
+displacement is the deep dive's `[V]`, taken on its authority. That file itself documents a render
+bug of exactly this shape one section later - `TRAPSET` at `015075` prints as `IX*2 ORCON=0x08` while
+the raw MARG is `0x48` - so a displacement read from a listing is precisely the value not to trust
+twice. Decoding it needs the `Microword` field decoder, which needs a build.
+
+**Do that first.** The classic half of this file was carved from microwords and is `[V]`; this half
+is a citation, and the two should not be quoted in the same breath.
