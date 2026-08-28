@@ -105,6 +105,24 @@ eight-way taxonomy of how a measurement lies. It is *still* the most productive 
 
 None of the three would have produced a red test. All three would have produced a **green** one.
 
+**THE ONE-QUESTION TEST FOR THIS WHOLE FAMILY**, from `nd500uc-47` the same day, and it is better
+than my taxonomy because it is a procedure rather than a list to remember:
+
+> **"Would this assertion still pass if the feature were deleted?"**
+
+`Assert.IsTrue(config.MMUEnabled)` fails that question instantly — it asserts a bool setter
+round-trips, and passes whether or not the flag is connected to anything. It can be asked about any
+assertion in a few seconds, needs no knowledge of the subsystem, and catches modes 7, 8 and 9 alike.
+
+A fourth instance surfaced within the hour, which is why this belongs at the top rather than in a
+footnote: **`MMUConfiguration.MMUEnabled` is parsed from the command line (`--mmu-enabled` / `-mmu`,
+and so from RetroCore.ini), defaults to true, logs itself as applied, and had no effect whatsoever** —
+a `Logger.Log` line was its only reader in the solution. Wiring it up (commit `c9646bda3`) failed
+five tests instantly, every one of them code that had *asked* for the MMU and been running without
+it. And underneath that sat a second, larger thing: the MMU presets set capabilities but never
+populate a PST entry, so they have never been able to translate at all. **A disconnected control was
+hiding an unbuilt feature, and neither was visible while the other held.**
+
 ### G5 — Real-vs-emulated ambiguity (R5 was recommended on 08-08 and never built)
 
 08-24 14:22: *"i hope we are not running simulated MON calls"* — followed by four one-word messages.
