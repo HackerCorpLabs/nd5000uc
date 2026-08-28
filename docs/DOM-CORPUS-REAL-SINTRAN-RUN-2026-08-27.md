@@ -1064,3 +1064,72 @@ Two reasons, both from the tree rather than from caution in the abstract:
 
 The lead is real and worth settling, but settling it means a measured fault census either side of
 the change, the way the last one was settled - not a one-line edit on a plausible story.
+
+## 13. The fault census, both runs (2026-08-28) - and what it cannot separate
+
+Ronny's call was to census before touching the subtype mapping. Done, on the failing
+LINKAGE-LOAD-H02 run and on the passing CPU-STAT run. Both censuses reconcile their buckets against
+an independent total, so neither is silently incomplete.
+
+**First, a correction to a number I had been repeating: the fault count is not 88. It is 13,359.**
+
+### Failing run - LINKAGE-LOAD-H02 (`RUN marker = -1`, timeout)
+
+```
+page-fault records posted: 13366  [buckets reconcile]
+  subtype=106B side=inst where=0xD psn=11  faults=1      distinctAddr=1  worstRepeat=1
+  subtype=6B   side=data where=0xD psn=12  faults=1      distinctAddr=1  worstRepeat=1
+  subtype=110B side=inst where=0xF psn=11  faults=2      distinctAddr=2  worstRepeat=1
+  subtype=10B  side=data where=0xF psn=12  faults=2      distinctAddr=2  worstRepeat=1
+  subtype=3B   side=data where=0x3 psn=12  faults=1      distinctAddr=1  worstRepeat=1
+  subtype=7B   side=data where=0xE psn=12  faults=13359  distinctAddr=1  worstRepeat=13359
+```
+
+### Passing run - CPU-STAT (`RUN marker = 0`, reached its output)
+
+```
+page-fault records posted: 142  [buckets reconcile]
+  subtype=106B side=inst where=0xD psn=11  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=103B side=inst where=0x3 psn=11  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=6B   side=data where=0xD psn=12  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=6B   side=data where=0xD psn=13  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=3B   side=data where=0x3 psn=13  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=10B  side=data where=0xF psn=13  faults=62  distinctAddr=62  worstRepeat=1
+  subtype=10B  side=data where=0xF psn=12  faults=3   distinctAddr=3   worstRepeat=1
+  subtype=110B side=inst where=0xF psn=11  faults=8   distinctAddr=8   worstRepeat=1
+  subtype=6B   side=data where=0xD psn=14  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=3B   side=data where=0x3 psn=14  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=10B  side=data where=0xF psn=14  faults=62  distinctAddr=62  worstRepeat=1
+```
+
+### What is established `[V]`
+
+ - **A high fault count is normal.** Two passing buckets post 62 faults each - and 62 DISTINCT
+   addresses each, every one faulting exactly once. That is demand paging walking forward. Count
+   alone is not the pathology, which retires the "many faults = broken" reading directly.
+ - **Repeat-at-one-address happens exactly once across both runs.** Of 13,508 posted records in
+   13 + 6 buckets, every bucket has `worstRepeat=1` except subtype 7B, which has
+   `worstRepeat=13359` at a single address (`0xB0215310`). The signature is unique and specific.
+ - **`where=0x3` is routine, not a mystery.** §12's flag on it was wrong to raise: the PASSING run
+   posts `3B` and `103B` too, once each, and is serviced fine. It is an ordinary fault kind our
+   nibble mapping passes through unmapped. Withdrawn as a lead.
+ - Independent corroboration of the big bucket: `[GROWABLE] calls=13359` matches
+   `subtype=7B faults=13359` exactly. Two separate instruments, same number.
+
+### What the census CANNOT settle, and this is the point
+
+**Subtype 7B does not appear in the passing run at all.** So the passing run is SILENT on whether
+subtype 7 is serviceable - it never exercises that path. The cross-run comparison, which is what I
+proposed and what was chosen, turns out not to reach the question.
+
+Worse for the tidy story: `where=0xE` IS "zero 1st-level PTE", and a zero L1 entry is exactly what
+a partially-paged segment produces. **The subtype and the unmappable page are the same condition
+described twice.** They co-occur by construction, so no census can separate "the subtype routes the
+fault to a report-only engine" from "this page was never going to be mapped and the subtype is just
+its name". Concluding the former from this data would be reading a correlation that cannot be
+anything else.
+
+That is the honest state: the signature is real and unique, and the mechanism behind it is still
+`[OPEN]`. Separating the two needs an intervention, not another observation - and the previous
+intervention of this exact shape was reverted as wrong, which is why it is not being made
+unilaterally.
