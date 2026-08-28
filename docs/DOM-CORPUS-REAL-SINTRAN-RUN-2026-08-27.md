@@ -958,3 +958,52 @@ two seeds walked genuinely different paths, so this is the routine branching and
 The comparison that matters is still ahead: decode the page-in request our side posts for one of
 the 88 live faults and check it against this field set. We now know what the machine builds and
 where it puts it, which is the half that was missing.
+
+### 11a. CORRECTION to the closing line of §11 - that comparison is cross-generation
+
+§11 ended with "decode the page-in request our side posts for one of the 88 live faults and check
+it against this field set." **That comparison, as written, is not valid.** The field set in §11 was
+carved from `MICRO-5800-B30.DATA` - the ND-5000 / SAMSON store. **The 88 faults are on the CLASSIC
+lane**, whose store is `CONT-STORE-10611` (8192 x 18 bytes), a different machine's microcode.
+
+Our own code already says so, at the exact place the request is built
+(`Nd500MicrocodeServicer.AnswerTrapStopLocked`):
+
+> The trap-dependent area (HW 0o17+) is GENERATION-SPECIFIC - settled 2026-08-11 by carving the
+> classic writer at CS 011271-011337 ... **the header above is identical on both generations, the
+> fault parameters are not.**
+
+So the two halves I was about to compare are the two halves the code names as differing. The B30
+carve in §11 stands on its own and is the right reference for the OCTOBUS lane; it is not the
+reference for the classic faults.
+
+There is a second gap in the same sentence, independent of generation: §11's slots `0o35` and
+`0o37` are **scratch register-file slots**, written by `D,RFA1`/`D,RF1`. The page-in request's
+`0o17`-`0o22` are **message offsets** in the 5MPM block. Nothing measured so far connects a
+register-file slot to a message offset - a later writer moves them, and which slot lands at which
+offset is `[OPEN]`. Lining the two number sets up because both are small octal numbers would be
+the same mistake as reading dispatch off label adjacency.
+
+### What the classic side actually writes, and where to read it
+
+`CONT-STORE-10611.LISTING.TXT` disassembles the classic 144-bit word losslessly, so the classic
+page-fault parameter writer is directly readable at `011314`-`011316`:
+
+```
+011314/ ALU,ADIR A,AM#31 D,AM#20 JMPNS 7546,0            fault LA
+011315/ ALU,AND A,XD,SARG B,AL#35 D,AM#20 JMPNS 7550,7777  phys segment, masked 7777B
+011316/ ALU,ADIR A,AM#27 D,AM#20 TYP,HW JMPNS 7550,0     composed status, ONE halfword
+```
+
+Three fields, and the surrounding words `011317`/`011322`/`011323` discriminate on the trap number
+constants `44` (protect violation), `46` (page fault) and `45`. That matches what our writer posts
+(`0o17`-`0o20` LA, `0o21` segment masked `0x0FFF`, `0o22` status halfword), which is unsurprising -
+our writer was built from a carve of these same words in August.
+
+**So the comparison for the classic lane is already done and already agrees.** The thing that is
+NOT settled on the classic side is the one our own comment flags as `[D]`: which fault kind maps to
+subtype code `6` / `7` / `10B`. `011126`-`011131` select it from **register bits** (`DSTS0` bit 4,
+`DCINHLL` bit 27, `DCINHLL` bit 6), not from which page-table level came back zero - and this
+emulator latches an MMWHERE nibble, which is a different code set. That mismatch is the live
+candidate for why SINTRAN answers the 88 faults without extending the mapping, and it is a
+classic-lane question that the B30 carve cannot speak to at all.
