@@ -1,11 +1,24 @@
 # PLAN
 
-**Next:** #67 — carve where the CLASSIC store really gets `THA` and `TE`, then stop reading them
-from context slots `0x4C`-`0x58` that the microcode never touches. A program that installs a trap
-handler still cannot receive a trap, because `THA` is zero rather than pointing at its vector table.
+**Next (this session owns the ND-5000 / OCTOBUS lane):** #56 — carve what writes and what clears
+`SWPPING` on the ND-100 side, and whether any ND-500-side actor is expected to consume a
+`SWPPING`/`3SWMESS` node. That one question decides whether the octobus stall is our defect or a
+symptom of a missing step further back. Evidence and the five refuted claims:
+`docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`.
 
-**Landed 2026-08-28:** LINKAGE-LOAD-H02 runs to its own `Nll:` prompt under real SINTRAN, MON path
-`forwarded=95 realRoundTrips=93 answeredByCsharpEmulation=0`.
+**LANE SPLIT, 2026-08-28 (Ronny):** this session is the **ND-5000 / octobus** session — RouteB, the
+swap-file question, #56, #59, #68, and the microword oracle (#50/#51). `nd500uc-47` is the
+**ND-500 / classic 3022** session — #49, #66, the DOM corpus. We spent a day running each other's
+lanes; the two harness filenames differ by four characters in the middle and the shorter is a strict
+prefix of the longer, so a filename mix-up maps directly onto a lane mix-up.
+
+**Landed 2026-08-28:**
+ - LINKAGE-LOAD-H02 runs to its own `Nll:` prompt under real SINTRAN (classic lane), MON path
+   `forwarded=95 realRoundTrips=93 answeredByCsharpEmulation=0`.
+ - The octobus swapper LOADS, STARTS, RUNS, ANNOUNCES and is marked free — steps 1-5 of the PROVEN
+   protocol. The stall is in the work handoff afterwards, not in the bring-up.
+ - The octobus lane finally records WHO answered its monitor calls: `seen=1 taken=1`, forwarded to
+   the CPU. `MonPathReport()` had existed for weeks with no caller.
 
 ---
 
