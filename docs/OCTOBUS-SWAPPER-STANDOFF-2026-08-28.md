@@ -220,3 +220,61 @@ no node ever shows `WAITING(2)` — because a node that is moved to `WAITING` an
 walks is never OBSERVED in that state. The counts do not contradict each other; they measure
 different instants. Anyone reading "no node was ever WAITING" as "no start was ever taken" would be
 wrong.
+
+## 8. Both sides are waiting for the other, and neither is wrong `[V]` 2026-08-29
+
+Re-ran the short bring-up with a denominator on the trap counter (see 8a for why that mattered).
+Every state line:
+
+```
+trapsAttempted=0 trapsPosted=0 lastTRAPN=0B
+PC=0x08008255 stopMode=WAIT startSeen=1 startMicfu=23B startTaken=True
+swpfu[LNEWSWAP:2]   ansMON=377B
+```
+
+Zero `TRAP-STOP` lines in the entire log. So the servicer was **never asked** to post a trap — this
+is not a drop, it is an absence.
+
+Put together with the histogram, the whole standoff reads out:
+
+ - The swapper was started (`3START` taken), **ran**, made its `MON 377B` calls with
+   `SWPFU = LNEWSWAP` twice, and **stopped**: `PC=0x08008255 stopMode=WAIT`. Same PC in the full
+   flow and in the short bring-up, run after run. It is parked at its own wait point.
+ - SINTRAN answered by marking it free — `SWMSG` at `PSWWAIT`, 85 observations — and is now waiting
+   for something to give the swapper work.
+ - `5ACTSWAPPER` has exactly three callers and every one of them needs an event that has not
+   happened: a **page fault** (`TRAPDECODER` trap 46), an allocate answer coming back
+   (`SWMESS`/`MSWSWAIT`), or a process already queued at `SWPWAIT` (`SWPD4` draining the FIFO).
+ - No fault has occurred, because nothing is running to fault. `PLACE-DOMAIN` records metadata only;
+   the content arrives by demand paging, and demand paging needs a running process.
+
+**Neither side is stuck in the sense of being broken. Each is idle waiting for the other**, and the
+event that should break the tie has not happened.
+
+### 8a. `LNEWSWAP` twice and nothing else is the sharpest clue
+
+`swpfu[LNEWSWAP:2]` — the swapper asked "what is my work?" twice and never asked anything else. On a
+lane that gets past this point the console prints `> Allocating memory - NNNN pages`, and the
+allocation runs through `LALLOPAGE`, which writes `PSW1WAIT` into `SWMSG`. **`SWMSG` never held
+`PSW1WAIT` in 421 visits.**
+
+So the question is no longer "why does SINTRAN not hand out work". It is: **why does our swapper only
+ever ask `LNEWSWAP`, and never the allocate function?** That is a question about the swapper program
+executing on our CPU, and `PC=0x08008255` is where it decided to stop asking.
+
+`[OPEN]`, and the next step is to disassemble around `0x08008255` and read what the swapper tests
+before choosing its `SWPFU`.
+
+### 8b. Why the trap counter needed a denominator before any of this could be said
+
+`TrapStopsPosted` is incremented only on the SUCCESS path of `AnswerTrapStopLocked`. A post that
+cannot resolve a message for the running process returns `false` without touching it, and that
+routine's own comment says the decline "is invisible from outside".
+
+So `trapsPosted=0` alone could not tell **"the CPU never trapped"** from **"every trap we tried to
+report was dropped here"** — opposite investigations behind an identical reading. That is the
+unfalsifiable-single-number shape, and the previous section's lead rested entirely on it.
+
+`TrapStopsAttempted` is now incremented before anything can refuse, so `attempted > posted` means
+dropped and `attempted = posted = 0` means never raised. It reads 0 and 0, which is what licenses the
+paragraph above — and would not have been safe to write from the old counter.
