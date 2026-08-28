@@ -750,3 +750,83 @@ State the limit exactly rather than rounding it to "never written":
 So the supported claim is: **no write reached the L1 table page in the last 65,536 events
 after the first fault**, which is consistent with SINTRAN never extending the mapping in
 response to 88 page-fault round trips - and is not the same sentence as "never written".
+
+## 9. SINTRAN built the table, not us - and a wrong inference of mine, recorded
+
+nd500uc-47 settled the registration: DESCRIPTION-FILE:DESC declares the FULL length for
+(210319H02:FLOPPY-USER)LINKAGE-LOAD-H02 - PSEG 123,989 and DSEG 2,184,977, both matching the
+files byte for byte, i.e. **1067 pages**. They ran a control on 370 unrelated PSEG/DSEG files
+on D:\ND\SI1.img rather than trusting offsets matched by eye, and reported the misses along
+with the hits. So the round 1024 is imposed downstream of the descriptor.
+
+**MY INFERENCE WAS WRONG, and the shape of the error is worth keeping.** I reasoned: the
+measured L1 entries are HALFWORDS with bit 15 clear; the only code in our tree that writes a
+page-table entry that way is `WritePte` on the growable path; therefore our growable path
+built the table. The middle step is true and the conclusion still does not follow - SINTRAN
+is a 16-bit machine writing halfwords natively, and these are SINTRAN's tables. "The only
+code in OUR tree that does X" silently assumes the writer is in our tree at all.
+
+Measured, with counters that cross-check (calls must equal ok + noSlot + mapFail):
+
+```
+GrowSegmentOnFault calls=12190 ok=0 noSlot=12190 mapFail=0 [counts agree]
+lastMiss: dom 0 seg 22 (L1=2 L2=42) - no growable slot registered for that domain+segment pair
+| NO growable segments registered at all
+```
+
+So our growable machinery never registered segment 22, never wrote an entry, and refused
+every one of 12,190 grow attempts. It did not build the table and it is not the limiter.
+
+Note why this needed a report and not a log line: the equivalent `Logger.Log` calls are at
+Debug/Warning and do not reach this harness's transcript. An earlier grep of the run for
+every growable log string returned ZERO hits, which looked like "the growable path is not
+involved" and in fact proved nothing whatsoever about the code. Same trap as before, one
+subsystem over.
+
+**Where that leaves it.** SINTRAN mapped 1024 pages of a segment it has registered as 1067,
+which is the ordinary demand-paging arrangement: the rest arrives when the swapper answers a
+page fault. Each of our faults does produce a real MON 377B round trip, answered by real
+SINTRAN with K=0, SWPFU=0x0000, SWPST=0x000A, every field constant. So the live question is
+whether the page-in request we post correctly names the segment and page we want. [OPEN]
+
+### 9a. Run status, stated rather than glossed
+
+The run that produced the growable report FAILED its marker (-1) and took 8m36s against
+4m23s for the previous one. The report above is still sound because it prints
+unconditionally after RUN, but nothing here rests on the program having reached its banner,
+and the earlier section's timings should not be compared with this run's.
+
+## 10. The real microcode's page-fault path, located
+
+Carved from MICRO-5800-B30.LABE plus the listing, on Ronny's instruction to let the microcode
+answer rather than derive it. The MMS fault dispatch is a table of arms at 013016-013035,
+each arm loading a fault code and jumping to a handler:
+
+| arm | label | meaning | target |
+|---|---|---|---|
+| 013016 | `MMS_SIX0` | segment index zero | 013044 |
+| 013031 | `MMS_PST0` | PST entry zero | 013042 -> 013044 |
+| 013032 | `MMS_PSIX` | PS index | 013044 |
+| 013033 | `MMS_PST` | PST | 013044 |
+| 013034 | `MMS_SIX0` | segment index zero | 013044 |
+| **013035** | **`MMS_LIX`** | **L-index - OUR CASE (L1 entry zero)** | 013044 |
+| 013017, 013024-013030 | `PROTVIOL` | protection violation | 013036 |
+| 013021-013023 | `MMS_ERROR` | hard error | 013102 |
+
+So the real machine classes "L1 entry zero" as a PAGE FAULT THAT BUILDS AN INFORMATION
+BLOCK, not as an error: 013044 -> `PF_NORM` (013051) -> `PF_PS` (013055) / `PF_PS_DATA`
+(013062) / `PF_PS_DOM` (013064) -> `PF_PS_LA` (013065) -> `PF_INFO_OK` (013101) ->
+`TRAP_PGF0`.
+
+That chain reads `A,DMM,PS`, `A,DMM,ADOM`, `A,DMM,DOM`, `A,IMM,PS`, `A,IMM,DOM` and
+`A,DMM,PHS` - the MMS registers naming the failing segment, domain and PHYSICAL SEGMENT - and
+writes them into register-file slots selected by MARG/RFA1. Those slots ARE the page-in
+request's fields.
+
+DO NOT read the MARG numbers off the rendered listing: `MICRO-5800-B30.md` mis-renders
+ORCON/MARG, which is exactly why this must be EXECUTED rather than read. The microword CPU
+loads the real B30 and decodes the raw word itself, so running the routine reports the true
+slot numbers and values. The established recipe is in `MailboxClrKickTests` - set
+`cpu.State.Mpc` to the entry, wrap `IMicroMemory` in a recording decorator, tick with a
+bounded budget, and treat an unimplemented microword as a finding that names the next thing
+to implement. [OPEN - that test is the next piece of work]
