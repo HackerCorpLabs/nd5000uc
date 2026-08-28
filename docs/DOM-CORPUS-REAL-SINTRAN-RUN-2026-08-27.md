@@ -1801,3 +1801,63 @@ repetition).
 
 Recorded with the contrast rather than the conclusion, because the contrast is measured and the
 conclusion is not.
+
+## 22. RESOLVED: the classic page-table split was wrong, and the loader runs (2026-08-28)
+
+**The whole investigation in this document was chasing a consequence.** The classic ND-500 divides
+its 27 address bits `6 + 10 + 11`; we were applying the ND-5000's `7 + 9 + 11` to both machines.
+
+### Result, measured
+
+```
+Passed!  - Failed: 0, Passed: 1, Total: 1, Duration: 9 m 1 s
+
+ND-Linkage-Loader -  H.02   3. March      1988 Time: 16:48
+[LINKAGELOADER] RUN marker index = 0 (0='ND-Linkage-Loader')
+
+[PFCENSUS] page-fault records posted: 31  [buckets reconcile]
+  subtype=106B where=0xD psn=11  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=6B   where=0xD psn=12  faults=1   distinctAddr=1   worstRepeat=1
+  subtype=110B where=0xF psn=11  faults=9   distinctAddr=9   worstRepeat=1
+  subtype=10B  where=0xF psn=12  faults=19  distinctAddr=19  worstRepeat=1
+  subtype=3B   where=0x3 psn=12  faults=1   distinctAddr=1   worstRepeat=1
+```
+
+`subtype=7B` is **absent**, not reduced: 13,359 -> no bucket at all. The prediction was written down
+before the run (section 18's discipline) and it held.
+
+**The strongest line is not the zero.** `where=0xF psn=12` went **2 -> 19, nineteen DISTINCT
+addresses, each once**. A vanishing bucket could in principle be something being suppressed;
+nineteen new second-level faults each resolving first time cannot be. They are the same fact from
+two sides. Every bucket across all 31 records is `worstRepeat=1` - nothing recurs anywhere.
+
+The trace agrees: 1,054,759 instructions, 625 distinct PCs in segment 22, and exactly **2**
+references to `0xB0215310`. The run ends parked on `call $0xF8000001,$2,...` - segment 31, the MON
+trampoline, **MON 1B INBT** (byte-identical opcode/trampoline/argc to an annotated CONVERT-DOM
+disassembly). The loader reached its command loop, printed, and is waiting for a character.
+
+### What every earlier section of this document was actually seeing
+
+ - "SINTRAN stops mapping at 1024 pages" (sections 7, 8, 17, 19, 21) - it never stopped. Two L1
+   entries cover 2048 pages under 6+10. The table was COMPLETE from the start.
+ - "SINTRAN never writes L1[2]" (section 17, 200,704 reads / 0 writes) - correct, and correct
+   BEHAVIOUR. There is no `L1[2]` in its layout for this segment.
+ - "SINTRAN answers K=0 without mapping" - it answered K=0 because the page WAS mapped. Its
+   constant answer to a repeated question was the right answer.
+ - The subtype hunt (sections 12-14) - `subtype=7B` / `where=0xE` faithfully reported "zero
+   first-level entry". The entry was zero because we were reading a slot that does not exist.
+ - Section 13's confound - "the subtype and the unmappable page are the same condition named
+   twice" - was RIGHT, and neither was the cause. Both were symptoms of the index arithmetic.
+
+### The method note worth keeping
+
+Four independent lines agreed BEFORE anything was changed: the carved microcode masks, SINTRAN's
+own two-entry allocation, the page-1066 arithmetic, and the one-table-per-page invariant. Even so,
+nothing was changed until the microcode - the authority - had spoken. That is the difference
+between this being a fix and being a fifth retraction.
+
+And the piece that actually decided it was not the carve. It was **counting the page-table entries
+the OS had allocated and checking them against our own geometry** - `ceil(1067/512) = 3` but SINTRAN
+built 2, while `ceil(1067/1024) = 2` matches. That needed no new run: it was in a census taken hours
+earlier and read wrongly. The prompt to re-read it was the neighbouring session pushing back on a
+framing this document had already retracted once and then re-adopted.
