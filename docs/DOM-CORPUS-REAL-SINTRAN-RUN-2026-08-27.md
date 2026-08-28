@@ -1007,3 +1007,60 @@ subtype code `6` / `7` / `10B`. `011126`-`011131` select it from **register bits
 emulator latches an MMWHERE nibble, which is a different code set. That mismatch is the live
 candidate for why SINTRAN answers the 88 faults without extending the mapping, and it is a
 classic-lane question that the B30 carve cannot speak to at all.
+
+## 12. The classic subtype: already carved, and it points at our 88 faults (2026-08-28)
+
+§11a named the classic subtype code (`6` / `7` / `10B`) as the live candidate. Checking the tree
+before investigating it: **it is already carved, and marked `[V]`.** From
+`Nd500MicrocodeServicer.AnswerTrapStopLocked`:
+
+> **WHO SETS THESE BITS: NOBODY IN THE STORE.** A sweep of all 8192 words, separating the DEST
+> field from the SOURCE field, finds ZERO writers for every one of them - `DSTS0` 0/2 refs as dest,
+> `ISTS0` 0/2, `DCINHLL` 0/9, `ICINHLL` 0/6, `TRAPINF` 0/14. The microcode only ever READS them, so
+> they are HARDWARE-SUPPLIED inputs composed by the memory-management hardware and presented at
+> fault time. `[V]`
+
+So the subtype cannot be composed from register bits in this emulator - those registers do not
+exist here. The writer instead maps our own MMWHERE nibble onto the classic codes:
+
+```
+where == 0xD  ->  subtype 6    zero PST entry
+where == 0xE  ->  subtype 7    zero 1st-level PTE
+where == 0xF  ->  subtype 8    zero 2nd-level PTE (10B)
+```
+
+### The connection to the 88 faults
+
+`CpuND500.MMU.cs:123` defines `MM_PFZ1 = 0xE`, and line 1127 - **the PS_ADI L1 branch, the one
+taking all 88 faults** - sets exactly that. So every one of those faults is posted to SINTRAN with
+**subtype 7, data side**.
+
+And the carve in the same comment block says what subtype 7 means on a real classic machine:
+
+> `011170` (codes 6/7) and its mirror `011213` do exactly one thing: **marshal a full report** ...
+> `011146` (code 10B) is a different routine that ... can reach `011232` - whose DESTINATION is
+> **TRAPCLR, the microcode CLEARING THE TRAP AND RESUMING**. TRAPCLR is NOT reachable from
+> `011170`.
+
+That is the same shape as the observed symptom: the fault gets described and never fixed, the page
+refaults, SINTRAN answers every time with a constant `K=0, SWPFU=0x0000, SWPST=0x000A`.
+
+### Why I am NOT changing the mapping
+
+Two reasons, both from the tree rather than from caution in the abstract:
+
+ 1. **A structurally identical change was made here and reverted.** The data-side mapping was once
+    changed `D -> 10B` on the argument that "data-side 6 is never serviced". The comment records
+    that **both the argument and the change were dead**: a full fault census of a PASSING cpu-stat
+    run shows data-side code-D faults serviced fine, and the real defect was one instruction
+    raising many page faults. The neighbouring block carries **"AN EXPERIMENT WAS RUN HERE AND
+    REVERTED - DO NOT RE-RUN IT."** My reasoning above has the same shape as the one that failed:
+    subtype looks guilty, the fault count was the actual discriminator.
+ 2. **I have not established that the arm even applies to us.** On a real machine `011170`/`011146`
+    are what the CPU's own microcode runs *before* a message reaches the ND-100. We do not run
+    them - we post the message ourselves. Whether the subtype we send therefore steers anything at
+    all, or is only read by SINTRAN's `DECOERRMESS`, is `[OPEN]`. Treating "10B reaches TRAPCLR" as
+    a reason to send 10B assumes a routing we bypass.
+
+The lead is real and worth settling, but settling it means a measured fault census either side of
+the change, the way the last one was settled - not a one-line edit on a plausible story.
