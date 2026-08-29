@@ -503,6 +503,10 @@ The dispatch is a **64-entry table indexed by MICFU** (`0o00`–`0o77`); the mic
 | **01** | `3RMICV` / `RMICVE` | **read microprogram version — the watchdog** | `MSG_VERSRD` |
 | 02–04 | `MILLFU` | illegal | `MSG_ILLEG` |
 | **05** | `3SWMESS` / `SWMESS` | message to swapper — **never put on the wire**; translated into 23B or 24B | `MSG_ILLEG` (consistent) |
+
+> **"NEVER PUT ON THE WIRE" IS NARROWER THAN IT READS — added 2026-08-29.** A mailbox node CAN be observed holding `MICFU=0o5`, and this happens on a lane where the swapper handover WORKS: measured on the classic lane as `x5=1@0x00420E30 TRAPN=0x0041 N5STAraw=0x0006 MICFU=0x0005 NUMPA=0x000A`, and on the octobus lane as `0x00428E30 N5STA=6 MICFU=0x05`. **`N5STAraw`/`N5STA` = 6 is `SWPPING`** — one of SINTRAN's OWN swapper states (`SWPWAIT=5`, `SWPPING=6`, `PSWWAIT=7`), not an ND-500 status. So the line describes the POST-TRANSLATION STEADY STATE, not every instant a node can be sampled in.
+>
+> **Cost of reading it literally:** an ordinary node was raised as a defect at the exact point of an active investigation, and the refuting evidence was already written down two hundred lines earlier in the investigator's own document. A source that says *never* makes an ordinary observation look like a finding.
 | 06 / 07 | `3EXAD` / `3DEPD` | examine / deposit memory descriptor | — |
 | **10 / 11** | `3RMED` / `3WMED` | data-memory read / write | `MSG_DMEMRD` / `MSG_DMEMWR` |
 | **12** | `CACHE` | cache operation | `MSG_CACHE` |
