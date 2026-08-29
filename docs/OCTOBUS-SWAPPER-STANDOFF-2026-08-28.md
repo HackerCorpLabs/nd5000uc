@@ -337,3 +337,51 @@ The common cause is not carelessness about the data — it is **naming a state b
 that produces it**. `stopMode=WAIT` at a PC says nothing about WHY until you know what instruction
 that PC belongs to, and one grep of the listing settled it. The project rule already says this:
 go and read the code, do not derive.
+
+## 10. `posted=2 seen=1 taken=1` — SINTRAN never came back `[V]` 2026-08-29
+
+The measurement section 9a asked for, on the short bring-up against `DOMS-CSFIX.IMG`:
+
+```
+----- MON restart path (octobus-shortbringup) ----- posted=2 seen=1 taken=1
+   <- SINTRAN NEVER CAME BACK for 1 of the stops we posted: those processes are
+      parked on a monitor call that was never restarted. Look at the ND-100 side,
+      not at the CPU.
+```
+
+Two `MON 377B` stops posted, **one** restart offered, one taken. So the swapper's second monitor call
+was never answered, and it is still sitting on it at `PC=0x08008255` — the instruction after the
+call, per section 9.
+
+**This localises the remaining work to the ND-100 side.** Everything the ND-500 was asked to do, it
+did; the CPU is not refusing anything. `[OPEN]`: why SINTRAN answers the first `MON 377B` and not the
+second.
+
+### 10a. The pair that was built to catch this could not see it
+
+`MonitorCallRestartsSeen` against `Taken` exists precisely because a single number "could only be
+believed" — it is this project's model instrument, and the MON-path ledger cites it as the way to
+tell a forwarded run from a faked one. **It starts counting at the OFFER.** A stop that never got one
+is outside its field of view, so it printed
+
+> `no gap - every restart offered was taken by the CPU`
+
+while the swapper sat on an unanswered call. That sentence is true of what it measures. It is also
+the reason this took an extra day.
+
+### 10b. Three instruments in one night, one failure mode
+
+| instrument | what it reported | what it could not see |
+|---|---|---|
+| `TrapStopsPosted` | `0` | a post that was DROPPED — incremented only on success, and the decline path says so in its own comment |
+| chain-visit ring | the steady state | the first ~50 of 609 visits — so "did this node ever reach `ANSWER`" was unanswerable. It had, 14 times, refuting section 5a |
+| `RestartsSeen`/`Taken` | `no gap` | a stop that never got an offer |
+
+Each was honest about what it measured and silent about what it could not. None was wrong; all three
+were unfalsifiable in the direction that mattered. **The question that finds this class before it
+costs a day is not "is this number right" but "what would this number look like if the thing I fear
+were happening?"** For all three the answer was *identical to what it already showed*.
+
+The fix is the same shape every time: give the number a denominator, or a second count that must
+agree with it — `attempted` beside `posted`, an uncapped histogram beside the ring, `posted` beside
+`offered`.
