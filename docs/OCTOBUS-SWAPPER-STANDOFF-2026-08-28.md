@@ -834,7 +834,12 @@ whether their histogram is cumulative across two capture passes (the block print
 identical numbers, which suggests per-pass). The 80/84-vs-0 contrast survives any such factor; the
 exact counts do not, and nothing above depends on them.
 
-### 14h. The dominant handover route on the working lane is `TRAPDECODER`, trap 46 `[V]` 2026-08-29
+### 14h. The dominant handover route on the working lane looks like `TRAPDECODER`, trap 46 `[D]` 2026-08-29
+
+> **DOWNGRADED FROM `[V]` TO `[D]` BY 14i, SAME DAY.** The heading below was graded `[V]` on a
+> correlation the peer has since retracted, and the carve alone does not settle it: `SWPST=0x0A` is
+> reachable on BOTH forks. The mechanism described here is `[V]`; the CONCLUSION about which fork
+> ran is not. Read 14i before using this.
 
 `nd500uc-47` ran a SWPST census over 40 MON 377B lines on the classic lane (their capture prints its
 diagnostic block TWICE — the first 40 lines are byte-identical to the last 40 — so their raw counts
@@ -895,3 +900,51 @@ wrong: it asked whether `SWPST` looks like a piece of the trap number, when the 
 function code there. An instrument aimed at the wrong field returns a clean, confident answer — the
 same shape as the `SWPFU=4` discriminator I asked them for, which also returned cleanly and meant
 nothing. **Ask what a null result would tell you before you ask for the measurement.**
+
+### 14i. 14h was graded `[V]` on a 95%-constant field, and `SWPST=0x0A` cannot pick a fork anyway `[V]` 2026-08-29
+
+`nd500uc-47` retracted the correlation 14h leaned on, and the retraction is right. Read in ORDER
+instead of as a census, their 40 lines give:
+
+ - **`TRAPN=0x0026` on 38 of 40 lines — a base rate of 95%.** So "`SWPST=0x0A` pairs with `0x0026`
+   in 20 of 20" is what chance produces when the second field barely varies. It reads as a perfect
+   correlation and carries almost nothing.
+ - **Line 1 already carries `0x0026`**, before any `SWPST=0x0A` line exists. So that `0x0026` cannot
+   have come from the packing it was credited to.
+
+Their rule from it, which is the one worth keeping: **before quoting a ratio, ask what the
+DENOMINATOR does on its own.** A 20-of-20 against a field that is 95% constant is not a finding.
+
+**And the carve does not rescue the conclusion either — this is my error, not theirs.** I wrote
+14h's `[V]` believing the mechanism carried it. It does not:
+
+ - the TRAP fork sets `SWPST` := high byte of `TRAPN` = `MSWPFAULT` = `0o12` = `0x0A`;
+ - the MESSAGE fork sets `SWPST` := `SWFUN`, and **`MSWPFAULT` is itself a member of the `MSW*`
+   namespace**, so `SWFUN = 0o12` is a legitimate value there too.
+
+`SWPST=0x0A` is therefore consistent with BOTH forks, and no count of it can separate them. That is
+the same defect as the peer's original test — I named it in 14h ("small value in the SWFUN space is
+true on BOTH forks and separates neither") and then built a `[V]` on top of it two paragraphs later.
+
+**What the mechanism DOES still say, and it is `[V]`:** the trap fork **strips** `TRAPN` to its low
+byte at `145047`; the message fork never touches `TRAPN`. So the only tell in the message is `TRAPN`
+CHANGING (`0x0A26` -> `0x0026`), and the 377B log line does not sample that window — a point the
+peer made against a grep I had proposed one message after warning them about exactly this shape.
+
+**So from the mailbox fields this is UNDECIDABLE, and that is precisely why the instrument in flight
+is a CALL-SITE COUNTER and not another field read.** `DiagPcWatch` on `135367` versus the other
+three callers answers directly what no amount of `SWPST` census can. The peer's advice to instrument
+the call sites before the routine turns out to have been protecting against this too.
+
+### 14j. Two observations of theirs kept as theirs, `[M]`, uninterpreted
+
+ - The `TRAPN=0x0041` (`0o101`) rows are **lines 6 and 7 — consecutive, early, both `SWPFU=0`**. A
+   pair, once, then never again. `TRAPDECODER` rejects anything above `0o53` at `135324` and returns
+   at `135331` without reaching `5ACTSWAPPER`, so `0o101` did not arrive through the page-fault arm.
+ - **The alternation breaks at the tail.** Lines 8-35 are a strict ping-pong of `0x0B` and `0x0A`
+   with no repeats; lines 36-40 are five consecutive `SWPFU=0 SWPST=0x0A`, and their run fails
+   immediately after. Nowhere else does either value repeat back to back. They explicitly do NOT
+   claim this is the failure — their lane is already root-caused elsewhere — and a tail like that is
+   at least as likely a consequence as a cause. Recorded because it is invisible in the census and
+   only appears when the rows are read in sequence, which is this project's own standing rule met
+   the hard way for the second time in one investigation.
