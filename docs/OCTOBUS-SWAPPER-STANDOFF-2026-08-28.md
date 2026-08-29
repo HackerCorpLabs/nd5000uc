@@ -2158,3 +2158,56 @@ does not prove `MUDOM` was set. **Probe `MIFLAG` directly. Do not infer it from 
 There is also a spin to be aware of at `063155`: `DO *IOXT WHILE A NBIT 3 OD` waits for bit 3 with
 no visible timeout. If our card never raises bit 3 this hangs inside the presence probe rather than
 falling through.
+
+---
+
+## 27. `MUDOM` is a real gate, but it is NOT unset here — behaviour refutes it `[V]` 2026-08-30
+
+A candidate root cause for B1 was raised: `XMSINIT` builds the octobus mailbox fields
+(`X5STA`/`X5ACC`/`X5OCT`/`X5HWB`) only inside `IF MSDFCPU.MIFLAG BIT MUDOM`, and `MUDOM` has exactly
+one writer in the whole source (`PH-P2-OPPSTART.NPL:3933`), set only when the IOX `100406` octobus
+presence probe answers `A=0` with bit 3 up. If `MUDOM` were clear the mailbox extension would never
+be built, `3RMICV` would go unanswered, and the watchdog would fire before any command.
+
+**The gate is real and worth having on file. Its PREDICTION is contradicted by this run.**
+
+If `MUDOM` were clear, SINTRAN could not post mailbox messages at all. Measured, same run:
+
+```
+MICFU=0x01 3RMICV(1) read-micro-version @0x00428E30
+MICFU=0x01 3RMICV(1) read-micro-version @0x0042C130     (repeatedly)
+MICFU=0x0A CACHE(12B) ... MICFU=0x19 PHYSWR(31B) ...
+servicer walk: polls=124072  active(x5act==0)=105
+discovered mailbox: header=0x00428800 extBlock=0x00428900
+5MSINIT@0o111100=0x000F  5CHALIVE=True 5ALBUF=True -> 4 SAMSON CPU(s), 1 alive
+                                                     -> ND-500 subsystem initialised
+```
+
+**SINTRAN is posting.** The watchdog is `X:=WATCHDOG; T:=5MBBANK; 3RMICV; *MICFU@3 STATX`
+(`RP-P2-N500.NPL:127470`) — it dereferences `5MBBANK` and a `WATCHDOG` buffer pointer that `XMSINIT`
+builds. Those messages arrive at sane in-window addresses with a valid MICFU, and 105 doorbell
+activations follow. **An unbuilt mailbox extension cannot produce that.**
+
+One caution on the evidence, because it matters which half proves what: our STATION derives the
+mailbox from the control store (§22), so the station FINDING the header proves nothing about
+SINTRAN's side. What proves SINTRAN's side is SINTRAN POSTING there — which it does.
+
+### 27a. And B1 is already root-caused anyway
+
+§23 closed B1 without needing `MUDOM`: the timeout is at capture line 32, `> Loading Control Store`
+at line 39, so at line 32 the store is legitimately empty and *"Microprogram has stopped"* is TRUE.
+It is the designed `5CLOST` -> `ECSLOAD` gate that TRIGGERS the auto-load. Two independent lines of
+evidence now agree that B1 is not a defect.
+
+### 27b. The pattern, for the fourth time tonight
+
+`5MBBANK` (§26) and `MUDOM` (here) are the same shape: a well-reasoned mechanism, derived from real
+source, that predicts a failure the run does not exhibit. Both were caught by the same free question
+— **does any measurement in the same run contradict this?** — and in both cases the contradicting
+measurement was already sitting in the log.
+
+**Still worth doing, and cheap:** probe `MIFLAG BIT MUDOM` directly rather than inferring it, since
+the inference here runs the other way (behaviour implies it is set). And note the flagged hazard
+independently of all this: `063155` is `DO *IOXT WHILE A NBIT 3 OD`, a spin on bit 3 with no visible
+timeout — if a card never raises bit 3 that hangs INSIDE the presence probe. Our machine plainly
+gets past it, so it is a robustness note, not this bug.
