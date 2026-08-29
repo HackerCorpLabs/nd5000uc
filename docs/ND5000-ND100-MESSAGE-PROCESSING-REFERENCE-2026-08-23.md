@@ -1,5 +1,24 @@
 # ND-100 ↔ ND-5000 message processing — a technical reference
 
+> ## ⚠ THIS DOCUMENT'S MAGNITUDES ARE NOT RELIABLE — added 2026-08-29
+>
+> Two independent numbers in it failed measurement on the same day, from different lines:
+>
+> | claim | line | measured |
+> |---|---|---|
+> | swapper delivery `8×13B` | stage-split line | **14×13B** (off by 75%); the `44×14B` beside it matched |
+> | swapper image `44×2048 = 90,112 B` | RESIWR row | **44 transfers, 32 distinct addresses, 63,488 B** — `44` is TRANSFERS, not blocks |
+>
+> **Use this document for WHICH — which MICFU carries what, which stage a value belongs to, which
+> handler serves it, what SHAPE a transfer takes. Do not use it for HOW MANY or HOW BIG without
+> re-measuring.** Its `[V]` grades were earned on identity and mechanism, which is what it is good at;
+> the magnitudes beside them were measured under configurations that are not stated and do not
+> reproduce.
+>
+> Nothing else here is called into question by this — the two corrections were found BY using the
+> document correctly, and both are annotated in place at their own lines.
+
+
 **Date:** 2026-08-23
 **Scope:** how a request the ND-100 sends is picked up and carried out by the ND-5000 microcode, down to individual microwords, and how everything the ND-5000 starts by itself — monitor calls, traps, page faults, error messages — gets back to the ND-100.
 
