@@ -1001,3 +1001,48 @@ impostor never consumes an entry, so the 60 slots hold 60 real samples. Post-fil
 left the same one usable sample.
 
 **The table above is therefore withdrawn and NOT recorded as a result.** Re-running with the filter.
+
+### 15c. The addresses were wrong: the listing is 0o200 BELOW the linked image `[V]` 2026-08-29
+
+The PIL filter was the right fix for the wrong problem. While the corrected run was in flight I
+checked something I had never checked: **is `0o144762` actually where `5ACTSWAPPER` lives in the
+image SINTRAN is running?** It is not.
+
+`MP-P2-N500.NPL` prints the assembler's address counter. The linked L07 image sits **0o200 (128
+words) higher.** Pinned against `SYMBOLS\L07\l07-kallsyms.txt`, three symbols from this same module:
+
+| symbol | listing | linked | offset |
+|---|---|---|---|
+| `SPRIO` | `0o141633` | `0xC41B` | **+0o200** |
+| `NNT12` | `0o141706` | `0xC446` | **+0o200** |
+| `SWMC` | `0o141753` | `0xC46B` | **+0o200** |
+
+The RELATIVE spacing matches exactly — `NNT12` to `SWMC` is `0o45` in both — so it is a base shift,
+not a different build. **Every one of the seven armed addresses was 128 words low**, and the 17 and
+232 in section 15's table were unrelated code that happens to live there.
+
+**So the PIL filter would NOT have rescued that run.** It would have removed the `PIL=1` noise and
+returned a table of clean, level-12, entirely meaningless numbers — and with the noise gone the
+invariant might well have read `[consistent]`. **The fix I was proud of would have made the wrong
+answer look right.** The run was stopped mid-flight rather than left to produce it.
+
+Corrected in the harness as a single named constant with the evidence beside it
+(`ListingToLinked = 0x80`), applied through one `Watch()` helper so no address can be missed. **The
+offset is PER MODULE** — it must be re-pinned against kallsyms for any routine in another segment,
+never carried across.
+
+### 15d. What actually caught it, and what did not
+
+Not the invariant, and not the PIL filter. **A question about provenance:** where does this number
+come from, and is that the same thing as where the machine runs? The listing addresses had been
+copied from the NPL all day — in 14d, in 15, in two messages to the peer — and nobody had asked
+whether the assembler's counter is the linked address. It reads as an address, so it was used as one.
+
+This is the memory note's own rule arriving from a new direction: **ask who WROTE this value.** An
+NPL listing address is written by the assembler about its own output, not by the linker about the
+running image. The two agree only when the module happens to load at 0.
+
+The consolation is that the previous table's self-contradiction was a TRUE alarm about a cause
+nobody had guessed. `caller=17, callee=0` was not noise on top of a real signal — it was the whole
+signal, saying "these addresses are not what you think". An instrument that reports its own
+inconsistency earns its keep even when it cannot say what is wrong.
