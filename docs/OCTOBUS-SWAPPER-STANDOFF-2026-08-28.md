@@ -1674,3 +1674,67 @@ top to bottom. Four findings were sitting in the part between my greps.
  2. **The `0B:6B` file-system INFO during the CS load**, which shares a subsystem with the fatal
     record's `CSTCK`.
  3. Only then the CS-load difference between rounds (#78) and the `place-domain` stall (#79).
+
+---
+
+## 22. §21f's first suspect is DEAD: the X5ACT "MISMATCH" is the diagnostic, not the machine `[V]` 2026-08-30
+
+§21f put the pre-command `N5TIMOUT` first, and named the run's own
+`X5ACT_carved=0x0043110A vs self-disc X5ACT=0x0042890A MISMATCH (delta 0x8800)` as the obvious
+suspect. **That line is wrong, and it is ours.**
+
+### 22a. The station does not sniff — it reads the control store
+
+`OctobusND5000Station.ConfigureMailboxFromControlStore` says so in its own header, and it is the
+"ACTUAL-CORRECT-WAY ... no resident read, no MMU translation, no 0xFFFF->0 sniff":
+
+```
+START_MESS = control-store word 0o26, LARG        (SINTRAN patches it with the window offset)
+SAMSON_CPU = control-store word 0o25, LARG
+header   = mpmStart + START_MESS      = 0x420000 + 0x8800 = 0x428800
+extblock = header + SAMSON_CPU*256    = 0x428900
+X5ACT    = extblock + 0x0A            = 0x42890A
+```
+
+So the value labelled "self-disc" in the dump is **control-store-derived and authoritative**. The
+label is misleading too — `_mailboxSelfDiscovered = true` is set only to SUPPRESS the sniff.
+
+### 22b. The harness's "carved" value counts the window offset twice
+
+```
+5FPMAILBOX = 0x0851 (page 2129)  ->  fpmail << 11 = 2129 * 2048 = 0x428800
+```
+
+`5FPMAILBOX` is a PAGE number, so `fpmail<<11` is already an **absolute physical byte address** —
+and it is the SAME `0x428800` the control store gives. The two agree exactly.
+
+Then the diagnostic added `X500DF<<1` = `0x4400*2` = **`0x8800`** — which **IS** `START_MESS`. The
+window offset goes in twice, and `0x428800 + 0x8800 + 0x100 + 0x0A = 0x43110A` is precisely the
+"carved" number.
+
+**The delta was always exactly `X500DF<<1`.** A delta that is a CONSTANT, equal to a term in the
+formula, is the tell that the disagreement is arithmetic rather than machine state — and it was
+printed on every run for weeks.
+
+### 22c. Why this matters beyond one line
+
+I promoted this to the top of §21f's list *because the instrument shouted MISMATCH*. A wrong
+diagnostic does not merely fail to help; it manufactures priorities. Taxonomy entry, adjacent to
+#9 (a switch that reports itself applied and does nothing): **a comparison instrument can disagree
+with reality because the COMPARISON is wrong, and it looks exactly like the subject being broken.**
+The check that catches it costs nothing — *is the delta constant, and is it equal to one of the
+terms?*
+
+Fixed: the `X500DF` term removed, with the reasoning in the code, and the label changed from
+"self-disc" to "CS-derived" so the authoritative value stops reading like a guess.
+
+### 22d. What is left of §21f
+
+ 1. ~~the X5ACT carved-vs-discovered mismatch~~ — **dead, it was arithmetic.**
+ 2. The pre-command `N5TIMOUT` itself is STILL REAL and still first: the monitor declares the
+    microprogram stopped before any command, on both rounds, and `MAR = 0` says no message address
+    was ever latched. The mailbox ADDRESS is now known to be right, so the question sharpens to
+    **why nothing answers at an address that is correct** — a different and better question than
+    "is the address wrong".
+ 3. The `0B:6B` file-system INFO during the CS load, sharing a subsystem with the fatal record's
+    `CSTCK`.
