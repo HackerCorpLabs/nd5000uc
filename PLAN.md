@@ -16,6 +16,33 @@ it lands.
 
 ---
 
+## STANDING RULE — EVERY ROUND RUNS TWICE  (Ronny, 2026-08-29)
+
+> *"you always run one round with macro CPU and then another with microcode and accp with 68k cpu
+> to find out what the real hw would do and then try to replicate that in macrocode. dont assume
+> shit, go measure, use logging and analytics"*
+
+ - **Round 1, macro:** functional `CpuND500` (`AttachNd5000Cpu`). The target — what has to end up
+   correct.
+ - **Round 2, real hardware:** microword `CpuND5000` on the real `MICRO-5800-B30`
+   (`AttachNd5000CpuOfKind(Nd5000CpuKind.Microword, …)`) **together with the real 68000 ACCP
+   firmware** (`AttachAccpFirmware`, `octo.bin`).
+
+**Round 2 is the ORACLE.** Diff the rounds; the difference IS the bug list. Then replicate the
+hardware's behaviour in macrocode. **Never report a macro-only conclusion.** Same test, one switch —
+two tests that drifted apart do not make a measurement.
+
+**Verified 2026-08-29:** the octobus boot harness calls `AttachNd5000Cpu` and never calls
+`AttachAccpFirmware`, so neither real component has ever been in this lane. Both seams are wired and
+unused.
+
+**The one exception, and it is not permission to skip round 2:** the ND-5000 **MMU walk is done by
+HARDWARE** — microwords only SELECT it — so a page-fault question is settled by neither round on its
+own; the MMS model is ours on both paths. Read round 2 with `ND-05.020.01` beside it. The classic
+ND-500 is the opposite: its microcode DOES walk.
+
+---
+
 ## THE TARGET
 
 Real ND-500/ND-5000 programs on the emulated CPU, driven by **REAL SINTRAN III on the emulated
