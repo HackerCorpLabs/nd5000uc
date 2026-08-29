@@ -1,6 +1,11 @@
 # The octobus swapper standoff — where `> Loading Swapper` actually stops
 
-> **READ SECTIONS 12 AND 12c FIRST (2026-08-29).** This lane HAS REACHED `> Allocating memory` and run a
+> **READ SECTION 14 FIRST (2026-08-29), THEN 12 AND 12c.** Section 14 shows this exact state was
+> already measured and named as this lane's open question on 2026-08-27, two days before sections
+> 7-11 re-derived it - so the "regression" framing below is too strong, and the diff read section 13a
+> proposes is the wrong next step.
+>
+> **(ORIGINAL BANNER, kept:)** > **READ SECTIONS 12 AND 12c FIRST (2026-08-29).** This lane HAS REACHED `> Allocating memory` and run a
 > domain for 7.5 minutes on 2026-07-31 and again on 2026-08-01. It no longer does. Sections
 > 7-11 may therefore be describing a REGRESSION rather than a standing property of the
 > octobus lane. CONFIRMED like-for-like in 12d: same test, same pack, same swap file geometry,
@@ -663,3 +668,70 @@ three instruments were given the denominators they needed, and the cause is stil
 changed is that the question is now small and well-posed - *what in this tree, between 2 August and
 now, stops the swapper being given work* - instead of the open-ended "why does the octobus lane not
 run a domain" it started as.
+
+## 14. The diff read is the WRONG next step, and a record two days old says why `[V]` 2026-08-29
+
+Before reading 110 commits I looked for the nearest prior record of this lane. It is in this repo's
+own `docs\` folder: `DOM-CORPUS-REAL-SINTRAN-RUN-2026-08-27.md`, section 1b, dated **2026-08-27**.
+
+It runs the SAME test, `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, and records:
+
+| | 2026-08-27 (§1b of the corpus doc) | 2026-08-29 (sections 7-11 above) |
+|---|---|---|
+| `startSeen` | 1 | 1 |
+| `startMicfu` | 23B (3START) | 23B |
+| `startTaken` | True | True (`taken=1`) |
+| page writes | 13 `PHYSWR` | the same copy family |
+| MON 377B | one answered, **`ansSWPFU=1B`** | one answered, `SWPFU=1` (LNEWSWAP) |
+| where it parks | `PC=0x08008255` | `PC=0x08008255` |
+| `place-domain` | did not finish in 300 s | STALL after `> Loading Swapper` |
+
+That is the same state, measured two days apart, and the corpus doc already names it as the lane's
+standing open question, verbatim: *"The swapper is parked on a MON 377B that gets no further
+restart. That is the next question."*
+
+### 14a. What this does and does not change
+
+ - **12d still stands, narrowly.** July reached `> Allocating memory`; today it does not. That
+   comparison was run like-for-like and it is not withdrawn.
+ - **12's framing does NOT stand.** It said sections 7-11 "have been characterising a REGRESSION,
+   not the original blocker", and that none of it "was true four weeks ago". Two days ago it was
+   true, and was written down as the lane's open question. Sections 7-11 re-derived a state that
+   was already recorded — with better instruments, which is worth something, but not as new ground.
+ - **13a's diff read is therefore misdirected.** Reading the servicer/octobus/ND-100 diff over
+   `ad1d18c16`..HEAD looks for a change that made the lane stop working. The lane has been in this
+   exact state for at least the last two days of that range, and the question that separates
+   working from not-working is a protocol question, not a `git log` question.
+
+### 14b. The question, stated once, from both records
+
+`SWPDECODER` (`MP-P2-N500.NPL:135443`) is a `GOSW` on `SWPFU`, the function the SWAPPER asks the
+ND-100 to perform:
+
+```
+0 ESWPFATAL   1 LNEWSWAP   2 LSWPAGE   3 LPRSUSPEND   4 LALLOPAGE   5 LDATREADY   6 LCLTSB
+```
+
+**The swapper only ever asks `SWPFU=1` — `LNEWSWAP`, "I am free, find me the next process that
+wants me".** It never asks `SWPFU=4` (`LALLOPAGE` @136513), which is the arm that sets `PSW1WAIT`
+into `SWMSG` — and section 7b measured that `SWMSG` never held `PSW1WAIT`, not once in 421 visits.
+The two records agree on this from opposite directions: 08-27 read it off the answer (`ansSWPFU=1B`),
+08-29 read it off the status histogram.
+
+So the swapper is not stuck. **It is idle because nothing is queued for it**, and the question is
+what puts a process on the swapper's request list on the classic lane and fails to on the octobus
+lane. `5ACTSWAPPER` has exactly three callers (135367 `TRAPDECODER` trap 46, 134154 `MSWSWAIT` tail,
+136037 `SWPD4` FIFO drain) and that is where to look.
+
+The cheapest discriminator available: the servicer already carries a **SWPFU histogram**
+(`Nd500MicrocodeServicer.cs:312`). Run the CLASSIC lane, which does reach allocation, and compare
+its SWPFU histogram against the octobus one. If classic shows a `4`, the difference is located in
+one number rather than in 110 commits.
+
+### 14c. The lesson, which is 12b's lesson applied one step too shallowly
+
+12b said the first question about any stall should be *"is this new?"*, and it was right. But it was
+asked of a July document and stopped there. The **nearest** record was two days old, in this repo,
+and it answered the question better: not "is this new" but "has anyone already written this down".
+A four-week-old record told me the lane once worked. A two-day-old record told me the lane is in a
+known, named, still-open state — which is the more useful fact and the cheaper one to find.
