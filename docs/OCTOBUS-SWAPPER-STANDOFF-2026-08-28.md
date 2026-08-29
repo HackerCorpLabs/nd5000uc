@@ -1202,3 +1202,91 @@ TRUNCATED window.** "98,194 non-zero writes across all 4096 addresses, every add
 ~24 times" is a count over the first million logged writes, not over the run. The `[D]` reading of
 it as a reused buffer may still be right, but it is not yet supported — it has to be re-counted on
 a log that did not saturate before it means anything.
+
+---
+
+## 17. The write log was measuring the BOOT, not place-domain — proved by two packs agreeing `[V]` 2026-08-29
+
+### 17a. The measurement
+
+Two runs of the same test, differing ONLY in the mounted pack:
+
+| run | pack | how far it got |
+|---|---|---|
+| A | `BIGDISK0-L.IMG` (harness default) | bailed at `define-swap-file` — `NO SUCH FILE NAME`, the harness's own wrong-pack guard |
+| B | `DOMS-CSFIX.IMG` | reached `place-domain cpu-stat`, **STALL**, then `run`, STALL |
+
+These two runs did completely different things. Their write logs:
+
+```
+40,463,048 bytes   both        (identical size)
+1,000,000 entries  both        (identical count - and this IS the built-in cap)
+first divergence   line 575,206 of 1,000,000
+PC histogram       IDENTICAL, all 451 sites, every count matching to the digit
+```
+
+**575,205 lines — 57.5% of the entire evidence budget — are byte-for-byte the same in a run that
+never reached place-domain and a run that stalled inside it.** The remaining 424,795 lines are
+dominated by `ST0PSYS` and its neighbours, i.e. teardown, in *both*.
+
+### 17b. What that means, and what it retracts
+
+The log's budget is consumed by boot traffic common to every run, and then by teardown. **It never
+had room to record the phase under investigation.** Anything read out of it about `place-domain` is
+a statement about SINTRAN's boot wearing the clothes of a statement about `place-domain`.
+
+**This retracts §16a's numbers as evidence.** "98,194 non-zero writes in page `0x45A000`, all 4096
+addresses, every one rewritten ~24 times" is a real count over a prefix that ends before the
+interesting work starts. The `[D]` reading — a disc-read buffer being reused — is not supported by
+it. It is not refuted either; it is simply unmeasured, which is the more dangerous state because the
+number looked like an answer.
+
+This is taxonomy #12 (a bounded evidence budget spent by noise) with the sharpest possible
+detector: **two runs that did different things producing the same log**. Worth keeping as a
+technique — when a capture is suspected of missing its subject, run it against a fixture that fails
+EARLIER and diff. If the logs agree, the capture never reached the subject. That question is
+answerable without knowing anything about what the right answer would look like.
+
+### 17c. A second defect the same data exposed: the PC cannot name the writer alone
+
+The top entry in the histogram is `pc=0o147703` = `ST0PS+0o50` = listing `0o147503` in
+`MP-P2-N500.NPL`, with **166,430 writes** against it. Reading the source there:
+
+```
+147500   IF CPUAVAILABLE BIT 5ALIVE AND A/\5CPUTYPE=SAMSON THEN
+147507      T:=5MBBANK; X:=MAILINK; *AAX X5CPU; LDATX
+147513      IF A-MPACTIVE=0 THEN
+```
+
+`0o147503` is inside a **poll loop executing `LDATX` — a READ**. It heads a WRITE log with six
+figures of writes attributed to it. One of these is true and they cannot both be:
+
+ - the writes come from another thread while the ND-100 sits in that loop, and the static
+   `DiagCurrentPC` is being sampled cross-thread (the caveat already written into the code); or
+ - the writes really are the ND-100's and the PC is stale or torn.
+
+**Do not resolve this by reading code.** A grep for a DMA path into `ND100Memory.WriteMemory32W`
+came back empty, which is the exact shape of a search that cannot see what it is looking for. It is
+settled by measurement: each entry now also carries the **writing thread's managed id**, 8 bits, as
+a discriminator. A thread id proves two writers differ but cannot name either; a PC names a routine
+but cannot prove the write came from it. **Only the pair answers the question** — which is precisely
+the point commit `94c81a4c7` makes about the 3022's trace.
+
+The address arithmetic above is worth noting as a check that PASSED: `MP-P2-N500.NPL` lists
+`ST0PSYS` at `0o147433` and `INSMONCO` at `0o147334`; `l07-kallsyms.txt` has them at `0o147633` and
+`0o147534`. **Both are exactly `+0o200`**, independently confirming §15's listing-to-linked offset
+for this module on two symbols that bracket the region being read.
+
+### 17d. Changes made
+
+ - `WriteLogCap` raised to **8,000,000** in the harness, past the 575k divergence point.
+ - Each log entry carries the writing thread's id (bits 20-27 of the packed context; PIL occupies
+   16-19, so no collision).
+ - The dump prints an **explicit saturation line**. The existing `histogram total == log total`
+   check is a *consistency* check and a saturated log passes it happily — saturation is not a
+   mismatch. So it is now stated on its own:
+   ```
+   *** WRITE LOG SATURATED at its N cap - this is a PREFIX of the run.
+       Absence of a write here is NOT absence in the run. ***
+   ```
+   or, when it did not saturate, a line saying so and giving the count against the cap.
