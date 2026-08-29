@@ -1,12 +1,13 @@
 # PLAN
 
-**Next (this session owns the ND-5000 / OCTOBUS lane):** #56 — read the chain-visit ring in order
-and count how many times the `3SWMESS` node enters `SWPPING`, and whether any of them reaches
-`ANSWER(3)`. No new instrument is needed; the ring already records `N5STA` before and after every
-visit. Blocked only on a free slot in `Emulated.Tests` — two attempts died on the shared tree, not
-on our code (a torn read of the peer's harness file mid-save, then `Emulated.Tests.dll` locked by
-their testhost). Evidence and the five refuted claims:
-`docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`.
+**Next (this session owns the ND-5000 / OCTOBUS lane):** #56 - read the `5ACTSWAPPER` call-site
+table from the run now in flight, on addresses VERIFIED against `l07-kallsyms.txt` (listing + 0o200;
+the first two runs were armed 128 words low and their tables are withdrawn). The question is which
+of the four callers - `MSWSWAIT` tail, `TRAPDECODER` trap 46, `SWPD4` FIFO drain, `SWMC` (MON 510B) -
+fires on the classic lane and never here. It is the ND-100 that never hands this swapper work:
+`SWACTIVE` appears 80 times on the working lane and zero times on ours. Evidence, and the eight
+claims refuted along the way: `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md` (read section 14 first,
+then 15).
 
 **LANE SPLIT, 2026-08-28 (Ronny):** this session is the **ND-5000 / octobus** session — RouteB, the
 swap-file question, #56, #59, #68, and the microword oracle (#50/#51). `nd500uc-47` is the
