@@ -151,7 +151,14 @@ GSWSP hunt (2026-08-20) and re-discovered on 2026-08-29 while about to build a t
 | `CpuND100.DiagPcWatchAdd(pc, name)` | up to **8** named ND-100 addresses, each with a hit count, plus registers + PIL for the first `DiagPcWatchLogMax` (60) hits. `DiagPcWatchReset()` clears and disarms | **"Is this SINTRAN routine ever entered, and which exit does it take?"** — the answer without an instruction trace, which the boot would drown. Arm the CALL SITES as well as the routine, or "a caller never reached" reads identically to "the routine declined" |
 | `CpuND100.DiagInstrTrace` / `DiagInstrLog` | ordered instruction log | only around a located window; the boot runs hundreds of millions of instructions |
 
-**Three things that will bite:**
+**`DiagPcWatchPil` — set it, effectively always.** Count and log only hits at one interrupt level;
+`-1` (any) is the default and `DiagPcWatchReset()` restores it. **Level 12 is the ND-500 driver
+level**, which is where everything in `MP-P2-N500.NPL` runs. Measured cost of NOT setting it,
+2026-08-29: address `0o145112` reported **232 hits, every logged one `PIL=1`** — a level-1 loop at
+the same 16-bit address — and those 232 also produced a table where a caller showed 17 hits and the
+routine it calls showed 0, which cannot both be true and gives no way to tell which number is wrong.
+
+**Four things that will bite:**
 
  - **The counters are STATIC.** A second test in the same process inherits the first one's totals.
    Call `DiagPcWatchReset()` before arming, every time.
@@ -160,6 +167,10 @@ GSWSP hunt (2026-08-20) and re-discovered on 2026-08-29 while about to build a t
    level 12 is the ND-500 driver level.
  - **Eight slots, no dictionary**, deliberately: the armed path is a linear scan on every
    instruction, and a hash lookup there would be far too expensive.
+ - **The 60-entry log is a BUDGET, and the noisiest address spends it.** In that same run 59 of the
+   60 entries were the `PIL=1` impostor and 1 was the real hit — so the log degrades in exact
+   proportion to how badly it is needed. Filter at the point of measurement (`DiagPcWatchPil`), not
+   afterwards: post-filtering leaves you the same one usable sample.
 
 Worked example in `Emulated.Tests\ND100\Nd100SintranNd5000OctobusBootHarnessTests.cs`,
 `ArmSwapperHandoverWatch()` — the four `5ACTSWAPPER` call sites plus the routine and both of its
