@@ -10,9 +10,38 @@ in the dated evidence records; this is what is left and how to attack it.
 
 ## Next
 
-**A3 — why does the ND-500 never raise a page fault on this lane?** That is the blocker, and it is
-on our side of the fence. First job is #77: make the round-2 harness (microword B30 + real 68k ACCP)
-runnable, because the standing rule below says no conclusion is reported from the macro round alone.
+**Read `Machines.Accp`'s existing tests before touching #78.** The ACCP-to-ND-5000 control-store
+link is already carved, modelled and tested there against the firmware's own microcode — so
+SINTRAN's failing `LOAD-CONTROL-STORE` is almost certainly NOT that seam, and the harness has been
+looking at the wrong end.
+
+---
+
+## THE RULE THAT JUST COST A DAY  (2026-08-30)
+
+> **`ls -d */` in `RetroCore\Nuget` BEFORE building a harness, an attach, or a probe.**
+> Ronny: *"dont forget about the fucking machines that are relevant to what we are doing.
+> dont duplicate code."*
+
+There is a whole `HackerCorpLabs.Emulation.Machines.Accp` — a real ACCP machine with
+`AccpBootTests`, `AccpConsoleTests`, `AccpSelftestStatusTests`, **and**
+`Nd5000ControlStoreLinkTests`, `Nd5000CsaFailureTraceTests`, `Nd5000FirmwareLoadTests`,
+`Nd5000AttachedMachineTests`. I attached the ACCP by hand inside the octobus boot harness, watched
+a boot marker not arrive, and wrote up "the real ACCP stops SINTRAN booting" — while that machine's
+own suite prints:
+
+```
+CPU model: ND-5900
+Communication ACCP-ND100 started. Version: December 5, 1988
+ACCP:                       console port took CR: True   ECHOED / RESPONDED: YES
+```
+
+**And there is a FAST layer I was not using.** From `Nd5000ControlStoreLinkTests`' own header:
+*"They run in milliseconds; booting the real firmware to reach the same code takes about twenty
+minutes, so the fast path is where the protocol gets pinned down and the slow boot is kept for
+confirming it end to end."* Every measurement this week was a 30-minute boot.
+
+Memory: `check-existing-machines-before-building`.
 
 ---
 
@@ -22,24 +51,15 @@ runnable, because the standing rule below says no conclusion is reported from th
 > to find out what the real hw would do and then try to replicate that in macrocode. dont assume
 > shit, go measure, use logging and analytics"*
 
- - **Round 1, macro:** functional `CpuND500` (`AttachNd5000Cpu`). The target — what has to end up
-   correct.
- - **Round 2, real hardware:** microword `CpuND5000` on the real `MICRO-5800-B30`
-   (`AttachNd5000CpuOfKind(Nd5000CpuKind.Microword, …)`) **together with the real 68000 ACCP
-   firmware** (`AttachAccpFirmware`, `octo.bin`).
+One switch on ONE test: `RETROCORE_ND5000_ROUND` = `""` | `hw-cpu` | `hw-accp` | `hw`.
+**Round 2 is the ORACLE.** Diff the rounds; the difference IS the bug list. Never report a
+macro-only conclusion.
 
-**Round 2 is the ORACLE.** Diff the rounds; the difference IS the bug list. Then replicate the
-hardware's behaviour in macrocode. **Never report a macro-only conclusion.** Same test, one switch —
-two tests that drifted apart do not make a measurement.
+**The one exception:** the ND-5000 **MMU walk is HARDWARE** — microwords only SELECT it — so a
+page-fault question is settled by neither round alone. Read round 2 with `ND-05.020.01` beside it.
 
-**Verified 2026-08-29:** the octobus boot harness calls `AttachNd5000Cpu` and never calls
-`AttachAccpFirmware`, so neither real component has ever been in this lane. Both seams are wired and
-unused.
-
-**The one exception, and it is not permission to skip round 2:** the ND-5000 **MMU walk is done by
-HARDWARE** — microwords only SELECT it — so a page-fault question is settled by neither round on its
-own; the MMS model is ours on both paths. Read round 2 with `ND-05.020.01` beside it. The classic
-ND-500 is the opposite: its microcode DOES walk.
+**A harness OUTCOME field is not a result.** `place-domain=returned` was an ERROR path that
+returned faster because it failed earlier. Only the console says what the machine did.
 
 ---
 
@@ -48,121 +68,133 @@ ND-500 is the opposite: its microcode DOES walk.
 Real ND-500/ND-5000 programs on the emulated CPU, driven by **REAL SINTRAN III on the emulated
 ND-100**, with every MON call **FORWARDED over the octobus**. A run our C# `SintranEmulation`
 answers **does not count**. Before believing any "it runs" claim: **who answered the MON calls?**
-Mechanical guard on a live run: `EmulatedMonPathMarker.Count` must be **0**, and the harness asserts
-it. The path table is `RetroCore\Emulated.HW\ND\CPU\ND500\Servicer\MON-PATH-LEDGER.md` — look it up,
-do not re-read the servicer.
+Mechanical guard: `EmulatedMonPathMarker.Count` must be **0**, and the harness asserts it. Path
+table: `RetroCore\Emulated.HW\ND\CPU\ND500\Servicer\MON-PATH-LEDGER.md`.
 
 ---
 
-# A. #56 — no page fault is ever raised on the octobus lane  (BLOCKS EVERYTHING BELOW)
+# A. The octobus lane — THREE bugs, and the order changed
 
-Every other octobus item is downstream. Do not start B, C or D while A is open.
+The two-round rule produced the ordering. One of the three then evaporated on contact with the
+existing test suite, which is why this section is rewritten rather than amended.
 
-### A1. MEASURED 2026-08-29 — macro round, table self-consistent
+### A1. #78 — SINTRAN's `LOAD-CONTROL-STORE` fails against the real B30  ← **START HERE**
 
-```
-INVARIANT callers=1 entry=1 outcomes=1 (bailed=0)  [consistent]
-
-  call:MSWSWAIT-tail           @0o134354  hits=0
-  bail:NOT-BSWSTARTED          @0o135551  hits=0
-  call:TRAPDECODER-pagefault   @0o135567  hits=0
-  call:SWPD4-fifo-drain        @0o136237  hits=1     <- the only caller
-  call:SWMC-mon510             @0o142165  hits=0
-  5ACTSWAPPER-entry            @0o145162  hits=1
-  HANDOVER-taken-SWACTIVE      @0o145211  hits=1     <- it DID hand over, once
-  queued-on-swapwait-fifo      @0o145312  hits=0
-```
-
-All hits `PIL=12`, link registers chain correctly, addresses verified against `l07-kallsyms.txt`.
-
-**This corrects the chain this section used to state.** It is NOT "the swapper is never handed
-work". `5ACTSWAPPER` runs, the swapper is seen free, and `SWACTIVE` IS written — once, via the
-`SWPD4` FIFO drain. What never happens is the route that keeps feeding it:
+Measured on `hw-cpu` (real B30 microword CPU, hand-written ACCP), full transcript:
 
 ```
-our ND-500 raises NO page fault      (trapsAttempted = 0; TRAPDECODER call site AND its bail both 0)
-   -> TRAPDECODER's trap-46 arm is never REACHED
-   -> the only handovers are the one-off FIFO drain
-   -> the swapper asks LNEWSWAP and parks at PC=0x08008255
-   -> place-domain never prints "> Allocating memory"
+> Loading Control Store
+Error when loading Control Store.
+ *** FATAL SYSTEM ERROR ***     ND-500(0) error: ND-500(0) timeout
+MAR 00000000000    MICRO P: 00000177777          <- all ones: the microprogram is not running
 ```
 
-The working classic lane hands over ~80 times. **The left end is ours: the emulator is not raising
-the fault. SINTRAN is not refusing to act on one.**
+The functional `CpuND500` sails through the same load, which is why this was invisible while the
+macro round was the only round.
 
-### A2. Refuted by that table
+**Do this in order, and the first two steps are minutes, not hours:**
 
- - **`BSWSTARTED` is NOT the blocker** (`bailed=0`). It was the primary suspect and the best fit to
-   the evidence available; it is wrong. There was nothing to bail on, because the arm is never
-   reached.
- - **`5ACTSWAPPER` is not broken**, and neither is the swapper. Both behave correctly at every
-   measured point.
+ 1. Run `Nd5000ControlStoreLinkTests` + `Nd5000AttachedMachineTests` (milliseconds). They pin the
+    carved firmware register sequence and prove the windows are mapped where the firmware reaches
+    them. `0x660000` bit 0 "control-store operation OK" is **earned** there — set only when a full
+    128-bit microword really reached the sink.
+ 2. Run `Nd5000FirmwareLoadTests` (minutes). It boots real `octo.bin` and compares against the
+    **firmware's own** microcode — `LoadSelftestMicrocodeIntoControlStore` @`0xB16E`, a PLANC
+    2-D descriptor at `0x13C18`, origo `0x13C30`, 3072 records of 8 x 16-bit = 3072 microwords.
+    An oracle that is not my reading of anything.
+ 3. **Only if those are green** is the defect in OUR octobus lane rather than the ACCP link — i.e.
+    in `OctobusND5000Station` / `NDBusOctobus`'s CSLOA path, or in how the harness wires the
+    microword CPU in as the control-store sink. Narrow it there, not in a boot run.
 
-### A3. THE QUESTION — why is no page fault raised?
+### A2. #79 — the macro round is LIVELOCKED
 
-Why does our ND-500 never fault here when the classic lane faults constantly?
+An exactly-repeating **8-write cycle at PIL 2, ~82,000 times**:
 
- - **Run BOTH rounds** (standing rule above). Note the exception: the ND-5000 MMU walk is HARDWARE,
-   so round 2 does not answer this on its own — the MMS model is ours on both paths. Read round 2
-   with `ND-05.020.01` beside it.
- - **Measure, do not reason.** Instrument the MMS translate path and count translations, hits,
-   misses and faults RAISED. **A fault never raised and a fault raised-then-swallowed look identical
-   from outside**, so a single counter cannot separate them — give it the pair.
- - Compare the same counters against the classic lane, which faults. A difference in translation
-   COUNT is a different bug from a difference in fault-raise RATE.
+```
+0x42810C := 0x0000   GETC5+5      (cache-defeating BSET)
+0x42890C := 0x00FF   GETC5+7      (X5PRO, ext+0x0C)
+0x428820 := 0x00FF   RDDMT+18     (32-bit cell)
+```
 
-### A4. Fix at the cause, not the symptom
+Geometry: `header=0x00428800 extBlock=0x00428900`. Windows 8-15 of the phase profile are 2.4M
+writes of one repeating pattern — 40% of the run.
 
-The fix belongs at the left end of A1's chain. Resist "make `5ACTSWAPPER` run" — it already does.
+**`GETC5PROC` is NOT the defect.** It is documented as a read and genuinely writes: two
+`*BSET BCM 120 DX; LDATX` pairs commented *"Fool the cache"* (`CC-P2-N500.NPL:657`), touching an
+address `0x800` away to force eviction. Our ND-100 records them correctly. **Do not "fix" it.**
+
+**Open: WHO CALLS IT.** Nine call sites across three NPL modules. Instrument built and committed
+(`a7de69017`): `CpuND100.DiagCurrentL` carries the `JPL` return address into the write log, and the
+dump prints a **caller histogram** keyed on it. No offset arithmetic, no adjacency guessing.
+
+### A3. #81 — NOT a bug. Harness timing.
+
+`RunUntil(marker, 300_000)` counts **host wall-clock milliseconds, not emulated cycles** — its own
+comment says so. A 68000 at `instructionsPerClock: 64` exhausts that budget with nothing broken.
+Re-measure with the window raised and/or the rate lowered, and **report timing separately from
+correctness**. Not a blocker for anything.
+
+### A4. #72 — fix at the cause, blocked on A2
+
+Blocked until the caller is named. Explicit do-nots: do not "make `5ACTSWAPPER` run" (it already
+does — measured `callers=1 entry=1 outcomes=1`); do not fix `GETC5PROC`; do not pick its caller by
+proximity. The regression test must be **run red first** against deliberately broken code, and the
+failing line checked.
 
 ### A5. Do NOT redo these
 
-Measured, refuted or done. Evidence: `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`.
-
- - The stall is **not** new (same state recorded 2026-08-27) and **not** bisectable — the history
-   does not build; the diff read is the wrong instrument.
- - "It is a regression" is **NOT established.** The last run that reached `> Allocating memory` was
-   2026-08-01 from an UNCOMMITTED working tree, and the harness has changed since — so a code
-   regression is not separated from a harness change. I claimed it this morning and had to narrow it.
- - The swap file is not the variable. Skipping `define-swap-file` gives an identical stall.
- - `SWPPING` is ND-100 bookkeeping; our chain walk is right to skip it.
- - `SWPFU=4` (`LALLOPAGE`) is **not** a discriminator — the working lane never asks for it either.
- - MON 377B is not a swapper-activation call, and `SWPST` cannot pick a fork.
- - `BSWSTARTED` — refuted above.
- - Do not carve more microcode for this, and do not re-measure the stall.
+ - `BSWSTARTED` is refuted (`bailed=0`). `5ACTSWAPPER` and the swapper both behave correctly at
+   every measured point. The old "the swapper is never handed work" framing is **wrong**.
+ - "No page fault is raised" had a **wrong premise**: nothing outside segment 1 was ever
+   translated, so the fault path is unreached, not defective.
+ - The swap file is not the variable; `SWPPING` is ND-100 bookkeeping; `SWPFU=4` is not a
+   discriminator; MON 377B is not a swapper-activation call.
+ - The history does not build, so a bisect cannot run.
+ - Do not re-measure the stall, and do not carve more microcode for it.
 
 ---
 
-# B. #50 / #51 — the microword oracle  (independent of A; work it while A waits on a run)
+# B. The microword oracle — #51 is NOT what its title said
 
-The microword `CpuND5000` runs the real B30 store and is the only thing that can adjudicate the
-functional `CpuND500`. Until its divergences are closed it cannot serve as an oracle — which is
-exactly what A's eventual fix will need for validation.
+`MacroOracleState.Diff()` **already** compares P, L, R, B, X1-4, A1-4, E1-4, Z, S, C, O. `K` and
+`Pia` are excluded **deliberately and documentedly** (carried for seeding/observation; the goldens
+never seed them) — that is not a hole.
 
- - **#51 FIRST** — extend the sweep diff to `B`/`R`/`L`/`TOS`/`HL`/`LL`/`THA`. It compares too few
-   registers today, so #50's count is a lower bound wearing the clothes of a total. Widening the
-   diff is what makes #50 trustworthy.
- - **#50** — then the 246 divergences + 31 trap-bit misses, re-counted on the widened diff.
+**What is actually left is register MODELLING, upstream of any diff change:**
 
-**Method:** per-divergence adjudication, never auto-trusting either engine. Surface both states plus
-the microcode or manual citation. Neither CPU is the reference; the B30 store is.
+ - functional `CpuND500` has **TOS, LL, HL, THA**.
+ - microword `CpuND5000` has `IduLl`, `IduHl`, `IduTe`, `IduLimc` — and **no TOS, no THA**.
+ - So TOS/THA cannot be diffed until they are modelled on the microword side; and whether
+   `IduHl`/`IduLl` **are** the architectural HL/LL is **UNVERIFIED**. Establish that from the
+   microcode or the manual FIRST — *a diff between two registers that are not the same register
+   manufactures divergences.*
 
----
-
-# C. #68 leftovers — two context slots, uncarved
-
-`ctx+0x6C` and `ctx+0x70`: `CNTXTSAVE` writes them and we write nothing. **Uncarved — inventing a
-value is worse than leaving a slot untouched.** Carve from the RAW `MICRO-5800-B30.DATA` word, or
-leave it `[OPEN]`. The classic-store divergence at `010410`/`010411` is the peer's lane, not ours.
+Then #50: per-divergence adjudication of the 246 divergences + 31 trap-bit misses on the widened
+diff. Never auto-trust either engine; the B30 store is the reference, not either CPU.
 
 ---
 
-# D. Deferred, and honestly deferred
+# C. #75 — single-float `-0.0` TEST, S=1 vs S=0
 
- - **#53** — the nd100x C ↔ ND-500 core seam. Gated on A being green; earlier means defining a seam
-   against a lane that does not run.
- - **#54** — single-float `-0.0` `TEST` `S=1`. One instruction, no dependants. The DOUBLE half is
-   closed; this is the single-precision tie-break and needs a trace before anything is touched.
+**Carved 2026-08-30 from the RAW `MICRO-5800-B30.DATA`:** `TESTF` (0o3000) and `TESTD` (0o3002) are
+the **same microcode** — identical words differing only in `ABS_ADDR` (0x0601 vs 0x0603, each
+jumping to its own continuation); 0o3001 and 0o3003 are **byte-identical** and both jump to
+`0x0679` = **0o3171 = `TESTFD`**. Both carry `DATATYPE = 7 = TYP,DR` — *"data type controlled by
+ICA"*.
+
+**So the TEST body has no per-width behaviour for the chip to be faithful to**, which turns the
+"self-inconsistent with the double path" suspicion into evidence pointing at our engine.
+
+Left: execute `TESTFD` @0o3171 with the recording-`IMicroMemory` decorator for both widths and
+record whether the sign is sampled **before or after** the `ALU,AND A,SRF4` mask (`&0x7FC00000`).
+Mind the **one-word condition delay**. Then adjudicate with Ronny — do NOT auto-fix.
+
+---
+
+# D. Deferred, honestly
+
+ - **#74** — the nd100x C ↔ ND-500 core seam. Gated on A; earlier means defining a seam against a
+   lane that does not run.
 
 ---
 
@@ -171,7 +203,7 @@ leave it `[OPEN]`. The classic-store divergence at `010410`/`010411` is the peer
 | what | where |
 |---|---|
 | Item-level status + the counts Ronny reads | the task list (`TaskList`) |
-| #56, all of it, with every refuted claim | `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md` — §14 first, then §15 |
+| The octobus investigation, every refuted claim included | `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md` — §14 on |
 | Run-a-program track | `PRIORITY-PLAN-2026-08-25-RUN-A-PROGRAM.md` |
 | Cross-core alignment track | `PRIORITY-PLAN-ND500-ALIGNMENT-2026-08-08.md` |
 | Every existing trace switch | `DIAGNOSTICS.md` — check before building an instrument |
@@ -181,26 +213,28 @@ leave it `[OPEN]`. The classic-store divergence at `010410`/`010411` is the peer
 
 ## Rules that have actually cost time here
 
+- **Check `RetroCore\Nuget` for an existing machine BEFORE building anything.** Newest and most
+  expensive; see the box at the top.
+- **Never conclude about a component from YOUR ad-hoc wiring of it.** "Did not finish in the
+  window" and "does not work" are different claims.
 - **CARVE, DON'T GUESS** — from `GROUND-TRUTH.md`, or mark it `[OPEN]`.
 - **Read `docs\ND5000-ND100-MESSAGE-PROCESSING-REFERENCE-2026-08-23.md` first** for anything about
   ND-100↔ND-5000 messaging. The trigger is "I wonder", not "I am about to derive".
-- **An NPL listing address is not a linked address.** This module is **listing + `0o200`**, verified
-  against `l07-kallsyms.txt`. The offset is PER MODULE; convert via the `*NNxnn=*` patch markers,
-  which exist in both the listing and the symbol table. **Pin symbols that BRACKET the routine**, not
-  ones merely near it.
-- **A better instrument on an unverified input is more dangerous than a noisy one** — it strips the
-  noise that was the only sign anything was wrong. Verify the input before polishing the instrument.
-- **Ask what a NULL result would tell you before asking for the measurement**, and check the
-  discriminator against the MECHANISM: if you cannot say what the test would SEE were the hypothesis
-  true, it cannot support a negative.
-- **Before quoting a ratio, ask what the denominator does on its own.** A 20-of-20 against a
-  95%-constant field is not a finding.
+- **An NPL listing address is not a linked address, and the offset is PER MODULE.** `MP-P2-N500` is
+  **+0o200**; `CC-P2-N500` is **+0o17**. Applied out of habit, the wrong offset lands on a different
+  routine that is every bit as plausible. Pin symbols that BRACKET the routine.
+- **`l07-kallsyms.txt` is HEX and 1,420 of its addresses carry MORE THAN ONE symbol** (9% of 15,799
+  lines). A one-name lookup flips a coin between real aliases. Use `pcsym.py`, which prints all of
+  them.
+- **A capped log is self-consistent.** A total-vs-total check cannot catch saturation; ask
+  separately whether the log hit its cap. Two runs that did DIFFERENT things producing the SAME log
+  is the sharpest test that a capture never reached its subject.
+- **A count with no denominator can only be believed, not checked.**
+- **Ask what a NULL result would tell you before asking for the measurement.**
 - Microcode addresses are **OCTAL**; read ORCON/MARG/SARG/SCAL from the RAW `MICRO-5800-B30.DATA`.
 - **SINTRAN IS ALWAYS OCTAL**, in and out. The only tell is the `B` on the echo.
-- **Shared-tree hygiene** — stage exact paths, never `git add -A`; check
-  `git diff --cached --name-only` before every commit. Two sessions, one checkout.
+- **Shared-tree hygiene** — stage exact paths, never `git add -A`. Two sessions, one checkout.
 - **No new branches without written permission.**
 - **Status headings in this tree have lied.** Check the code before investigating anything marked
-  open; more than half the time it is already done.
+  open; more than half the time it is already done. This applies to a task you are about to CREATE.
 - **A test never seen red is not evidence.** Run it against broken code and check WHICH LINE fails.
-- **"Would this assertion still pass if the feature were deleted?"**
