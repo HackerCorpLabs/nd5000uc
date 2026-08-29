@@ -546,6 +546,11 @@ stall should be **"is this new?"**, and the records that answer it were already 
 
 ## 12d. CONFIRMED: it is a regression. Like-for-like, only the code date differs `[V]` 2026-08-29
 
+> **Read 12f with this.** The test named here was first committed 2026-08-02, so the July runs
+> came from an uncommitted working tree and the HARNESS has changed too. The guest-visible
+> state matched exactly; "the emulator regressed" is not yet isolated from "the harness
+> drives it differently now".
+
 Ran the July configuration exactly, on today's code:
 
 | | 2026-07-31 | 2026-08-29 (today) |
@@ -580,3 +585,36 @@ About 30 minutes per probe, so pick candidates by inspection first rather than b
 mechanics, and every one of those answers is correct and none of them is the cause. The cause is a
 change in this tree, and the fastest route to it is `git log` over the octobus, servicer and CPU
 paths in August.
+
+
+## 12f. A caveat on 12d, and what it does to the bisect `[V]` 2026-08-29
+
+`Nd500SwapFile_CreateAndDefine_Capture` was **first committed on 2026-08-02** (`ad1d18c16`, "Boot
+harness: ND-500 swap file + LINKAGE-LOADER installer tests"). The July document dates its runs
+2026-07-31 and names that test — so those runs were made from an **uncommitted working tree**, two
+days before the test entered git.
+
+That does not undo 12d, but it narrows what it proves. What is still exactly matched, and it is a
+lot: the same machine, the same stock pack, a swap file created in session reporting the **same mass
+storage address `76110B` and the same `11610B` free part**, and the same `recover-domain` command.
+What is NOT matched is the harness itself — the test file has changed since, including 109 lines
+added as recently as `25d7c5e14` (2026-08-28, "Give RouteB its own swap file"), though that commit
+touches only the test file and not the servicer or CPU.
+
+**So the honest claim is:** the guest-visible state was identical and the outcome was not, and
+*something in this tree* changed it — but "the emulator regressed" is not yet isolated from "the
+harness drives it differently now". Both are code, and both changed.
+
+### What this does to the plan
+
+ - **The bisect cannot start before 2026-08-02.** There is no commit where the July test exists and
+   the July behaviour can be reproduced, because on 07-31 it existed only in a working tree.
+ - **The first probe is `ad1d18c16` itself.** If it reaches `> Allocating memory`, the range is
+   `ad1d18c16`..HEAD (a few hundred commits, ~9 probes) and the bisect is well-founded. If it does
+   NOT, then the behaviour was never in git and the July result came from uncommitted work — in
+   which case bisecting is the wrong tool entirely and the question becomes what that working tree
+   had that the commit did not.
+ - That second outcome is worth naming in advance, because it is the one that would waste a night of
+   30-minute probes if discovered on probe six.
+
+`[OPEN]`.
