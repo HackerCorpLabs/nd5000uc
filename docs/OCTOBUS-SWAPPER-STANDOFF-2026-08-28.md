@@ -3,7 +3,8 @@
 > **READ SECTIONS 12 AND 12c FIRST (2026-08-29).** This lane HAS REACHED `> Allocating memory` and run a
 > domain for 7.5 minutes on 2026-07-31 and again on 2026-08-01. It no longer does. Sections
 > 7-11 may therefore be describing a REGRESSION rather than a standing property of the
-> octobus lane - but 12c records why that is still a HYPOTHESIS and what run settles it. The
+> octobus lane. CONFIRMED like-for-like in 12d: same test, same pack, same swap file geometry,
+> same command, only the code date differs. The
 > measurements are sound; the framing is not yet earned.
 
 **Created 2026-08-28.** Full path:
@@ -456,7 +457,7 @@ process queued at `SWPWAIT` — and `trapsAttempted=0` says no trap was ever rai
 is unchanged from section 8 and was never really about the restart: **what should be running that
 would fault, and why is nothing running?**
 
-## 12. HYPOTHESIS: a regression. The lane used to reach allocation `[OPEN]` 2026-08-29
+## 12. A REGRESSION: the lane used to reach allocation `[V]` 2026-08-29 (confirmed in 12d)
 
 The swap-file hypothesis from the previous tick is REFUTED, by the discriminator built to test it:
 with `define-swap-file` skipped entirely, the run stalls in exactly the same place, after
@@ -541,3 +542,41 @@ stall should be **"is this new?"**, and the records that answer it were already 
 > before reading the code that produces it; and now a multi-variable difference attributed to the
 > one variable I found interesting. Each time the fix was to change ONE thing and re-run, and each
 > time it was available immediately.
+
+
+## 12d. CONFIRMED: it is a regression. Like-for-like, only the code date differs `[V]` 2026-08-29
+
+Ran the July configuration exactly, on today's code:
+
+| | 2026-07-31 | 2026-08-29 (today) |
+|---|---|---|
+| test | `Nd500SwapFile_CreateAndDefine_Capture` | same |
+| env | `RETROCORE_NLL_FLOPPY=1`, `RETROCORE_ND5000_RUNTHREAD=1` | same |
+| pack | stock `BIGDISK0-L`, swap file created in session | same |
+| swap file | `(PACK-ONE:SYSTEM)SWAP-FILE-0:SWAP;1`, addr `76110B`, `11610B` pages | **identical, digit for digit** |
+| command | `recover-domain (210319H02:FLOPPY-USER)LINKAGE-LOAD-H02` | same |
+| result | `> Allocating memory - 7110B pages`, ND-500 runs ~7.5 min, 5SWAP protect violation | **`> Loading Swapper`, then nothing** |
+
+`list-swap-file-info` reporting the same mass-storage address and the same `11610B` free part as the
+July transcript is the tightest control available here: the machine, the pack and the swap file are
+in the same state, and the command is the same. **The only variable left is the code.**
+
+So section 12's hypothesis is upgraded, and 12c's caution is discharged — by doing the one thing
+12c said would settle it, rather than by arguing.
+
+**Sections 7-11 therefore describe a regression introduced between 2026-08-01 and 2026-08-29.** The
+measurements stand; they are the shape of the regression. The swapper being idle-parked,
+`posted=2 seen=1`, `trapsAttempted=0`, `SWMSG` never reaching `PSW1WAIT` — that is what this bug
+looks like, not what the octobus lane is.
+
+### 12e. The next step, and what NOT to do
+
+Bisect over RetroCore between roughly `2026-08-01` and now, running
+`Nd500SwapFile_CreateAndDefine_Capture` with `RETROCORE_NLL_FLOPPY=1` and
+`RETROCORE_ND5000_RUNTHREAD=1` at each probe, scoring on whether `> Allocating memory` appears.
+About 30 minutes per probe, so pick candidates by inspection first rather than bisecting blind.
+
+**Do NOT** carve further microcode for this. Four hours went into characterising the stall's
+mechanics, and every one of those answers is correct and none of them is the cause. The cause is a
+change in this tree, and the fastest route to it is `git log` over the octobus, servicer and CPU
+paths in August.
