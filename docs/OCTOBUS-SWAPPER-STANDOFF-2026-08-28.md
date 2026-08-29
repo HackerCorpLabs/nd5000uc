@@ -1503,3 +1503,86 @@ end of the chain**, which is precisely what Ronny's rule exists to prevent.
 Artifacts kept out of the shared temp directory before the next run could overwrite them:
  - round 1: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\round1-artifacts\`
  - `hw-cpu`: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\round2-hwcpu-artifacts\`
+
+---
+
+## 20. RETRACTION: the "livelock" is SINTRAN's histogram sampler counting time `[V]` 2026-08-30
+
+### 20a. What the caller instrument said
+
+`CpuND100.DiagCurrentL` (commit `a7de69017`) carries the `JPL` return address into the write log, so
+the log now names the CALLER, not just the callee. Round 1, unsaturated (5,849,918 of an 8M cap),
+caller histogram consistent:
+
+```
+5MPM CALLER HISTOGRAM: 3476 distinct L values
+  caller L=45626B  writes=1315584
+  caller L=51450B  writes= 983290
+  caller L=2000B   writes= 892840
+  ...
+  caller histogram total=5849918 log total=5849918 [consistent]
+```
+
+Filtered to the cycle that §18 called a livelock:
+
+| write | callers |
+|---|---|
+| `0x0042890C` (X5PRO, via `GETC5+5/+7`) | **`L=0o133240` x 65,883**, `L=0o145675` x103, two others x2 |
+| `0x00428820` (via `pc=0o133062`) | **`L=0o33076` x 65,883** |
+
+One call site accounts for 65,883 of 65,990 calls.
+
+### 20b. Reading the source at that address
+
+`L` is the RETURN address, so the call is the word before it. `MP-P2-N500.NPL`:
+
+```
+133212   IF A=2 THEN                               % Process-logg-one
+...
+133230      MIN "5HIDATA".S1; P+1; MIN X.S0; 0/\0  % Increment total number of samples counter
+133235      CALL GETC5PROC
+133236      IF A=5LOGPROC THEN                     % Is process to be logged active?
+133241         LACTIVE;
+133242      ELSE ... LIDLE / LSWPWAIT / LSWPPING / LCPU / LINMCALL
+```
+
+And the other writer, `pc=0o133062`, is the same construct in the neighbouring arm:
+`MIN "5HIDATA".S5; P+1; MIN X.S4 % Increment number of samples`.
+
+**This is SINTRAN's ND-500 process-logging / histogram sampler.** It runs on a clock at PIL 2,
+increments a sample counter, asks which process the ND-500 is currently executing, and classifies
+the answer into one of six buckets. Running tens of thousands of times is what it is FOR.
+
+### 20c. So §18's headline is wrong, and this is the third time this shape has caught me
+
+**RETRACTED: "the lane is LIVELOCKED in an 8-write cycle".** The cycle is real, the counts are real,
+the decode is real — and the conclusion drawn from them is not. A periodic sampler ticking 82,000
+times means **TIME PASSED**. It says the machine sat there; it says nothing about WHY.
+
+The octobus skill states this exact trap in as many words about a different counter:
+
+> *"`3RMICV` (0x01) is the WATCHDOG heartbeat... A burst of 3RMICV means TIME PASSED, nothing more."*
+
+Same shape, different counter, and the warning was already written down. Add it to the taxonomy as
+a variant of #8 (a measurement that cannot be RELEVANT): **the dominant term in a volume-ranked
+instrument is very often the thing that runs on a CLOCK, not the thing that is broken.** Ranking by
+volume ranks by elapsed time.
+
+**What survives from §18:** the instrument work (unsaturated log, single writing thread, named
+writers and now named callers), the phase profile, and — importantly — §18d, that `GETC5PROC`'s
+writes are deliberate cache-defeating `*BSET BCM 120 DX` read-modify-writes and must not be
+"fixed". What does not survive is the word livelock and any inference built on it.
+
+### 20d. What this does to the search
+
+The write log is now KNOWN to be dominated by clock-driven sampler traffic, so **volume is the wrong
+sort key for this question** and no amount of extra write-log resolution will fix that. The stall has
+to be found by asking what `place-domain` is BLOCKED ON, not by asking who writes most:
+
+ - the sampler itself classifies the ND-500 into `LACTIVE / LIDLE / LSWPWAIT / LSWPPING / LCPU /
+   LINMCALL` — **read which bucket it keeps choosing.** That is SINTRAN's own opinion of what the
+   ND-500 is doing, computed 65,883 times and thrown away. It is the single most direct answer
+   available and it costs one counter.
+ - `5HIDATA` is the histogram area; the counters it increments are already in memory.
+
+That is the next measurement, and it is not a bigger log.
