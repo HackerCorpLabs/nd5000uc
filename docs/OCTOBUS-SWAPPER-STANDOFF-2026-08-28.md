@@ -1586,3 +1586,91 @@ to be found by asking what `place-domain` is BLOCKED ON, not by asking who write
  - `5HIDATA` is the histogram area; the counters it increments are already in memory.
 
 That is the next measurement, and it is not a bigger log.
+
+---
+
+## 21. THE MACHINE IS ALREADY DEAD BEFORE THE FIRST COMMAND `[V]` 2026-08-30
+
+Four things sitting in a sixty-line transcript I had opened repeatedly and read past. All four are
+present on the **MACRO round** — the one I have been calling "works".
+
+### 21a. `N5TIMOUT` fires BEFORE any command is typed
+
+```
+@nd-500
+ND-500/5000 MONITOR  Version J04 88. 6.16 / 88. 8.17
+ND-5000 timeout:      ACCP was terminated; Microprogram has stopped
+ND-5000: define-swap-file          <- the FIRST command comes after this
+```
+
+I had been reading that line as part of the banner. It is not. It is `N5TIMOUT` — the `3RMICV`
+watchdog going unanswered (`RP-P2-N500.NPL:127642`, `N5STA != ANSWER` -> `RSTARTALL`).
+
+**So SINTRAN already considers the microprogram STOPPED before `define-swap-file`, before
+`place-domain`, before anything.** Every measurement in sections 14-20 was taken in that state.
+
+This is not new — memory `nd5000-timeout-convergence` records the same chain and its fix direction
+(*"mailbox never walked -> 3RMICV unanswered -> J04 monitor fatal -> timeout; fix = deterministic
+X5ACT addr `5FPMAILBOX<<10+X500DF`, not the 0xFFFF->0 sniff"*). What is new is realising it is
+happening **here, on every run, before the thing under investigation starts.**
+
+And this run says outright it did not resolve: `CARVED mailbox ... X5ACT_carved=0x0043110A vs
+self-disc X5ACT=0x0042890A MISMATCH (delta 0x8800)`.
+
+### 21b. A FILE SYSTEM error fires DURING the control-store load — on both rounds
+
+```
+> Loading Control Store
+INFO    * 0B:6B * 1998-08-29 20:57:01 * BAK01.37603B
+          SINTRAN III File System
+          Not used
+```
+
+Subsystem `0B`, error `6B`, raised while SINTRAN is reading `CONTROL-STORE:DATA` off the pack.
+**Present on the macro round too**, where the CS load then "succeeds". Dismissed as noise every
+time I looked at a transcript.
+
+### 21c. The failure registers are zero and all-ones
+
+```
+N100 STATUS 000000   N500 STATUS 000000
+MAR 00000000000      MICRO P: 00000177777
+```
+
+`MAR = 0` means **no message address was ever latched**. Per the bus reference MAR holds the
+message's ND-100 WORD address; a zero MAR is precisely why no answer arrives and the command times
+out. `MICRO P = 0o177777` is all ones — the microprogram is not running.
+
+### 21d. The FATAL record resolves to the FILE SYSTEM, not to the ND-500
+
+`FATAL * 21B:77B * ... * 147421B.12331B` — both halves resolve to exact or near symbols:
+
+| address | symbol | what it is |
+|---|---|---|
+| `0o147421` | **`CSTCK` / `5CSTC` + 0** (exact hit) | *"CSTCK: FILE SYSTEM CURRENT STACK POINTER"*, `CC-P2-COMMON.NPL:402` |
+| `0o12331` | `9FLER+4` | SINTRAN's error logger — `5P-P2-MON60.NPL:324`, *"SUBROUTINE TO CALL ERROR LOGGER ROUTINE 9FLER"* |
+
+So the fatal path runs through the **file system**, and 21b puts a file-system INFO inside the CS
+load. That is a coherent thread, and it is emphatically NOT what the checksum-source theory of §19b
+predicted — which is consistent with that fix changing nothing.
+
+### 21e. What this does to sections 14-20
+
+**It reframes them rather than refuting them.** The measurements stand; their SETTING was wrong.
+I was asking "why does `place-domain` not complete" on a machine SINTRAN had already declared dead
+at the prompt. `> Loading Control Store` and `> Loading Swapper` are being driven at a CPU whose
+microprogram the monitor believes is stopped and whose MAR was never latched.
+
+**The methodological failure is RULE #0b, exactly as written:** *decode the actual bytes in order
+and read what is there; a search can only confirm or deny a thing you already imagined.* I grepped
+these transcripts for `Loading`, for `Error`, for `OUTCOME` — never once read the sixty lines
+top to bottom. Four findings were sitting in the part between my greps.
+
+### 21f. The order to work them
+
+ 1. **The pre-command `N5TIMOUT` / `MAR = 0`.** Nothing downstream can be trusted while the monitor
+    thinks the microprogram is stopped. The X5ACT carved-vs-discovered MISMATCH printed by the same
+    run is the obvious first suspect and has a recorded fix direction.
+ 2. **The `0B:6B` file-system INFO during the CS load**, which shares a subsystem with the fatal
+    record's `CSTCK`.
+ 3. Only then the CS-load difference between rounds (#78) and the `place-domain` stall (#79).
