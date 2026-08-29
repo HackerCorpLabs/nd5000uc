@@ -1588,6 +1588,12 @@ Direction is fixed by the handler, not by a flag: **WR copies B→A, RD copies A
 | `0o11` / `0x09` | `3WMED` / `WMEMD` | `MSG_DMEMWR` `0o015355` | Mirror; word loop `MSG_DMEMWRW`, byte tail `MSG_DMEMWRBY` | `[V]` |
 | `0o13` / `0x0B` | `RAMED` | `MSG_RESIRD` `0o015516` | "Resident": **no** `NEWCNTXT`, **no** domain resolve. A pure block copy — no validation, and `TRAPN` is never read | `[V]` |
 | `0o14` / `0x0C` | `WAMED` | `MSG_RESIWR` `0o015534` | Exact mirror of 13B. The swapper image arrives as **44 × 14B** blocks of 2048 bytes | `[V microcode; V live trace]` |
+
+> **MAGNITUDE CAVEAT — added 2026-08-29, and this is the SECOND instance in this document.** `44 × 2048 = 90,112 bytes` does not survive measurement. Re-measured on the working classic lane by OPERANDS: **44 transfers but only 32 DISTINCT addresses**, uniform stride 2048 across all 31 gaps, range `0x00210000..0x0021F800` = **63,488 bytes (64 KB), not 90 KB**. Twelve transfers repeat an address — retries, a second pass, or overlapping regions are all live and none is established.
+>
+> So `44` is the **TRANSFER count, not the block count**. Together with the `8×13B` miss at the stage-split line, treat this as a **property of the document: reliable for WHICH MICFU values carry the swapper and WHAT SHAPE the transfers take — bulk movement at a uniform page stride — and NOT reliable for magnitudes.**
+>
+> **The shape is what discriminates, and it is worth more than any count.** The octobus lane's nearest traffic is 13 transfers of 4 bytes of zeros into a ~48-byte fixed span — a probe. Bulk movement at a page stride versus a fixed-address probe is a difference in KIND, and it was invisible while both sides were being compared by message counts alone.
 | `0o30` / `0x18` | `3PHSR` / `MPHSREAD` | `MSG_PHYSRD` `0o015561` | Copy engine + the 4th halfword param into `D,MM,PHS` | `[V]` |
 | `0o31` / `0x19` | `3PHSW` / `MPHSWRITE` | `MSG_PHYSWR` `0o015600` | Mirror | `[V]` |
 | `0o34` / `0x1C` | `3MONO` / `RMEMP` | `MSG_IMEMRD` `0o015403` | **Instruction-memory read**, not a mon-call variant. Reads the halfword at word 7 first, then checks alignment: low 2 bits non-zero → `MSG_ILLEG` (`0o015406-07`). Ends via `MSG_KILL_P` | `[V]` |
