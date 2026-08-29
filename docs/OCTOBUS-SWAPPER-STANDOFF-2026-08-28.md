@@ -1,9 +1,10 @@
 # The octobus swapper standoff — where `> Loading Swapper` actually stops
 
-> **READ SECTION 12 FIRST (2026-08-29).** This lane REACHED `> Allocating memory` and ran a
+> **READ SECTIONS 12 AND 12c FIRST (2026-08-29).** This lane HAS REACHED `> Allocating memory` and run a
 > domain for 7.5 minutes on 2026-07-31 and again on 2026-08-01. It no longer does. Sections
-> 7-11 characterise a REGRESSION that appeared during August, not a standing property of the
-> octobus lane. The measurements are sound; the framing in those sections is not.
+> 7-11 may therefore be describing a REGRESSION rather than a standing property of the
+> octobus lane - but 12c records why that is still a HYPOTHESIS and what run settles it. The
+> measurements are sound; the framing is not yet earned.
 
 **Created 2026-08-28.** Full path:
 `E:\Dev\Ronny\ND5000UC\docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`
@@ -455,7 +456,7 @@ process queued at `SWPWAIT` — and `trapsAttempted=0` says no trap was ever rai
 is unchanged from section 8 and was never really about the restart: **what should be running that
 would fault, and why is nothing running?**
 
-## 12. THIS IS A REGRESSION. The lane used to reach allocation `[V]` 2026-08-29
+## 12. HYPOTHESIS: a regression. The lane used to reach allocation `[OPEN]` 2026-08-29
 
 The swap-file hypothesis from the previous tick is REFUTED, by the discriminator built to test it:
 with `define-swap-file` skipped entirely, the run stalls in exactly the same place, after
@@ -503,3 +504,40 @@ the lane.
 
 The instruments are worth keeping and the carves are all correct. But the FIRST question about any
 stall should be **"is this new?"**, and the records that answer it were already in the repo.
+
+
+> ## 12c. THE REGRESSION CLAIM IS NOT YET EARNED — I made the same mistake again `[OPEN]` 2026-08-29
+>
+> I checked the lane (correctly — the July records ARE from
+> `Nd100SintranNd5000OctobusBootHarnessTests.cs`, so the octobus lane, not classic) and then
+> promptly attributed a four-way difference to time.
+>
+> The 2026-07-31 record is test **`Nd500SwapFile_CreateAndDefine_Capture`**, with
+> `RETROCORE_NLL_FLOPPY=1` and `RETROCORE_ND5000_RUNTHREAD=1`, on **BIGDISK0-L** with a swap file
+> **created in session**, using **RECOVER-DOMAIN**. Tonight's runs are
+> `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, no floppy, on **DOMS-CSFIX**, using
+> **PLACE-DOMAIN**. That is four differences, and "the date" is the only one I have no evidence for.
+>
+> **So section 12 above is a HYPOTHESIS, not a finding.** It is bannered rather than deleted because
+> the underlying observation — this lane HAS reached `> Allocating memory` and run a domain for 7.5
+> minutes — is real and important either way.
+>
+> Worse, that same July document lists as its **blocker #1**: *"`@SET-AVAIL` was never run before
+> `@ND-500` — with it, RECOVER-DOMAIN stops stalling at Loading Swapper"*. **Stalling at
+> `> Loading Swapper` is the exact symptom that document was written to close.** My runs do issue
+> `set-avail`, so it is not simply missing — but a symptom with a known prior cause deserved that
+> check before I proposed a bisect.
+>
+> **The decisive run, now in flight:** the July configuration exactly —
+> `Nd500SwapFile_CreateAndDefine_Capture` with `RETROCORE_NLL_FLOPPY=1` and
+> `RETROCORE_ND5000_RUNTHREAD=1`, stock pack, on today's code.
+>  - reaches `> Allocating memory` → **there is no regression**; tonight's stall is a property of
+>    the ShortBringup configuration (pack, command, or the missing floppy), and sections 7-12 are
+>    describing that configuration rather than the lane.
+>  - stalls after `> Loading Swapper` → the regression claim is earned and the bisect is the right
+>    next step.
+>
+> **The pattern, three times in one night:** wrong pack read as a machine fault; a state named
+> before reading the code that produces it; and now a multi-variable difference attributed to the
+> one variable I found interesting. Each time the fix was to change ONE thing and re-run, and each
+> time it was available immediately.
