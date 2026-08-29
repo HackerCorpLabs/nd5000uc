@@ -2271,3 +2271,44 @@ So the question is not "why does the swapper not run" — it runs, correctly, an
 
 Per §25e the delivery choice lives in S3SM5, which is disassembled. If that turns out to be
 generation-dependent in SINTRAN's own code, it explains BOTH lanes at once.
+
+---
+
+## 29. The caller histogram survives the check that killed the peer's PST trace `[V]` 2026-08-30
+
+`nd500uc-47` retracted "SINTRAN never writes PST entry 14": all 52 writes carried NO `pc=`, and in
+that tracer a missing pc is a deliberate signal — `NDBusND500IF.Nd100TraceContext` opens with
+`if (CpuND500.Nd500PortBDepth > 0) return 0u;` so an ND-500 Port B access cannot be misread as an
+ND-100 instruction address. 52 of 52 unstamped means those writes were ND-500 side, not SINTRAN's.
+They also flagged that `Nd500PortBDepth` is a **shared static across two threads**, so an ND-100
+write landing while the ND-500 thread is inside Port B would be misattributed anyway.
+
+**That caveat applies to our instrument on its face** — `NDBusOctobus.Nd100WriteContext()` has NO
+`Nd500PortBDepth` guard. Checked rather than assumed, and it does not need one:
+
+ 1. **Structural.** `RecordMpmWrite` has exactly ONE caller in the tree:
+    `Emulated.Machines/ND/ND100/ND100Memory.cs:580`, inside the ND-100 write path. `Nd500PortBDepth`
+    appears only in `NDBusND500IF.cs` (the 3022 card) and nowhere in the octobus path. **There is no
+    code path by which an ND-500 Port B write reaches our log at all** — the ND-500 reaches the same
+    DeviceRAM by a different route that never calls `RecordMpmWrite`.
+ 2. **Behavioural.** All 5,849,918 entries carry `thr=15` — a single managed thread — while the
+    ND-5000 CPU runs on its own thread (`startRunThread=True`). If the ND-500 side were reaching
+    this log, a second thread id would appear. None does.
+
+Two independent confirmations, one static and one measured, which is why §20's caller histogram
+stands where their PST attribution did not. **Not luck: the two instruments have different shapes.**
+Theirs is a RAM-level trace that both ports pass through, so it MUST discriminate by port and can be
+fooled by a racing static. Ours is fed from one CPU's memory path, so the discrimination is
+structural and there is no race to lose.
+
+Worth keeping as a design note: **an instrument placed where only one writer can reach it needs no
+attribution logic, and therefore cannot get attribution wrong.** When a trace has to tell writers
+apart at runtime, that is a signal to move the probe rather than to add a flag.
+
+### 29a. And do not read their `LSWPAGE:84` as a working growable path
+
+They add: on their lane the growable-segment path reports `calls=25 ok=0 noSlot=25`, ending
+*"NO growable segments registered at all"*. So that path is dead on the classic lane too, and their
+84 `LSWPAGE` calls come from somewhere else. §28's discriminator stands — they drive `LSWPAGE`, we
+do not — but **it is not evidence that their growable-segment path works**, and must not be used to
+justify wiring ours to match it.
