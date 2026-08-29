@@ -772,3 +772,64 @@ we have never seen on this lane.
 interesting at the time (the swapper's own state machine), not from an exhaustive grep of the
 symbol. One `grep -n` settles it, and it is the same shape as every other lost fact in this project
 — a correct observation about a subset, recorded as if it were about the whole.
+
+### 14e. 14b's discriminator is REFUTED, and the working lane supplied a better one `[V]` 2026-08-29
+
+`nd500uc-47` added `SwpfuHistogram()` to the classic harness (their commit `a285d75da`) and ran
+`Nd500_LinkageLoader_UnderRealSintran_RealCpu_Capture`. Their number, beside mine (mine read out of
+this session's own run logs, `swpfu[...]` in `%LOCALAPPDATA%\Temp\fullflow-run.txt`):
+
+| SWPFU arm | classic (reaches `> Allocating memory`) | octobus (stalls) |
+|---|---|---|
+| 0 `SWACTIVE` / `ESWPFATAL` | **80** | **0** |
+| 1 `LNEWSWAP` | 112 | 5 |
+| 2 `LSWPAGE` | **84** | **0** |
+| 4 `LALLOPAGE` | **0** | **0** |
+
+**14b was wrong.** I proposed "does classic show a 4?" as the one-number discriminator. Classic
+shows no 4 either, reaches allocation anyway, and so the ABSENCE of `LALLOPAGE` distinguishes
+nothing. Their words, and they are right to have said them rather than let me build on it: *"I'd
+rather tell you that than let you build on a difference that isn't there."*
+
+**What the same table gives instead is a POSITIVE control, which is strictly better than the
+absence argument sections 7-11 were built on.** Two arms separate the lanes:
+
+ - **Arm 2 `LSWPAGE`: 84 on classic, 0 here.** The classic swapper asks for page work. Mine never does.
+ - **Arm 0: 80 on classic, 0 here.** And arm 0 is not what the histogram called it.
+
+### 14f. Arm 0 is `SWACTIVE`, and `SWACTIVE = 0` — the instrument was mislabelling the common case
+
+`SWPFU` has TWO writers using one field in opposite directions:
+
+ - the ND-500 SWAPPER writes its REQUEST code (1 `LNEWSWAP`, 2 `LSWPAGE`, ...) when it calls out;
+ - **the ND-100 writes `SWACTIVE` into `SWMSG.SWPFU` when it HANDS WORK OVER** —
+   `MP-P2-N500.NPL:145011` inside `5ACTSWAPPER`, and again at `133666` in `SWMESS`.
+
+`SWACTIVE = 0` `[V]` — `N5SWAP-SWMSG-FIELD-DOSSIER-RELAY-2026-08-17.md:66` grades it PROVEN against
+L07:3594/3479, and `OCTOBUS-SWAPPER-HANDOFF-2026-07-25.md:2604` gives the same value from L07/K03.
+
+So bucket 0 is dominated by HANDOVERS, not fatals, and the histogram printing `ESWPFATAL:80` invited
+exactly the wrong reading — eighty fatal swapper errors on a run that completed the load normally.
+The peer spotted the shape without the carve (*"zero-as-both-failure-and-sentinel"*) and asked; the
+carve answers it. **Fixed in the shared servicer**, commit `ce809640d`: the label is now
+`SWACTIVE-or-ESWPFATAL`, with the two writers and both line numbers in the remarks, and the stale
+"4 = allocate page is the one that matters" comment at the feed site is corrected in place.
+
+That is instrument-failure mode #7 in a new dress: a bucket that cannot separate "nothing decided
+yet" from "it failed", carrying a name that claimed it could.
+
+### 14g. The question, restated with the positive control
+
+**`SWACTIVE` appears 80 times on the working lane and never on mine.** `SWACTIVE` is written by the
+ND-100, at the moment it hands the swapper a job. So this is no longer "the swapper never asks for
+work" inferred from an absence — it is **the ND-100 never hands this swapper any work**, measured
+against a lane where it hands it work eighty times.
+
+That points at the four `5ACTSWAPPER` callers in 14d rather than at the ND-500 side at all. Next: of
+those four, which one fires 80 times on the classic lane. `5ACTSWAPPER` is shared ND-100 code, so
+whatever gates it is reachable from both transports and is being gated OFF on one of them.
+
+**Caveat the peer raised, kept because it bounds the claim:** one run, and it is not yet confirmed
+whether their histogram is cumulative across two capture passes (the block prints twice with
+identical numbers, which suggests per-pass). The 80/84-vs-0 contrast survives any such factor; the
+exact counts do not, and nothing above depends on them.
