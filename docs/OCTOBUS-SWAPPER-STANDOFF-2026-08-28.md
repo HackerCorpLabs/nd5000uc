@@ -833,3 +833,65 @@ whatever gates it is reachable from both transports and is being gated OFF on on
 whether their histogram is cumulative across two capture passes (the block prints twice with
 identical numbers, which suggests per-pass). The 80/84-vs-0 contrast survives any such factor; the
 exact counts do not, and nothing above depends on them.
+
+### 14h. The dominant handover route on the working lane is `TRAPDECODER`, trap 46 `[V]` 2026-08-29
+
+`nd500uc-47` ran a SWPST census over 40 MON 377B lines on the classic lane (their capture prints its
+diagnostic block TWICE — the first 40 lines are byte-identical to the last 40 — so their raw counts
+were doubled; these are the corrected ones):
+
+| SWPFU | SWPST | count |
+|---|---|---|
+| 0x0000 `SWACTIVE` | **0x000A** | **20** |
+| 0x0002 `LSWPAGE` | 0x000B | 13 |
+| 0x0002 | 0x0010 | 2 |
+| 0x0002 | 0x000C | 2 |
+| 0x0000 | 0x0018 / 0x000F / 0x000E | 1 each |
+
+They read this as the 3SWMESS message fork, on the grounds that no SWPST equals a trap number.
+**That reading is refuted, and the field it rests on cannot discriminate.**
+
+`SWPST` is written by `5ACTSWAPPER` at `145054`, and the fork above it is:
+
+```
+145043      *SWFUN@3 LDATX          % MICFU was 3SWMESS - take SWFUN
+145045      *AAX TRAPN; LDATX       % otherwise a trap (page fault)
+145047      A=:D/\377; *STATX       % TRAPN := its LOW byte only - stripped in place
+145052      A:=D SHZ -10            % A := the HIGH byte
+145054      X:=SWMSG; *AAX SWPST; STATX
+```
+
+and the trap arm reaches it from `TRAPDECODER`:
+
+```
+135332   ELSE IF D = 46 THEN                 % PAGE FAULT   (46 OCTAL - NPL default in this file)
+135361      MSWPFAULT SHZ 10 + D             % (MSWPFAULT << 8) | trapno  ->  TRAPN
+135367      CALL 5ACTSWAPPER
+```
+
+So the trap fork puts a **function code**, not a byte of the trap number, into `SWPST` — and
+**`MSWPFAULT = 0o12 = 10 decimal = 0x0A`** `[V]` (`ND500-MAILBOX-MESSAGE-CATALOG.md:143`,
+`ND500-SWAPPER-ANALYSIS.md:654`, both citing line 135361). Their dominant row, `SWPST=0x000A` 20
+times, is exactly and only what `TRAPDECODER` produces. Their own capture confirms it from the other
+side: they report `TRAPN=0x0026` on those lines, and `0x26` = 38 decimal = **46 octal**, the trap
+number `135332` tests for.
+
+`MSWPFAULT` is itself a member of the `MSW*` namespace (`MSWFI=0`, `MSWSTART=0o7`, `MSWFO=0o10`,
+`MSWIP=0o11`, `MSWPFAULT=0o12`, `MSWME=0o13`, `MSWSWAIT=0o24`, `MSWDO=0o34` max), so **"SWPST is a
+small value in the SWFUN space" is true on BOTH forks and separates neither.** The field that
+separates them is `TRAPN`: the trap fork strips it to its low byte at `145047`, the message fork
+never touches it.
+
+Reading of the rest, `[D]` not `[V]`: the other SWPST values (`0o13`, `0o14`, `0o16`, `0o17`, `0o20`,
+`0o30`) are the message fork carrying `SWFUN`, so **both forks are live on the working lane**, with
+the page-fault one dominant at half the traffic.
+
+**What it buys.** 14d left four call sites as equal candidates. The working lane says the dominant
+one is **`135367` — `TRAPDECODER`, trap 46** — which is one of the seven addresses armed in
+`ArmSwapperHandoverWatch()`. The run in flight now has a specific prediction to fail against.
+
+**Method note, and it is the second time today.** Their test was well-formed and its premise was
+wrong: it asked whether `SWPST` looks like a piece of the trap number, when the packing puts a
+function code there. An instrument aimed at the wrong field returns a clean, confident answer — the
+same shape as the `SWPFU=4` discriminator I asked them for, which also returned cleanly and meant
+nothing. **Ask what a null result would tell you before you ask for the measurement.**
