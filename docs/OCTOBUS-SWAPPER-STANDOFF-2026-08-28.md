@@ -2211,3 +2211,63 @@ the inference here runs the other way (behaviour implies it is set). And note th
 independently of all this: `063155` is `DO *IOXT WHILE A NBIT 3 OD`, a spin on bit 3 with no visible
 timeout — if a card never raises bit 3 that hangs INSIDE the presence probe. Our machine plainly
 gets past it, so it is a robustness note, not this bug.
+
+---
+
+## 28. CORRECTION to §25, and the real discriminator is `LSWPAGE` `[V]` 2026-08-30
+
+### 28a. §25 was half wrong: `3START` IS sent
+
+§25 said our lane sends "no 21B, no 23B". **The 23B half is wrong.** It was read off the MICFU
+*trace listing*, which is capped. The harness state line carries the COMPLETE histogram:
+
+```
+micfu[1B:87  12B:1  23B:1  24B:1  31B:13]
+startSeen=1  startMicfu=23B  startTaken=True
+swpfu[LNEWSWAP:2]  ansMON=377B  ansSWPFU=1B
+PC=0x08008255  stopMode=WAIT  restarts=1/1
+```
+
+`3START` (23B) is sent AND taken, and `3MONCO` (24B) arrives. **What is genuinely absent is 13B and
+14B — zero of each — and 21B.** The "no swapper image delivery" conclusion stands; the "the swapper
+never starts" half does not.
+
+**How the error happened, because the shape recurs:** a capped listing and an uncapped counter
+disagreed, and I read the listing. Same family as §17 (a capped write log read as a whole run).
+**When a trace and a counter disagree, the counter is usually right and the trace is usually
+truncated** — check the cap before believing an absence in a listing.
+
+### 28b. The discriminator: `LSWPAGE`
+
+`nd500uc-47`'s SWPFU histogram against ours, same phase:
+
+| | SWACTIVE/ESWPFATAL | LNEWSWAP | **LSWPAGE** |
+|---|---|---|---|
+| classic (reaches `> Allocating memory`) | 80 | 118 | **84** |
+| ours | — | 2 | **0** |
+
+**They drive `LSWPAGE` 84 times. We drive it zero.** `LSWPAGE` (SWPFU=2) is the page-in request —
+the actual swapping work.
+
+### 28c. This corrects a note in our own plan
+
+`PLAN.md` recorded: *"`SWPFU=4` (`LALLOPAGE`) is not a discriminator — the working lane never asks
+for it either."* The peer's histogram CONFIRMS that (neither lane uses 4). But the whole SWPFU
+question was framed around `LALLOPAGE`, and `LSWPAGE=2` — where the lanes actually diverge — was
+never looked at. **A correct fact about the wrong field**, which is a quieter failure than a wrong
+fact and survived longer for exactly that reason.
+
+### 28d. The picture, now coherent
+
+Our swapper **does** start (3START taken), asks `LNEWSWAP`, is told there is nothing to do, and
+parks at `PC=0x08008255 stopMode=WAIT`. That is the DESIGNED idle, not a fault — the harness's own
+MON-restart note says so. Nothing ever queues `LSWPAGE` work for it, and nothing ever delivers the
+image (no 13B/14B). **Those are plausibly ONE fault, not two:** no page-in requests and no image
+delivery are the same absence seen from two ends.
+
+So the question is not "why does the swapper not run" — it runs, correctly, and idles. It is:
+
+> **Why does SINTRAN queue no `LSWPAGE` work and send no 13B/14B on the octobus lane?**
+
+Per §25e the delivery choice lives in S3SM5, which is disassembled. If that turns out to be
+generation-dependent in SINTRAN's own code, it explains BOTH lanes at once.
