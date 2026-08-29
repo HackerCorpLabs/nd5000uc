@@ -1816,3 +1816,68 @@ B1 is closed with a root cause. What is genuinely open and upstream is now:
     reaches `> Allocating memory`.
  3. **B6** — `hw-cpu` fails the CS load where macro succeeds.
  4. **B2** — the `0B:6B` file-system INFO during the CS load, sharing a subsystem with B8's `CSTCK`.
+
+---
+
+## 24. B7 IS THE VERIFY-BLOCK SEAM, and the 3WREG theory is refuted `[V]` 2026-08-30
+
+`nd500uc-47` (classic 3022 lane) proposed that our `> Loading Swapper` -> no `> Allocating memory`
+stop is the servicer's deliberate `3WREG` refusal. Checked in one field, and it is not.
+
+### 24a. The gate is real, and unreachable
+
+`Nd500MicrocodeServicer`, `case N5MicroFunction.RegisterWrite` (21B = 3WREG):
+
+```csharp
+// ND500-only: MSG_ILLEG in both 5800 listings (B30 @015245, A30 @014261)
+// -> the ND-5000 answers 5ERANSWER like the hardware.
+if (Generation != Nd500Generation.ND500) { understood = false; break; }
+```
+
+and `OctobusND5000Station.cs:665` does construct the servicer with `Nd500Generation.ND5000`, so the
+refusal WOULD fire. **But `3WREG` never arrives.** The complete MICFU set for a whole macro run is
+three functions and no more:
+
+```
+MICFU=0x01 3RMICV(1)      MICFU=0x0A CACHE(12B)      MICFU=0x19 PHYSWR(31B)
+```
+
+No 21B, no 23B (`3START`), and no 13B/14B (`RESIRD`/`RESIWR`) — the documented ND-5000
+swapper-delivery path. **The refusal is not the blocker; the ABSENCE of the message is.** Note for
+whoever touches that gate: it is currently unreachable on the 5000 generation for this reason, so a
+test of it would be measuring nothing.
+
+### 24b. What the lane actually does — and it reproduces a question already on file
+
+Every `PHYSWR` in the run, deduplicated, in address order:
+
+```
+addrA=0x00000096 addrB=0x0000CC00 nrbyt=4      addrA=0x000000B2 ...
+addrA=0x0000009A ...                            addrA=0x000000B6 ...
+addrA=0x0000009E ...                            addrA=0x000000BC ...
+addrA=0x000000A2 ...                            addrA=0x000000C0 ...
+addrA=0x000000A6 ...                            addrA=0x000000C4 ...
+addrA=0x000000AA ...   addrA=0x000000AE ...     (28 PHYSWR total, 12 distinct targets)
+```
+
+That is, verbatim, the block recorded in `nd5000-octobus-research` /
+`OCTOBUS-MAILBOX-MICFU-SEQUENCE-REFERENCE-2026-07-28.md`:
+
+> *"start-swapper performs a write-then-read-back VERIFY of 13 words over ND-500 physical
+> `0x96..0xC4`, which COMPLETES AND PASSES - and then SINTRAN issues nothing but watchdogs and never
+> sends `3START`, so the CPU stays `PC=0 stopMode=WAIT`. Identifying that block is the open
+> question."*
+
+**So B7 is not a new bug. It is that open question, reproduced exactly on the current pack with the
+current code.** The verify passes; the next message never comes.
+
+### 24c. The one measurement that would settle it
+
+The classic lane REACHES `> Allocating memory`. So the divergence is a single message: whatever
+that lane sends immediately after its equivalent verify block, which ours does not. Asked
+`nd500uc-47` for the complete unfiltered message sequence between `> Loading Swapper` and
+`> Allocating memory` — MICFU, N5STA, and `addrA`/`addrB`/`nrbyt` for the copy family — plus the
+raw bytes written to `0x96..0xC4` so content can be compared, not just addresses.
+
+That is a byte dump in issue order, deliberately not a grep: a grep can only confirm a message one
+of us already thought of, and the whole point is that our lane is missing one we have not named.
