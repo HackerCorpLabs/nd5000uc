@@ -1078,3 +1078,82 @@ against the linked image. They are the only labels in this file that exist in bo
 
 `ListingToLinked = 0x80` in the harness is therefore verified for this module over the range it is
 used on, and nowhere else.
+
+---
+
+## 16. The 5MPM write log had NO caller context, and the "existing switch" was on the other card `[V]` 2026-08-29
+
+### 16a. What the log said, and what it could not say
+
+`sintran-octobus-mpm-writes-octobus-shortbringup.txt` (1,000,000 lines, at the cap) over the
+harness window `[0x420000..0x460000)`:
+
+| what | count |
+|---|---|
+| writes carrying zero | 851,796 |
+| writes carrying non-zero data | 148,204 |
+| of those, inside the single 4 KB page `0x45A000` | 98,194, across **4096 distinct addresses** |
+
+Every address in that one page is rewritten roughly 24-28 times with real content, and the zero
+traffic is a linear byte-ascending zero-fill. Read `[D]`: a 4 KB page rewritten two dozen times with
+real content is a **buffer being reused**, not an image being laid down — consistent with SINTRAN
+reading the swapper file off disc into an ND-100 buffer while the step that pushes it into ND-500
+memory never happens.
+
+**But that is where the log stops.** Every line is `W <addr>=<val>`. There is no writer identity in
+it, so it can prove a frame was rewritten and cannot name a single writer. This is taxonomy #7 in
+plain form: a number that can only be believed.
+
+### 16b. The plan said "enable the existing switch". The switch was not on this card.
+
+The recorded next step was: *enable the caller-context stamping that already exists (commit
+`94c81a4c7`, "let a traced RAM stamp caller context on each access") and re-run — one harness switch,
+not new code — **CHECK IT IS WIRED before assuming it works**.*
+
+Checked. It is not wired here, for two independent reasons:
+
+ 1. `94c81a4c7` touches `Emulated.HW/Memory/MpmAccessTrace.cs` and
+    `Emulated.HW/ND/CPU/NDBUS/**NDBusND500IF**.cs`. `NDBusND500IF` is the **3022** card. Nothing in
+    that commit goes near `NDBusOctobus`.
+ 2. `NDBusOctobus.InitializeSharedMemory` allocates a **plain `RAM`**, not a `TracingRam`:
+    ```csharp
+    _deviceRam = new RAM(startAddress, size, $"Octobus_SharedRAM_{MemoryName}");
+    ```
+    So `TracingRam.ContextSource` — the field the commit added — has no instance to be set on in this
+    lane at all. The octobus log is fed instead from `ND100Memory`'s write path into
+    `NDBusOctobus.RecordMpmWrite`, a completely separate mechanism.
+
+**Neither of those is visible from the commit message**, which describes the capability in
+card-neutral language. Had the switch simply been flipped, the run would have produced a log
+identical to the one before it and the absence of context would have read as "the writer has no PC",
+which is a statement about the plumbing wearing the clothes of a statement about SINTRAN. This is
+the same shape as §15's filter problem, one layer down.
+
+### 16c. What was built instead
+
+The context stamp now lives on the octobus's own never-evicted `_writeLog`, which is the log that
+actually produced the file above:
+
+ - `NDBusOctobus._writeLog` entries are now `(uint Addr, ushort Val, **uint Ctx**)`, where `Ctx`
+   packs `CpuND100.DiagCurrentPC` in the low half and `CpuND100.DiagCurrentPIL` in the high half —
+   the same shape `NDBusND500IF.Nd100TraceContext` uses, so the two cards report comparably.
+ - **The PIL is carried, not just the PC.** SINTRAN runs its disc driver and its swapper on
+   different interrupt levels, so the level separates "the program did this" from "a driver did
+   this" even when both land in shared code. That distinction is the whole question here.
+ - The harness prints `pc=<octal>B pil=<n>` on every line. **Octal, because every SINTRAN symbol
+   table and every `l07-kallsyms.txt` address is octal** — a hex PC guarantees a hand conversion as
+   the next step, and §15's listing-vs-linked lesson says radix conversions by hand are where this
+   investigation loses days.
+ - A **writer histogram** keyed on `(pc, pil)` is printed with the top 15 sites, and — the part that
+   matters — a line comparing the histogram's total against the log's total:
+   ```
+   histogram total=<n> log total=<n> [consistent]   (or [MISMATCH - do not trust])
+   ```
+   Taxonomy #7 again: one count cannot be checked, a count with a denominator that must agree can.
+
+Both accuracy caveats are carried in the source comments: `DiagCurrentPC`/`DiagCurrentPIL` are plain
+statics updated by the ND-100 instruction loop, so a cross-thread read can be torn or one
+instruction stale. Good enough to answer *which routine*, and explicitly **not** good enough for
+exact instruction attribution.
+
+Build green. The result of the re-run belongs in the next section.
