@@ -10,9 +10,9 @@ in the dated evidence records; this is what is left and how to attack it.
 
 ## Next
 
-**#56 step 1 is running** — the `5ACTSWAPPER` call-site table, on addresses verified against
-`l07-kallsyms.txt`. It decides between the three shapes in A2. Nothing else here should start until
-it lands.
+**A3 — why does the ND-500 never raise a page fault on this lane?** That is the blocker, and it is
+on our side of the fence. First job is #77: make the round-2 harness (microword B30 + real 68k ACCP)
+runnable, because the standing rule below says no conclusion is reported from the macro round alone.
 
 ---
 
@@ -54,57 +54,66 @@ do not re-read the servicer.
 
 ---
 
-# A. #56 — the octobus swapper is never handed work  (BLOCKS EVERYTHING BELOW)
+# A. #56 — no page fault is ever raised on the octobus lane  (BLOCKS EVERYTHING BELOW)
 
 Every other octobus item is downstream. Do not start B, C or D while A is open.
 
-### A1. What is established, as a causal chain
+### A1. MEASURED 2026-08-29 — macro round, table self-consistent
 
 ```
-our ND-500 posts NO page-fault trap        (trapsAttempted = 0, measured)
-   -> SINTRAN's TRAPDECODER never runs
-   -> 5ACTSWAPPER is never called
-   -> SWMSG.SWPFU is never set to SWACTIVE  (0 here; 80 on the working lane)
-   -> the swapper is never given work
-   -> it asks LNEWSWAP forever and parks at PC=0x08008255
-   -> place-domain never prints "> Allocating memory" and stalls
+INVARIANT callers=1 entry=1 outcomes=1 (bailed=0)  [consistent]
+
+  call:MSWSWAIT-tail           @0o134354  hits=0
+  bail:NOT-BSWSTARTED          @0o135551  hits=0
+  call:TRAPDECODER-pagefault   @0o135567  hits=0
+  call:SWPD4-fifo-drain        @0o136237  hits=1     <- the only caller
+  call:SWMC-mon510             @0o142165  hits=0
+  5ACTSWAPPER-entry            @0o145162  hits=1
+  HANDOVER-taken-SWACTIVE      @0o145211  hits=1     <- it DID hand over, once
+  queued-on-swapwait-fifo      @0o145312  hits=0
 ```
 
-Every arrow is carved or measured. **The left end is on OUR side of the fence** — the emulator is
-not producing the trap; SINTRAN is not refusing to act on one.
+All hits `PIL=12`, link registers chain correctly, addresses verified against `l07-kallsyms.txt`.
 
-### A2. The fork the running table decides
+**This corrects the chain this section used to state.** It is NOT "the swapper is never handed
+work". `5ACTSWAPPER` runs, the swapper is seen free, and `SWACTIVE` IS written — once, via the
+`SWPD4` FIFO drain. What never happens is the route that keeps feeding it:
 
-| table shows | meaning | next move |
-|---|---|---|
-| **some caller fires** | something DOES reach `5ACTSWAPPER`, and it declines or queues | read the outcome pair: `HANDOVER-taken` vs `queued-on-swapwait-fifo`. Queued means the swapper was not at `PSWWAIT` at that instant — a race, not a gate |
-| **all four callers zero** | nothing upstream ever asks | the question moves off the swapper entirely, to A3 |
-| **INCONSISTENT printed** | the addresses are still wrong | re-pin against kallsyms before reading a single cell. Do NOT quote the table |
+```
+our ND-500 raises NO page fault      (trapsAttempted = 0; TRAPDECODER call site AND its bail both 0)
+   -> TRAPDECODER's trap-46 arm is never REACHED
+   -> the only handovers are the one-off FIFO drain
+   -> the swapper asks LNEWSWAP and parks at PC=0x08008255
+   -> place-domain never prints "> Allocating memory"
+```
 
-### A3. If nothing asks — the real question, and the primary suspect
+The working classic lane hands over ~80 times. **The left end is ours: the emulator is not raising
+the fault. SINTRAN is not refusing to act on one.**
 
-Then `place-domain` is blocked before any faulting begins and the swapper is idle *correctly*.
-Two candidates, in the order to test them:
+### A2. Refuted by that table
 
-1. **`BSWSTARTED` is never set.** `TRAPDECODER` bails before it ever reaches `5ACTSWAPPER`:
-   ```
-   135342   IF 5INITFLAG BIT BRESPLACE OR "N500DF".SYSINITFLAG NBIT BSWSTARTED THEN
-   135351      X:=L; CALL 5RRTWT; GO NXTMSG        % restart the ND-100 proc, handle next
-   ```
-   **The short bring-up deliberately never runs `START-SWAPPER`** (it hangs the monitor — a separate
-   known failure). If SINTRAN therefore believes the swapper was never started, EVERY page fault
-   takes this bail and none reaches the swapper. Cheapest to test, best fit to the evidence.
-   **How:** arm the bail address (`0o135351` + `0o200`) beside the call site. *Reached and bailed*
-   and *never reached* are different cells, and the current arming cannot tell them apart.
-   **Add it before the next run.**
-2. **The monitor is blocked in a MON 60 subfunction that never answers** — in which case nothing
-   about the swapper is involved. **How:** capture the last MON 60 subfunction issued before output
-   stops; the harness already brackets every monitor command in its crash breadcrumb.
+ - **`BSWSTARTED` is NOT the blocker** (`bailed=0`). It was the primary suspect and the best fit to
+   the evidence available; it is wrong. There was nothing to bail on, because the arm is never
+   reached.
+ - **`5ACTSWAPPER` is not broken**, and neither is the swapper. Both behave correctly at every
+   measured point.
+
+### A3. THE QUESTION — why is no page fault raised?
+
+Why does our ND-500 never fault here when the classic lane faults constantly?
+
+ - **Run BOTH rounds** (standing rule above). Note the exception: the ND-5000 MMU walk is HARDWARE,
+   so round 2 does not answer this on its own — the MMS model is ours on both paths. Read round 2
+   with `ND-05.020.01` beside it.
+ - **Measure, do not reason.** Instrument the MMS translate path and count translations, hits,
+   misses and faults RAISED. **A fault never raised and a fault raised-then-swallowed look identical
+   from outside**, so a single counter cannot separate them — give it the pair.
+ - Compare the same counters against the classic lane, which faults. A difference in translation
+   COUNT is a different bug from a difference in fault-raise RATE.
 
 ### A4. Fix at the cause, not the symptom
 
-Wherever it lands, the fix belongs at the LEFT end of A1's chain. Resist "make `5ACTSWAPPER` run" —
-it and the swapper are behaving correctly at every point measured so far.
+The fix belongs at the left end of A1's chain. Resist "make `5ACTSWAPPER` run" — it already does.
 
 ### A5. Do NOT redo these
 
@@ -112,12 +121,14 @@ Measured, refuted or done. Evidence: `docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.m
 
  - The stall is **not** new (same state recorded 2026-08-27) and **not** bisectable — the history
    does not build; the diff read is the wrong instrument.
+ - "It is a regression" is **NOT established.** The last run that reached `> Allocating memory` was
+   2026-08-01 from an UNCOMMITTED working tree, and the harness has changed since — so a code
+   regression is not separated from a harness change. I claimed it this morning and had to narrow it.
  - The swap file is not the variable. Skipping `define-swap-file` gives an identical stall.
- - The harness has not switched to the microword CPU; `AttachNd5000Cpu` still builds a functional
-   `CpuND500`.
  - `SWPPING` is ND-100 bookkeeping; our chain walk is right to skip it.
  - `SWPFU=4` (`LALLOPAGE`) is **not** a discriminator — the working lane never asks for it either.
  - MON 377B is not a swapper-activation call, and `SWPST` cannot pick a fork.
+ - `BSWSTARTED` — refuted above.
  - Do not carve more microcode for this, and do not re-measure the stall.
 
 ---
