@@ -139,3 +139,28 @@ that read as a bug in the guest program.
 
 - RetroCore DAP: TCP port 4711 (skill `retrocore-dap-mcp`); nd500x DAP: `--dap [port]`, default 4500.
 - Real machines: retroterm MCP (`terminal_connlist` has the ports). Never hand-roll telnet.
+
+## ND-100 CPU instruments (`CpuND100`, static, NOT environment variables) — added to this file 2026-08-29
+
+These are **static fields on `CpuND100`**, armed from a test rather than from a variable or a config
+key, which is why searching this file for a switch name never found them. They were built for the
+GSWSP hunt (2026-08-20) and re-discovered on 2026-08-29 while about to build a third one.
+
+| Instrument | What it does | When to use |
+|---|---|---|
+| `CpuND100.DiagPcWatchAdd(pc, name)` | up to **8** named ND-100 addresses, each with a hit count, plus registers + PIL for the first `DiagPcWatchLogMax` (60) hits. `DiagPcWatchReset()` clears and disarms | **"Is this SINTRAN routine ever entered, and which exit does it take?"** — the answer without an instruction trace, which the boot would drown. Arm the CALL SITES as well as the routine, or "a caller never reached" reads identically to "the routine declined" |
+| `CpuND100.DiagInstrTrace` / `DiagInstrLog` | ordered instruction log | only around a located window; the boot runs hundreds of millions of instructions |
+
+**Three things that will bite:**
+
+ - **The counters are STATIC.** A second test in the same process inherits the first one's totals.
+   Call `DiagPcWatchReset()` before arming, every time.
+ - **It matches the 16-bit PC ONLY.** The same address on another level, or under another page
+   table, counts as a hit. The recorded **PIL** is what says whether it was the routine you meant —
+   level 12 is the ND-500 driver level.
+ - **Eight slots, no dictionary**, deliberately: the armed path is a linear scan on every
+   instruction, and a hash lookup there would be far too expensive.
+
+Worked example in `Emulated.Tests\ND100\Nd100SintranNd5000OctobusBootHarnessTests.cs`,
+`ArmSwapperHandoverWatch()` — the four `5ACTSWAPPER` call sites plus the routine and both of its
+outcomes, seven of the eight slots, for the octobus swapper-handover question (task #56).
