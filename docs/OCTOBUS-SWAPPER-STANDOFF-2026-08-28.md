@@ -1157,3 +1157,48 @@ instruction stale. Good enough to answer *which routine*, and explicitly **not**
 exact instruction attribution.
 
 Build green. The result of the re-run belongs in the next section.
+
+### 16d. Reading the histogram: two traps in the symbol lookup itself `[V]` 2026-08-29
+
+The histogram prints PCs. Turning a PC into a routine name has two failure modes here, and the
+first attempt hit both:
+
+ 1. **`l07-kallsyms.txt` is HEX; the harness prints OCTAL.** The file's lines look like
+    `0xCFCD T ENDOP`. Feeding it octal-parsed addresses returns nothing, or worse, returns a
+    plausible neighbour.
+ 2. **1,420 of the addresses in that table carry MORE THAN ONE symbol** — 9% of its 15,799 lines.
+    Two runs of a one-name lookup returned `CEESC` and then `MOTRO` for `0o75676`, and `3FFTP` then
+    `3FTYP` for `0o147507`. Both pairs are aliases at a single address and the choice between them
+    was arbitrary sort order. A name picked that way is not wrong-looking — it is a real symbol at
+    the real address — so nothing about the output signals that a coin was flipped.
+
+The octobus skill already says this in as many words: *"DUMP THE SYMBOLS KEEPING ALIASES —
+de-duplicating by value discards the informative one."* The resolver at
+`$CLAUDE_JOB_DIR/tmp/pcsym.py` now prints every alias joined with `/`, so
+`0o75706` resolves as `CEESC/MOTRO+8` and the ambiguity is visible instead of hidden.
+
+**Worked example, from the wrong-pack run** (teardown-dominated, so useful only as a shakedown of
+the instrument — NOT as evidence about bring-up):
+
+```
+  pc=0o60716 pil=0  writes=262144  T135W+2 @0o60714
+  pc=0o60717 pil=0  writes=262144  T135W+3 @0o60714
+  pc=0o147703 pil=1 writes=166430  ST0PS+40 @0o147633
+  pc=0o75706 pil=11 writes= 92160  CEESC/MOTRO+8 @0o75676
+  ...
+  histogram total=1000000 log total=1000000 [consistent]
+```
+
+Two things are readable at a glance that no previous version of this log could say:
+
+ - `ST0PS` is **`ST0PSYS`, the shutdown path**, and it plus its neighbours account for well over
+   200,000 writes. A histogram dominated by teardown says nothing about bring-up.
+ - **The log is AT ITS CAP** (`1000000` is the built-in limit, not a coincidence), and the single
+   two-instruction loop `T135W+2/+3` at PIL 0 spends **524,288 of the budget — 52%**. This is
+   taxonomy #12 exactly: a bounded evidence budget spent by noise.
+
+**Consequence, stated plainly: the earlier `0x45A000` figures in §16a were counted inside a
+TRUNCATED window.** "98,194 non-zero writes across all 4096 addresses, every address rewritten
+~24 times" is a count over the first million logged writes, not over the run. The `[D]` reading of
+it as a reused buffer may still be right, but it is not yet supported — it has to be re-counted on
+a log that did not saturate before it means anything.
