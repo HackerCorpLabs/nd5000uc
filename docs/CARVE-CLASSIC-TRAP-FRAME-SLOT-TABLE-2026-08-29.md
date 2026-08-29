@@ -1,5 +1,39 @@
 # The classic ND-500 trap frame: both directions, carved from the store
 
+> # RETRACTED IN PART, 2026-08-29, SAME DAY
+>
+> **The slot ORDER below is right. The BASE is WRONG, and so is everything I built on it.**
+>
+> I claimed `BM#2 = 4`, hence base `B+20`, hence slot 1 (P) at `B+20` and slot 2 (L) at `B+24`.
+> `nd500uc-47` applied that, broke two documented tests, and reverted. They were right, and the
+> evidence was there to be read: **ND-05.009.4**, Figure 19 and `B.arg1`.
+>
+> What the manual actually says, all `[V]`:
+>  - Figure 19: the local data field is `Trapping P (1 word)` FOLLOWED BY `Copy of register block`.
+>    Trapping P is NOT in the block - it precedes it.
+>  - `B.arg1 = Trapping P and the rest of the register block as numbered in chapter 2`.
+>  - `The P register saved in B.ARG2 holds the address of the instruction to be executed when the
+>    trap condition has been taken care of.`
+>
+> So **arg1 = Trapping P (a separate word), and arg2 = the saved P = the RESUME address, which is
+> the FIRST word of the register block.** The microcode agrees exactly: the block loop writes
+> `A,P` into its slot 1, and the manual calls that word `B.arg2`.
+>
+> **Therefore microcode slot 1 IS arg2, not arg1.** With arg1 at `B+20` and arg2 at `B+24` - the
+> layout RetroCore already uses, which passes both documented tests and keeps LED out of an
+> infinite trap loop - the block base is `B+24`, so `BM#2 = 0` and my `4` is refuted. Slot 2 (L)
+> sits at `B+28`, not `B+24`.
+>
+> **How I got it wrong:** I graded `BM#2 = 4` as `[D]` from our own engine plus a suggestive
+> pointer-stride, said out loud that our engine predicting our own observation is not independent
+> evidence - and then leaned on it anyway. A `[D]` was allowed to overrule a manual I had not gone
+> looking for. It was in-repo the whole time, under `NDInsight\Reference-Manuals\`.
+>
+> **`[OPEN]` and worth chasing:** the microcode loop runs `LC := 035` = 29 iterations and the
+> dispatch table has 29 arms, but Figure 19 calls the register block **39 words**. Those do not
+> agree and I have not reconciled them. Do not treat 29 as the frame size.
+
+
 Source: `E:\Dev\Repos\Ronny\ND110Compile\ND110Compile\uCode\CONT-STORE-10611.LISTING.TXT` — the
 vendor round-trip listing, one line per microword, octal addresses. Everything below is `[V]` unless
 marked otherwise.
