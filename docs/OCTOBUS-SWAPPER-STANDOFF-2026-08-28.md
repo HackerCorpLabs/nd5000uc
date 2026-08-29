@@ -618,3 +618,48 @@ harness drives it differently now". Both are code, and both changed.
    30-minute probes if discovered on probe six.
 
 `[OPEN]`.
+
+
+## 13. The bisect is NOT VIABLE: the history does not build `[V]` 2026-08-29
+
+Two probes in a detached worktree (`git worktree add --detach`, so the shared tree the other session
+is working in was never touched):
+
+| probe | commit | result |
+|---|---|---|
+| the "good" end | `ad1d18c16` 08-02, the commit that first carries the July test | **16 build errors** — the test references `SintranLayer.Mon50Count`, `ND100Machine.FindDiscControllerSmd` and others that do not exist at that commit |
+| the midpoint | `5140889ec` 08-18 | **3 build errors** — `XmsgClient.PostMultiCall` signature mismatch, unrelated to ND-500 or octobus |
+
+Both failures are the same shape: a file committed against a version of the library it does not
+match. **Commits in this range are not individually buildable**, so a bisect over them cannot run,
+and patching each probe enough to compile would change the code under test — which is the one thing
+a bisect probe must not do.
+
+This is the outcome 12f named in advance, arriving on probe one instead of probe six. Writing it
+down before starting is what made a two-probe stop cheap instead of a six-probe one.
+
+### 13a. What to do instead
+
+The runtime comparison is exhausted for now — sections 7-12 measured the stall thoroughly and
+correctly, the swap file is refuted, the CPU-kind explanation is refuted, and the history cannot be
+run. What is left is **reading the diff** over the servicer, octobus and ND-100 machine paths
+between `ad1d18c16` and HEAD, looking for a behavioural change in what happens after the swapper
+loads.
+
+Two candidates worth reading FIRST, both because they change defaults rather than logic and so would
+not show up as an obvious bug:
+
+ - `b066f83b2` "Snapshot before the env-var to config migration" — a migration that moves behaviour
+   from environment variables into config is exactly the shape that silently changes a default.
+ - `8faa83da7` "ND-500: production wiring for attached CpuND500 + config-driven identity" — same
+   shape, on the CPU identity.
+
+**Do not** resume microcode carving for this, and do not re-measure the stall. Both are done.
+
+### 13b. Worth saying plainly
+
+The stall was characterised in detail, four wrong interpretations of it were caught and retracted,
+three instruments were given the denominators they needed, and the cause is still not found. What
+changed is that the question is now small and well-posed - *what in this tree, between 2 August and
+now, stops the swapper being given work* - instead of the open-ended "why does the octobus lane not
+run a domain" it started as.
