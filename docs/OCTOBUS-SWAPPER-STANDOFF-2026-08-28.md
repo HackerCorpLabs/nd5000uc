@@ -1955,3 +1955,103 @@ Record the ORDER and the VALUES: if `5MBBANK` is written once, early, from a sma
 `5FPMAILBOX` is written again later with nobody recomputing `5MBBANK`, that is the bug. If both are
 written together and still disagree, the arithmetic model above is wrong and it is the model that
 needs fixing first.
+
+---
+
+## 25. THE OCTOBUS LANE NEVER DELIVERS THE SWAPPER IMAGE AT ALL `[V]` 2026-08-30
+
+`nd500uc-47` dumped its complete PLACE-DOMAIN message sequence in issue order, unfiltered. It
+inverts §24c's question and answers something better.
+
+### 25a. Classic lane, complete MICFU run-sequence, `> Loading Control Store` -> `> Allocating memory`
+
+```
+ 14x  0x0B  ResidentRead        (13B)
+ 44x  0x0C  ResidentWrite       (14B)
+  1x  0x0A  CacheControl        (12B)
+  1x  0x11  RegisterWrite       (21B = 3WREG)
+  3x  0x0F  DepositRegister     (17B)
+  2x  0x13  StartProcess        (23B = 3START)
+  1x  0x14  MonitorCallContinue (24B)
+  1x  0x13  StartProcess
+  6x  0x14  MonitorCallContinue
+  1x  0x11  RegisterWrite
+  1x  0x19  PhysicalWrite       (31B)     <- ONCE, and AFTER 3START
+  1x  0x14  MonitorCallContinue
+```
+
+### 25b. Ours, same phase, complete
+
+```
+  0x01  3RMICV      (watchdog)
+  0x0A  CACHE  12B  (once)
+  0x19  PHYSWR 31B  x28, 12 distinct targets, nrbyt=4, ND-500 phys 0x96..0xC4
+```
+
+**No 13B. No 14B. No 21B. No 23B.**
+
+### 25c. What that means, and it is not what §24 guessed
+
+§24c asked "what message follows the verify block". Wrong question. **The classic lane delivers the
+swapper image with 58 ResidentRead/ResidentWrite messages (13B/14B) and uses `PHYSWR` exactly ONCE,
+AFTER `3START`.** Our lane uses `PHYSWR` for 4-byte pokes and never issues a single 13B/14B.
+
+So our lane **never delivers the swapper image at all.** The 12 `PHYSWR` at `0x96..0xC4` are a
+verify block, not a load — 4 bytes each, 48 bytes total, against a swapper `PSEG` of 38,161 bytes
+and `DSEG` of 218,117 bytes on the pack.
+
+**And this is exactly the split this project already wrote down**, in `CLAUDE.md`, quoting the deep
+dive verbatim:
+
+> *"The swapper delivery uses 13B/14B (measured live: 8x13B, **44x14B**); PLACE+RUN uses 30B/31B."*
+
+The peer measured **44x 14B** — the same number, independently, on a different lane today. The
+document is right, our lane is on the wrong side of the split, and the fact was on file the whole
+time.
+
+### 25d. The corroboration that makes the classic dump trustworthy
+
+The `ResidentWrite` bodies are consecutive and differ in EXACTLY one halfword:
+
+```
+#1875057  |08: A000 0021 2400 0800 ...
+#1875075  |08: A800 0021 2400 0800 ...
+```
+
+`A000 -> A800` = **+0x800 = one 2048-byte page**. That is an image being walked page by page, which
+is what a swapper load looks like and what 28 fixed 4-byte pokes do not.
+
+*(Deliberately NOT inheriting the peer's field reading: they declined to say which halfword is
+source and which is destination because the catalog's "32-bit address at offsets 7-10B" is
+unverified against these bytes. Correct call - that decode is ours to do.)*
+
+### 25e. The question, restated correctly
+
+**Not** "why does the swapper not start" and **not** "what message comes after the verify". It is:
+
+> **Why does SINTRAN choose the `PHYSWR` path instead of `RESIRD`/`RESIWR` for the swapper image on
+> the octobus lane?**
+
+The peer's instinct is right that this is answerable in SINTRAN's own code rather than ours. First
+carve results:
+
+ - the delivery MICFU is NOT set in the resident modules — every `*MICFU@3 STATX` in
+   `MP-P2-N500.NPL` / `CC-P2-N500.NPL` / `RP-P2-N500.NPL` writes `3MONCO`, `3START`, `3RMED`,
+   `3RMICV` or `3WMONCO`. None writes 13B/14B or 31B.
+ - `WPHSG` is **MON 60 subfunction 110B** (`i_wphsg`: bytecount > 4000B -> `EBIGBUF`, `frusmove`
+   from the user buffer, then the common path with function `0110`) — a USER-invoked
+   write-into-physical-segment, not a swapper loader.
+ - so the choice lives in **S3SM5**, which IS disassembled
+   (`030-S3SM5.dis`, 1.53 MB, + the routine map + `FUNCS-BODIES/`). `FUNCS` entries confirmed at
+   `142124 -> 166537` (RPHSG) and `142141 -> 167550` (WPHSG).
+
+### 25f. An instrument warning from the peer, worth keeping
+
+`[PSTWATCH]` and `[L1WATCH]` share ONE `MpmTrace` ring, and `ArmL1TableWatchIfRequested`
+(`CpuND500.MMU.cs` ~2565) calls `tracing.Trace.Clear()` when it takes over. **Any "no writes were
+seen" conclusion from PSTWATCH in a run where L1WATCH also armed is void** — the ring was emptied
+underneath it. They nearly published "SINTRAN never fills PST entry 14" off that silence.
+
+Taxonomy: this is #9's cousin — not a switch that does nothing, but **two instruments sharing one
+buffer, where arming the second silently destroys the first's evidence**. The tell is a shared ring
+with more than one arming path.
