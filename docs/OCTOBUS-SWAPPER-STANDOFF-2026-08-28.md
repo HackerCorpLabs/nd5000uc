@@ -1881,3 +1881,77 @@ raw bytes written to `0x96..0xC4` so content can be compared, not just addresses
 
 That is a byte dump in issue order, deliberately not a grep: a grep can only confirm a message one
 of us already thought of, and the whole point is that our lane is missing one we have not named.
+
+---
+
+## 21. B1 thread: `5MBBANK` and `5FPMAILBOX` are INCONSISTENT in the live machine `[V]` 2026-08-30
+
+Measured, not inferred. `5MBBANK` is the bank register used for **every** mailbox access in SINTRAN
+(`T:=5MBBANK; *AAX X5PRO; LDATX` and ~40 more sites in `5P-P2-MON60.NPL`).
+
+### 21a. What SINTRAN's own arithmetic says
+
+`RP-P2-N500.NPL:737`, inside `XMSINIT`:
+
+```
+131133   5FPMAILBOX=:D:=0; AD SH 12; A=:5MBBANK    % MEMORY BANK FOR MESSAGES
+```
+
+`D := 5FPMAILBOX`, `A := 0`, shift the AD pair left 12, keep the high half — i.e.
+**`5MBBANK = 5FPMAILBOX >> 4`**.
+
+### 21b. What the live machine holds
+
+| cell | address | measured | source |
+|---|---|---|---|
+| `5MBBANK` | `0o4654` | **`0x0021` = 33** | harness resident probe, both rounds |
+| `5FPMAILBOX` | `0o111102` | **2129** (`0x0851`) | harness carved-mailbox probe, both rounds |
+
+`2129 >> 4 = 133`, not 33. Inverting, `33 << 4 = 528`, so `5MBBANK` corresponds to a
+`5FPMAILBOX` of about **528-543** — not the 2129 that is in the cell.
+
+**The harness is reading the right cell:** `l07-kallsyms.txt` puts `5MBBA` at `0o4654`, which is
+exactly the address probed. So this is not an addressing mistake on our side, and the harness has
+been printing `MISMATCH` on this line in every run for as long as the probe has existed.
+
+### 21c. Why this is on B1's thread
+
+`5FPMAILBOX` has exactly two writers, both in the MON60 initialisation path:
+
+```
+5P-P2-MON60.NPL:501   A-+5NPAGES=:5NPAGES; 0=:5FPMAILBOX     (zeroes it)
+5P-P2-MON60.NPL:640   A=:5FPMAILBOX                           (after CALL 5GBUFF allocates)
+```
+
+and `027102 CALL 5GBUFF / 027104 A=:5FPMAILBOX` is the mailbox-page allocation. So the two cells can
+only disagree if **`5MBBANK` was derived before `5FPMAILBOX` reached its final value**, or if one of
+them is written by something else.
+
+If `5MBBANK` is wrong, every mailbox access goes to the wrong bank, `3RMICV` is never answered, and
+`N5TIMOUT` fires — which is exactly B1's symptom, and B1 fires **before any command is typed**.
+
+**This is a hypothesis with a measured foundation, and it is NOT yet the root cause.** Do not act on
+it until the next measurement is done.
+
+### 21d. The next measurement, and it is not a guess
+
+`XMSINIT` has **no `CALL` site** — grep finds none; it is dispatched through a table
+(`DP-P2-VARIABLES.NPL:97` lists it in `NRPIT,XMSINIT,`). So the call order **cannot be read out of
+the source** and must be measured.
+
+Watch the two writes in order, with PCs, using the existing `CpuND100.DiagPcWatchList` /
+`DiagPcWatchPil` instrument (the same one that produced the `5ACTSWAPPER` call-site table):
+
+ - **`A=:5MBBANK`** — listing `131133` in `RP-P2-N500`; **`RP-P2-N500`'s offset is `+0o136`**
+   (`XMSINIT` listing `131127` vs `l07-kallsyms` `0o131265`), so the linked address is **`0o131271`**.
+ - **`A=:5FPMAILBOX`** — listing `027104` in `5P-P2-MON60`; that module's offset is **NOT yet
+   pinned**, so pin it first from a bracketing pair before arming anything.
+
+**THREE distinct module offsets are now confirmed in this one image** — `MP-P2-N500` `+0o200`,
+`CC-P2-N500` `+0o17`, `RP-P2-N500` `+0o136`. Applying any of them to another module lands on a real,
+plausible, wrong routine. Pin per module, every time.
+
+Record the ORDER and the VALUES: if `5MBBANK` is written once, early, from a small `5FPMAILBOX`, and
+`5FPMAILBOX` is written again later with nobody recomputing `5MBBANK`, that is the bug. If both are
+written together and still disagree, the arithmetic model above is wrong and it is the model that
+needs fixing first.
