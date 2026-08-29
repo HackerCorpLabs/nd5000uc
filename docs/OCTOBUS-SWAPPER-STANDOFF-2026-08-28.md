@@ -2055,3 +2055,106 @@ underneath it. They nearly published "SINTRAN never fills PST entry 14" off that
 Taxonomy: this is #9's cousin — not a switch that does nothing, but **two instruments sharing one
 buffer, where arming the second silently destroys the first's evidence**. The tell is a shared ring
 with more than one arming path.
+
+---
+
+## 26. `5MBBANK` is CORRECT — the probe's shift was wrong (third diagnostic artefact today) `[V]` 2026-08-30
+
+A `5MBBANK` mismatch was raised as a candidate root cause for the pre-command `N5TIMOUT`: if the
+mailbox bank register is wrong, every mailbox access lands in the wrong bank, `3RMICV` is never
+answered, and the watchdog fires. Good reasoning from a measured foundation. **The measurement is
+the probe's, and the probe is wrong.**
+
+```
+measured:  5MBBANK @0o4654 = 33        5FPMAILBOX @0o111102 = 2129
+probe:     2129 >> 4 = 133             -> "MISMATCH"
+```
+
+**33 is exactly right.** A bank is `0x20000` = 128 KB = 64 pages of 2048 bytes:
+
+```
+2129 >> 6 = 33          == the measured value, exactly
+2129 * 2048 = 0x428800  == the mailbox header the station discovers from the control store
+```
+
+The probe modelled `>>4`; the machine uses `>>6`.
+
+**Behaviour was the check that should have settled it first, and it was already in hand:** the
+mailbox WORKS — `3RMICV` answered repeatedly, `polls=124072`, `active(x5act==0)=105`, header found
+at `0x428800`. A wrong bank register would break precisely that. **A diagnostic that contradicts
+measured behaviour should be suspected before the machine is.**
+
+Fixed, with the reasoning in the code. The NPL line being modelled is
+`RP-P2-N500.NPL:737` (`XMSINIT`): `5FPMAILBOX=:D:=0; AD SH 12; A=:5MBBANK` — it is the AD-pair
+shift decode that was misread; the corrected constant is pinned to the measured machine.
+
+### 26a. Three in one night, same shape
+
+| § | instrument | what it claimed | truth |
+|---|---|---|---|
+| 22 | X5ACT carved-vs-derived | `MISMATCH (delta 0x8800)` | the delta WAS `X500DF<<1`, counted twice |
+| 20 | 5MPM write-volume ranking | "the lane is LIVELOCKED" | the top writer is a clock-driven sampler |
+| 26 | `5MBBANK` recompute | `MISMATCH (33 vs 133)` | wrong shift; 33 is correct |
+
+Every one produced a top-priority investigation. Two shared a tell that costs nothing to check:
+**the disagreement was a CONSTANT** (`0x8800`; a fixed `>>4`-vs-`>>6` factor). The third had a
+different but equally cheap tell: **it contradicted behaviour the same run had already
+demonstrated.**
+
+The rule earned: **before promoting an instrument's disagreement to a bug, ask (a) is the delta
+constant, and (b) does any other measurement in the same run contradict it?** Both questions are
+free. All three of tonight's artefacts fail one of them.
+
+### 21e. THE 500-vs-5000 GATE: `MUDOM`, and why the 3022 session cannot answer this `[V]` 2026-08-30
+
+Ronny, 2026-08-30: *"but maybe there is a difference in 500 and 5000 in this - so be aware, and test
+and validate."* He is right, and it is in this exact routine.
+
+`XMSINIT` initialises the octobus-specific mailbox fields **only inside a generation gate**
+(`RP-P2-N500.NPL:757`):
+
+```
+131220   IF MSDFCPU.MIFLAG BIT MUDOM THEN
+131225      T:=5MBBANK; X:=MSMLINK; *AAX X5STA; STATX      % STATION NUMBER
+131245      ...                     *AAX X5ACC; STDTX      % ACCP BUFFERS
+131255      ...                     *AAX X5OCT-X5ACC; STDTX % OCTOBUS BUFFERS
+131265      ...                     *AAX X5HWB-X5OCT; STDTX % HW BUFFERS
+131267   FI
+```
+
+**`MUDOM` has exactly ONE writer in the entire source**, `PH-P2-OPPSTART.NPL:3933`:
+
+```
+063151   T:=100406; *IOXT; TRA IIC
+063154   IF A=0 THEN                      % Octobus present? - (assumes Samson)
+063155      DO *IOXT WHILE A NBIT 3 OD    % wait for data ready
+063161      ASTATION\/COMD=:5STATION
+063170      T:=100405; A\/CMMACLE; *IOXT  % masterclear Samson system
+063173      A:=X\/CMACONT; *IOXT          % continue accp
+063176      MIFLAG BONE MUDOM=:MIFLAG     <-- the only assignment of MUDOM anywhere
+063201      CPUAVAILABLE/\140000\/SAMSON
+063205   ELSE  A:=0  FI
+```
+
+So `MUDOM` is set **only when the IOX `100406` octobus presence probe returns `A=0`** and bit 3
+(data ready) then comes up.
+
+**If `MUDOM` is not set, `X5STA` / `X5ACC` / `X5OCT` / `X5HWB` are never initialised** — the octobus
+mailbox extension is unbuilt, messaging cannot work, `3RMICV` is never answered, and `N5TIMOUT`
+fires before any command is typed. **That is B1's exact symptom.**
+
+**And this is the generation difference in the flesh:** `MUDOM` is meaningless on the classic 3022
+lane, so the ND-500 session can have `.DOM` files running with this defect fully present on ours.
+Their `5MBBANK`/`5FPMAILBOX` values would have told us nothing, and adopting them would have been
+the `nd500-classic-vs-nd5000-page-table-split` mistake again — sharing a constant across two
+generations that divide the work differently.
+
+**NOT YET MEASURED, and this is the next step:** whether `MIFLAG BIT MUDOM` is actually set on our
+live machine, and what the IOX `100406` probe returns. The harness already reports
+`5MSINIT@0o111100=0x000F ... OK: 4 SAMSON CPU(s), 1 alive`, so SAMSON detection itself works — but
+`CPUAVAILABLE`/`SAMSON` is set on the line AFTER `MUDOM` in the same block, so SAMSON being detected
+does not prove `MUDOM` was set. **Probe `MIFLAG` directly. Do not infer it from the SAMSON count.**
+
+There is also a spin to be aware of at `063155`: `DO *IOXT WHILE A NBIT 3 OD` waits for bit 3 with
+no visible timeout. If our card never raises bit 3 this hangs inside the presence probe rather than
+falling through.
