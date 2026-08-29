@@ -735,3 +735,40 @@ asked of a July document and stopped there. The **nearest** record was two days 
 and it answered the question better: not "is this new" but "has anyone already written this down".
 A four-week-old record told me the lane once worked. A two-day-old record told me the lane is in a
 known, named, still-open state — which is the more useful fact and the cheaper one to find.
+
+### 14d. `5ACTSWAPPER` has FOUR callers, not three — the fourth is a MON call `[V]` 2026-08-29
+
+Earlier notes in this session (and 14b above) list three callers. `grep -n 5ACTSWAPPER
+MP-P2-N500.NPL` gives four:
+
+| line | caller | what hands the swapper work there |
+|---|---|---|
+| `134154` | `MSWSWAIT` tail | restart-swapper-and-wait, after an allocate-page |
+| `135367` | `TRAPDECODER`, trap 46 | a page fault, gated on `5INITFLAG NBIT BRESPLACE` / `SYSINITFLAG NBIT BSWSTARTED` |
+| `136037` | `SWPD4` FIFO drain | the queue behind the swapper's own completion |
+| **`141765`** | **`SWMC`** | **a MONITOR CALL to the swapper** — missed until now |
+
+`SWMC` (`MP-P2-N500.NPL:2047`, header *"MONITOR CALL TO THE SWAPPER, DRIVER LEVEL"*) is:
+
+```
+141753   SWMC:  MSM510 SHZ 10=:D; T:=5MBBANK; *AAX TRAPN; LDATX
+141761          A/\377+D; *STATX; AAX -TRAPN
+141765          CALL 5ACTSWAPPER; GO NXTMSG
+```
+
+**Its MON number is 510B, and the arithmetic pins it two ways.** `MCHANDEL` (`137332`) routes
+`L12MIN <= A <= L12MAX` through a `GOSW` on `A - L12MIN`; `SYMBOL L12MIN = 500`, `L12MAX = 523`
+(`136764`), and `SWMC` is the **ninth** arm — `500B + 8 = 510B`. The routine's own constant is named
+`MSM510`. Anything outside 500B..523B goes to `NORMMC` and is handled by the system monitor, so
+**MON 377B — the call our swapper parks on — is NOT a swapper-activation call**; it falls through to
+the ordinary monitor.
+
+Why it matters here: it is a fourth, independent way for work to reach the swapper, and it is the
+only one that a *user process* can trigger directly rather than by faulting. So "nothing is queued"
+now has four possible causes to separate, not three, and one of them is observable as a MON number
+we have never seen on this lane.
+
+**How the count came to be wrong:** the three-caller list was assembled from the routines that were
+interesting at the time (the swapper's own state machine), not from an exhaustive grep of the
+symbol. One `grep -n` settles it, and it is the same shape as every other lost fact in this project
+— a correct observation about a subset, recorded as if it were about the whole.
