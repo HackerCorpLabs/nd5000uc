@@ -1,5 +1,10 @@
 # The octobus swapper standoff — where `> Loading Swapper` actually stops
 
+> **READ SECTION 12 FIRST (2026-08-29).** This lane REACHED `> Allocating memory` and ran a
+> domain for 7.5 minutes on 2026-07-31 and again on 2026-08-01. It no longer does. Sections
+> 7-11 characterise a REGRESSION that appeared during August, not a standing property of the
+> octobus lane. The measurements are sound; the framing in those sections is not.
+
 **Created 2026-08-28.** Full path:
 `E:\Dev\Ronny\ND5000UC\docs\OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md`
 
@@ -449,3 +454,52 @@ printed. `5ACTSWAPPER`'s three callers all need an event — a page fault, an al
 process queued at `SWPWAIT` — and `trapsAttempted=0` says no trap was ever raised. The open question
 is unchanged from section 8 and was never really about the restart: **what should be running that
 would fault, and why is nothing running?**
+
+## 12. THIS IS A REGRESSION. The lane used to reach allocation `[V]` 2026-08-29
+
+The swap-file hypothesis from the previous tick is REFUTED, by the discriminator built to test it:
+with `define-swap-file` skipped entirely, the run stalls in exactly the same place, after
+`> Loading Swapper`. No swap file, same stall. So the swap file is not the variable.
+
+What is the variable is TIME. Two records in `ND500-STATUS-AND-INDEX.md`, both on this lane:
+
+| date | command | domain | result |
+|---|---|---|---|
+| 2026-07-31 | `RECOVER-DOMAIN` | LINKAGE-LOAD-H02 | `> Allocating memory - 7110B pages` → 5SWAP protect violation at `1 10533B` |
+| 2026-08-01 | `ND-5000: LINKAGE-LOADER` | (installed) | same message, same trap, **same address** |
+
+Different commands, different domains, and on 31 July the ND-500 **ran for about seven and a half
+minutes** (02:57:12 → 03:04:46) before failing. That is a lane which reaches allocation, runs a
+domain, and dies in a *known, carved* way — the 5SWAP `RPHS` protect violation, whose `P` value
+`0o1000010533` is already recorded.
+
+**Tonight, 29 August, it does not get that far.** `place-domain`, `recover`-style install, with a
+swap file, without a swap file, on the stock pack, on DOMS-CSFIX — every one stalls after
+`> Loading Swapper` and never prints `> Allocating memory`.
+
+**So sections 7 through 11 have been characterising a REGRESSION, not the original blocker.**
+Everything measured there is true of the machine as it stands today, and none of it was true four
+weeks ago. The swapper being idle-parked, `posted=2 seen=1`, `trapsAttempted=0`, `SWMSG` never
+reaching `PSW1WAIT` — all of that is the *shape* of the regression, not a standing property of the
+octobus lane.
+
+### 12a. What this changes about the next step
+
+The question is no longer "why does nothing fault" or "what does the classic lane do differently".
+It is **what changed in this tree between 2026-08-01 and now**, and that is a bisect-shaped question
+over RetroCore's octobus, servicer and CPU paths rather than another microcode carve.
+
+`[OPEN]`. Worth noting that August included the ND500/ND5000 rename sweep (95 identifiers) and a
+good deal of generation-gating work, both of which touch exactly the code that decides what the
+octobus lane does after the swapper loads.
+
+### 12b. The cheap check I did not do for four hours
+
+Every run tonight produced the same three console lines, and the question "has this EVER got
+further?" was one grep of the existing records away. It would have cost two minutes at the start and
+would have reframed everything after it — the histogram, the trap denominator, the restart triple
+and the four self-corrections all happened inside an assumption that this was the normal state of
+the lane.
+
+The instruments are worth keeping and the carves are all correct. But the FIRST question about any
+stall should be **"is this new?"**, and the records that answer it were already in the repo.
