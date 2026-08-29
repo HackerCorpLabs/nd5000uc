@@ -9,8 +9,9 @@
 
 ## Next
 
-**B1 — `N5TIMOUT` fires at `@nd-500` BEFORE any command is typed, in EVERY run.** It is the most
-upstream known bug and everything else was measured while it was true.
+**B9 — validate `start-swapper`.** B1 is CLOSED (root-caused, section 23: it is the designed
+"control store not loaded" gate, and `3RMICV` is answered 100+ times once the store is loaded).
+The `start-swapper` ladder run is the first thing that has never been measured on this pack.
 
 ---
 
@@ -46,7 +47,7 @@ each line is.
 
 Every one of these is measured and reproducible on `DOMS-CSFIX.IMG`. None may be dismissed.
 
-### B1. `N5TIMOUT` before any command — **MOST UPSTREAM, START HERE**
+### B1. `N5TIMOUT` before any command — **CLOSED 2026-08-30, root-caused, NOT a bug**
 
 ```
 @nd-500
@@ -59,9 +60,23 @@ Fires on entry to the monitor, **before** `define-swap-file`, **before** `place-
 watchdog going unanswered (`MP-P2-N500.NPL:1209` stamps it into the WATCHDOG buffer and arms a
 timer; the check is `RP-P2-N500.NPL:127642` → `N5TIMOUT` → `RSTARTALL`).
 
-**Consequence: SINTRAN already believes the microprogram is stopped before any command runs.**
-Every measurement taken after this line was taken in that state. Fix this before believing anything
-downstream.
+**ROOT CAUSE (section 23 of the standoff doc), closed rather than dismissed:**
+
+The capture's own line numbers settle it — the timeout is at line 32, `> Loading Control Store` at
+line **39**, seven lines later. **At line 32 no control store has been loaded yet.** Neither ND
+generation has microcode ROM; the store is RAM and empty until `LOAD-CONTROL-STORE`. So nothing can
+answer, and *"Microprogram has stopped"* is TRUE about the machine at that instant.
+
+It is the DESIGNED trigger, not a fault: `RSTA5` bit 9 `5CLOST` (*"micro clock stopped = CS NOT
+loaded"*) -> `ECSLOAD 2032B` -> the monitor prints *"Loading Control Store"* and auto-loads. Line 32
+CAUSES line 39.
+
+**And the "3RMICV goes unanswered" mechanism is refuted by the same run:** the servicer trace shows
+`MICFU=0x01 3RMICV` answered repeatedly with `MicroVersion=0x2E9A`, plus `CACHE` and `PHYSWR`
+serviced, `polls=124072`, `active(x5act==0)=105`. The mailbox works after the CS load.
+
+**B3 (`MAR=0`) and B4 (`N500 STATUS 000000`) are read from the SAME fatal report at the SAME moment**
+- check their timestamp before treating them as separate bugs.
 
 ### B2. File-system error DURING the control-store load — **NOT NOISE**
 
