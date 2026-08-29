@@ -948,3 +948,56 @@ the call sites before the routine turns out to have been protecting against this
    at least as likely a consequence as a cause. Recorded because it is invisible in the census and
    only appears when the rows are read in sequence, which is this project's own standing rule met
    the hard way for the second time in one investigation.
+
+## 15. The call-site table came back UNREADABLE, for a reason the instrument documents `[V]` 2026-08-29
+
+The run completed and reproduced the phenomenon exactly — `place-domain cpu-stat` printed
+`> Loading Control Store` / `> Loading Swapper` and STALLED, `swpfu[LNEWSWAP:2]`, no `SWACTIVE`,
+no `LSWPAGE`. So it is a valid instance. The table it produced is not usable:
+
+```
+----- 5ACTSWAPPER call sites (after PLACE-DOMAIN) -----
+  call:MSWSWAIT-tail           @0o134154  hits=0
+  call:TRAPDECODER-pagefault   @0o135367  hits=17
+  call:SWPD4-fifo-drain        @0o136037  hits=0
+  call:SWMC-mon510             @0o141765  hits=0
+  5ACTSWAPPER-entry            @0o144762  hits=0
+  HANDOVER-taken-SWACTIVE      @0o145011  hits=0
+  queued-on-swapwait-fifo      @0o145112  hits=232
+```
+
+**Two things make this unreadable, and the first proves the second.**
+
+ - **`0o145112` reported 232 hits and every logged one is `PIL=1`**, with `A` counting up `0o210`,
+   `0o211`, `0o212` and `D`/`T`/`X`/`B` constant. That is a loop on level 1, not `5ACTSWAPPER` on
+   level 12. `CpuND100.DiagPcWatch` matches the **16-bit PC only** — its own comment says so, and
+   `DIAGNOSTICS.md` repeats it — so unrelated code at the same address counts as a hit.
+ - **A caller shows 17 hits while the routine it calls shows 0.** Those cannot both be true. The
+   table therefore contains at least one wrong number and offers no way to say which, so neither
+   `TRAPDECODER=17` nor `5ACTSWAPPER-entry=0` can be quoted — and `entry=0` is exactly the cell that
+   would have confirmed "the ND-100 never hands this swapper work". **A number that says what you
+   expect, in a table that is provably inconsistent, is the easiest kind to publish by mistake.**
+
+### 15a. The failure worth naming: the log cap was eaten by the noise
+
+`DiagPcWatchLogMax` is 60, and the register detail is what distinguishes a real hit from a
+same-address impostor. Of those 60 entries, **59 were the `PIL=1` false positive and 1 was a real
+`PIL=12` hit.** So the louder the wrong thing is, the less of the right thing the instrument
+records — the log degrades in exact proportion to how badly it is needed.
+
+That is not the same as any of the modes in the taxonomy. #7 is a number that cannot be checked; #8
+is one that cannot be relevant; #9 is a switch that does nothing. **This is a bounded log whose
+budget is spent by whatever fires most, which is systematically the thing you did not want.** The
+counters kept counting; only the evidence that could adjudicate them was crowded out.
+
+### 15b. Fixed at the point of measurement, not after it
+
+`CpuND100.DiagPcWatchPil` — count and log only hits at a given interrupt level, `-1` (any) by
+default so nothing else in the tree changes, reset by `DiagPcWatchReset()`. The harness sets it to
+**12**, the ND-500 driver level, which is where every routine in `MP-P2-N500.NPL` runs.
+
+Filtering at the point of measurement rather than post-hoc is what saves the log budget: a level-1
+impostor never consumes an entry, so the 60 slots hold 60 real samples. Post-filtering would have
+left the same one usable sample.
+
+**The table above is therefore withdrawn and NOT recorded as a result.** Re-running with the filter.
