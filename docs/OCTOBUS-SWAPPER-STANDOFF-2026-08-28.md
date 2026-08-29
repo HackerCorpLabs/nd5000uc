@@ -1046,3 +1046,35 @@ The consolation is that the previous table's self-contradiction was a TRUE alarm
 nobody had guessed. `caller=17, callee=0` was not noise on top of a real signal — it was the whole
 signal, saying "these addresses are not what you think". An instrument that reports its own
 inconsistency earns its keep even when it cannot say what is wrong.
+
+### 15e. The offset re-pinned properly: NINE symbols, spanning the whole armed range `[V]` 2026-08-29
+
+15c pinned `+0o200` from three symbols clustered around `0o1416xx`, then applied it to addresses
+from `0o134154` to `0o145112`. That is extrapolation, and the whole point of 15d was that I had
+stopped asking where numbers come from. So it was re-pinned across the full range before spending
+another hour of run time:
+
+| symbol | listing | linked | offset |
+|---|---|---|---|
+| `NNC09` | `0o135476` | `0xBBBE` | +0o200 |
+| `NNT08` | `0o136557` | `0xBDEF` | +0o200 |
+| `NNA04` | `0o136565` | `0xBDF5` | +0o200 |
+| `NNJ10` | `0o136622` | `0xBE12` | +0o200 |
+| `SPRIO` | `0o141633` | `0xC41B` | +0o200 |
+| `NNT12` | `0o141706` | `0xC446` | +0o200 |
+| `SWMC` | `0o141753` | `0xC46B` | +0o200 |
+| `NNC24` | `0o144771` | `0xCA79` | +0o200 |
+| `NNJ11` | `0o145076` | `0xCABE` | +0o200 |
+
+Nine symbols, exact, no drift across ~7500 words. And the two that matter most **bracket
+`5ACTSWAPPER` directly**: `NNC24` (`0o144771`) is the `CNVWADR` marker four words inside the
+routine and `NNJ11` (`0o145076`) is the marker just before its FIFO arm, so the entry at
+`0o144762`, the handover store at `0o145011` and the FIFO arm at `0o145112` all sit between two
+independently confirmed points rather than at the end of an extrapolation.
+
+The patch markers (`*NNxnn=*`) turn out to be the right instrument for this: they are dense, they
+are spread through the module, and they are in the symbol table precisely because ND needed to patch
+against the linked image. They are the only labels in this file that exist in both worlds.
+
+`ListingToLinked = 0x80` in the harness is therefore verified for this module over the range it is
+used on, and nowhere else.
