@@ -1446,6 +1446,35 @@ the same CS load, which is why this was invisible for as long as the macro round
 
 ### 19c. Bug two: the real ACCP firmware stops SINTRAN booting at all
 
+> **RETRACTED 2026-08-29, same day, before anyone acted on it.** Ronny: *"i have seen it boot."*
+> The heading is left standing so the wrong version is not re-adopted; everything below it is
+> UNSUPPORTED as a statement about the ACCP.
+>
+> **What was actually measured:** with the ACCP attached inside THIS harness, the ND-100 did not
+> reach `SINTRAN III RUNNING` inside THIS harness's wait window. Two reasons that is not the same
+> claim:
+>
+>  1. `RunUntil(marker, 300_000)` counts **host wall-clock milliseconds, not emulated cycles** - its
+>     own comment says *"host wall-clock, not instructions"*. A 68000 at `instructionsPerClock: 64`
+>     slows the whole machine in REAL time, so a 300-second budget can expire with nothing broken.
+>     *Did not finish in the window* and *does not work* are different claims - the distinction is
+>     stated verbatim a few hundred lines up this same file, about `place-domain` at 300s vs 900s,
+>     and I made the error anyway.
+>  2. A conclusion about a component drawn from MY ad-hoc wiring of it is a conclusion about the
+>     wiring.
+>
+> **And the machine already exists.** `RetroCore\Nuget\HackerCorpLabs.Emulation.Machines.Accp`
+> is a complete ACCP machine with `AccpBootTests` (reset vectors, firmware entry point, RAM walk,
+> `Boot_RaisesNoUnexpectedException`), `AccpConsoleTests`, `AccpSelftestStatusTests` - and
+> `Nd5000ControlStoreLinkTests`, `Nd5000CsaFailureTraceTests`, `Nd5000FirmwareLoadTests`,
+> `Nd5000AttachedMachineTests`, which cover the control-store load, i.e. **19b / task #78**. Run
+> that suite before forming any opinion about either. See memory
+> `check-existing-machines-before-building`.
+>
+> **What survives:** the `hw-cpu` vs `hw-accp` vs `hw` split is still a real, reproducible
+> difference in this harness, and 19a (a harness OUTCOME field is not a result) stands untouched.
+> What does not survive is naming the ACCP as the cause.
+
 `hw-accp` isolates it: functional CPU, real `octo.bin`, and the ND-100 never reaches
 `SINTRAN III RUNNING` in five minutes. No IO device `Clock()` ever threw (`faults isolated: 0`) and
 the servicer moved nothing (`copy-family log: 0 transfers`), so this is not an exception being
