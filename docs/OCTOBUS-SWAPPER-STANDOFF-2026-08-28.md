@@ -1290,3 +1290,103 @@ for this module on two symbols that bracket the region being read.
        Absence of a write here is NOT absence in the run. ***
    ```
    or, when it did not saturate, a line saying so and giving the count against the cap.
+
+---
+
+## 18. Round 1 on an UNSATURATED log: the lane is LIVELOCKED in an 8-write cycle `[V]` 2026-08-29
+
+Round 1 re-run with the fixed instrument, pack `DOMS-CSFIX.IMG`. Outcome unchanged
+(`place-domain=STALL run=STALL`), but the log now covers the run:
+
+```
+write log did NOT saturate (5,980,734 of 8,000,000) - it covers the whole run.
+1856 distinct (pc,pil) sites   [was 451 at the old cap]
+histogram total=5980734 log total=5980734 [consistent]
+```
+
+**The real run is six times the old 1M cap.** Everything measured before this was a 17% prefix.
+
+### 18a. Every write came from ONE thread
+
+`thr=15` on all 5,980,734 entries — a single distinct thread id in the whole log. No DMA writer, no
+ND-5000 thread, nothing else touching the window through this path. So the PC stamps are
+same-thread and can be read. That is measured, and it replaces the empty grep for a DMA path, which
+proved nothing.
+
+### 18b. The phase profile, read in order
+
+Profiling the log in 300,000-line windows rather than searching it for an expected pattern:
+
+| windows | shape |
+|---|---|
+| 0-3 | broad address sweep `0x4207FE`..`0x4586CF`, then `ST0PS`-region traffic |
+| 4-7 | **first-addr == last-addr == `0x0045D800`** — 600,000 writes to ONE cell |
+| 8-15 | eight windows of IDENTICAL shape, 61,440 writes each at `pc=0o45637`, start addresses stepping down by 8 |
+| 16-19 | collapses into the mailbox neighbourhood `0x42810C`..`0x428E46` |
+
+Windows 8-15 alone are 2.4M writes — **40% of the run in one repeating pattern**. That is not a
+machine making progress.
+
+### 18c. The livelock, decoded byte by byte
+
+Taking a contiguous slice from the middle of the last phase and reading every write in sequence (not
+grepping for a suspected pattern) gives an exactly-repeating **8-write cycle**, at PIL 2, ~82,000
+times:
+
+```
+  W 0x0042810C=0x0000  pc=23654B pil=2 thr=15
+  W 0x0042810D=0x0000  pc=23654B pil=2 thr=15
+  W 0x0042890C=0x00FF  pc=23656B pil=2 thr=15
+  W 0x0042890D=0x00FF  pc=23656B pil=2 thr=15
+  W 0x00428820=0x00FF  pc=133062B pil=2 thr=15
+  W 0x00428821=0x00FF  pc=133062B pil=2 thr=15
+  W 0x00428822=0x00FF  pc=133062B pil=2 thr=15
+  W 0x00428823=0x00FF  pc=133062B pil=2 thr=15
+```
+
+Counts: `0x42890C` 82,004 writes of `0xFF`; `0x42810C` 82,005 writes of `0x0000`; the 32-bit cell at
+`0x428820` 81,884 writes of `0xFF`. The discovered geometry this run is
+`header=0x00428800 extBlock=0x00428900`, and the station's own map puts **`X5PRO` at `ext+0x0C`**
+(`X5ACT` at `ext+0x0A`) — so `0x42890C` IS X5PRO.
+
+### 18d. `GETC5PROC` writing is CORRECT — do not "fix" it
+
+`pc=0o23654`/`0o23656` resolve to `GETC5+5`/`+7`. `GETC5PROC` is documented *"Subroutine to get
+current executing process number"* — a READ — and it sat at the head of a WRITE log. That looked
+like an instrument defect. It is not. `CC-P2-N500.NPL:657`:
+
+```
+023630   GETC5PROC: T:=5MBBANK; X=:D:=MAILINK; *AAX X5PRO
+023634           *BSET BCM 120 DX; LDATX                      % Fool the cache
+023636           *BSET BCM 120 DX; LDATX
+023640           X:=D; EXIT
+```
+
+Two deliberate cache-defeating read-modify-writes before each `LDATX`, and they touch an address
+`0x800` away from the cell being read — which is exactly why the cycle shows `0x42810C` and
+`0x42890C` together from a single call. **The routine really does write, on purpose, and our ND-100
+records it faithfully.** The same reasoning retires the identical worry about `ST0PSYS` in §17c.
+
+So `GETC5PROC` is not the defect. **The defect is whatever calls it ~82,000 times without
+progressing.**
+
+### 18e. A THIRD listing-to-linked offset, and it is not `+0o200`
+
+`GETC5PROC` is at listing `0o023630` in `CC-P2-N500.NPL` and at `0o023647` in `l07-kallsyms.txt`:
+**`+0o17`**. `ST0PSYS` and `INSMONCO` in `MP-P2-N500.NPL` are both `+0o200`. Same image, two
+modules, two different offsets — which is precisely what §15 and taxonomy #13 say, and it is worth
+re-stating because a `+0o200` applied out of habit to a `CC-P2-` address lands 129 words away and
+still resolves to a real, plausible routine.
+
+### 18f. What this does and does not settle
+
+**Settled:** the lane is livelocked, the loop is on the ND-100 side at PIL 2, and the instrument is
+now trustworthy (single thread, unsaturated, self-consistent, writers named).
+
+**NOT settled:** what the loop is waiting for. `GETC5PROC`'s caller has not been identified — the
+write log names the callee, not the caller, and guessing from the call-site list in
+`MP-P2-N500.NPL` would be exactly the "adjacency is not dispatch" error.
+
+**And per the standing rule this is a MACRO-ROUND result and must not be reported as a conclusion
+on its own.** Round 2 (microword B30 + real 68000 ACCP) is running against the same pack; the diff
+between the rounds is the next section.
