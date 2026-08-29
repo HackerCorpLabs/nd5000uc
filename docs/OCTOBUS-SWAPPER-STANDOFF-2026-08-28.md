@@ -1738,3 +1738,81 @@ Fixed: the `X500DF` term removed, with the reasoning in the code, and the label 
     "is the address wrong".
  3. The `0B:6B` file-system INFO during the CS load, sharing a subsystem with the fatal record's
     `CSTCK`.
+
+---
+
+## 23. B1 ROOT-CAUSED: the pre-command `N5TIMOUT` is the DESIGNED "control store not loaded" gate `[V]` 2026-08-30
+
+§21a promoted this to most-upstream-bug and PLAN.md leads with it. **Root-caused, and it is expected
+behaviour** — recorded here rather than dismissed, because the standing rule is that no error is
+closed as "expected" without a root cause written down.
+
+### 23a. The ordering settles it
+
+From the macro-round capture, with line numbers:
+
+```
+29:  @nd-500
+31:  ND-500/5000 MONITOR  Version J04 88. 6.16 / 88. 8.17
+32:  ND-5000 timeout:      ACCP was terminated; Microprogram has stopped
+34:  ND-5000: define-swap-file
+37:  ND-5000: place-domain cpu-stat
+39:  > Loading Control Store          <- the CS load happens HERE, seven lines LATER
+```
+
+**At line 32 no control store has been loaded yet.** Neither ND generation has microcode ROM — the
+store is RAM and is empty until `LOAD-CONTROL-STORE`. So there is genuinely no microprogram running,
+nothing can answer the probe, and *"Microprogram has stopped"* is a TRUE statement about the machine
+at that instant.
+
+And it is the DESIGNED trigger, not a fault report. The bus reference: `RSTA5` bit 9 `5CLOST`
+(*"micro clock stopped = CS NOT loaded"*) → `ECSLOAD 2032B` → the monitor prints
+*"Loading Control Store"* and auto-loads. **The monitor noticing a stopped microprogram is what
+CAUSES the control-store load.** Line 32 and line 39 are cause and effect.
+
+### 23b. The claim that the watchdog goes unanswered is REFUTED by the same run
+
+§21a's mechanism was "`3RMICV` going unanswered". Measured on that very run:
+
+```
+----- servicer MICFU trace [MicroVersion=0x2E9A CpuParameter=0x03E1] -----
+MICFU=0x01 3RMICV(1) read-micro-version @0x00428E30
+MICFU=0x01 3RMICV(1) read-micro-version @0x0042C130      (many more)
+MICFU=0x0A CACHE(12B)  cache-clear @0x00428E30  nrbyt=2048
+MICFU=0x19 PHYSWR(31B) physical-write @0x00428E30  addrA=0x000000BC nrbyt=4
+----- servicer walk: polls=124072 active(x5act==0)=105 -----
+----- discovered mailbox: header=0x00428800 extBlock=0x00428900 -----
+```
+
+**`3RMICV` is answered, repeatedly**, and the version `0x2E9A` goes back. The mailbox is walked
+124,072 times with 105 doorbell activations, and `CACHE` and `PHYSWR` are serviced. So the mailbox
+path WORKS after the CS load. The timeout is a one-shot at entry, in the window where the store is
+legitimately empty.
+
+### 23c. So §21a's conclusion was too strong
+
+**RETRACTED:** *"SINTRAN already considers the microprogram STOPPED before any command... every
+measurement in sections 14-20 was taken in that state."* The first half is true and unremarkable;
+the second half is false. The machine is not in that state for the measurements — the CS gets
+loaded during `place-domain` and the mailbox answers from then on.
+
+This is the mirror image of §22 and worth naming as a pair: **§22 was an instrument shouting
+MISMATCH when the arithmetic was wrong; §23 is a machine printing a real error message that is
+correct and expected.** Both produced a top-priority item. The discipline that catches both is the
+same — before promoting an error, ask *what would the machine legitimately print here?* — and it is
+cheaper than either investigation.
+
+`MAR = 0` (B3) and `N500 STATUS 000000` (B4) are read at the SAME moment, from the same fatal
+report, and are very likely the same story. Check their timestamp before treating them as separate
+bugs.
+
+### 23d. Revised order
+
+B1 is closed with a root cause. What is genuinely open and upstream is now:
+
+ 1. **B9** — `start-swapper` has never been validated (running now; the test used all week
+    deliberately skipped it).
+ 2. **B7** — the macro round loads the control store and reaches `> Loading Swapper`, then never
+    reaches `> Allocating memory`.
+ 3. **B6** — `hw-cpu` fails the CS load where macro succeeds.
+ 4. **B2** — the `0B:6B` file-system INFO during the CS load, sharing a subsystem with B8's `CSTCK`.
