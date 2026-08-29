@@ -340,6 +340,11 @@ go and read the code, do not derive.
 
 ## 10. `posted=2 seen=1 taken=1` — SINTRAN never came back `[V]` 2026-08-29
 
+> **VERDICT SUPERSEDED by section 11.** The counts below are right and the instrument fix was
+> worth making. "SINTRAN never came back" is NOT - an unanswered swapper MON 377B at
+> `PSWWAIT` is the DESIGNED IDLE state (`LNEWSWAP`, MP-P2-N500.NPL:135470). Read 10a and
+> 10b, which stand; ignore the headline.
+
 The measurement section 9a asked for, on the short bring-up against `DOMS-CSFIX.IMG`:
 
 ```
@@ -385,3 +390,62 @@ were happening?"** For all three the answer was *identical to what it already sh
 The fix is the same shape every time: give the number a denominator, or a second count that must
 agree with it — `attempted` beside `posted`, an uncapped histogram beside the ring, `posted` beside
 `offered`.
+
+## 11. Section 10's VERDICT is wrong — an unanswered swapper call is the designed idle `[V]` 2026-08-29
+
+Carved `LNEWSWAP` (`MP-P2-N500.NPL:135470`) before building anything on section 10, and it refutes
+the interpretation there. The numbers in 10 stand; the sentence "SINTRAN NEVER CAME BACK … look at
+the ND-100 side" does not.
+
+```
+135470   LNEWSWAP:
+135470          AD := SWMSG.HSWPI                      % the node the swapper is currently serving
+135474          IF D >< 0 THEN                         % anything being served?
+...
+135575             IF A/\17777=SWPPING THEN            % that node is "using the swapper"
+135604                IF 3SWMESS=D THEN                % message to swapper?
+135626                   CALL RN5STATUS; A/\160000\/ANSWER
+135631                   GO FAR SWPD2                  % yes - restart the ND-100 proc
+```
+
+Then `SWPD3`/`SWPD4` mark `SWMSG := PSWWAIT` (free), drain the swap FIFO, and `GO NXTMSG`.
+
+**Nowhere in that path is the SWAPPER's own `MON 377B` answered.** The swapper is deliberately left
+parked and marked free; it is woken later by `5ACTSWAPPER`, which sets `MICFU := 3MONCO`
+(`145071`) and calls `MCCO` — and THAT is the restart our counter sees.
+
+So `posted=2 seen=1` is **exactly what a healthy idle swapper looks like**: one call restarted with
+work, one call parked as "free, waiting for something to do". It is a STATE, not a fault, and
+section 10's verdict pointed at the wrong side of the bus.
+
+This also explains the histogram cleanly: the `3SWMESS` node reaching `ANSWER` fourteen times is
+`135626` doing its job every round.
+
+### 11a. I put the wrong conclusion INSIDE the instrument, which is worse than putting it in a doc
+
+The harness line did not merely report `posted > seen`. It printed **"SINTRAN NEVER CAME BACK … Look
+at the ND-100 side, not at the CPU"** — a verdict, baked into the tool, that would have mis-aimed
+every future run and every reader of every future transcript. A wrong sentence in a document is read
+once by someone who can see its date; a wrong sentence in an instrument is re-asserted on every run
+with the authority of a measurement.
+
+Corrected: the line now reports the count and says explicitly that it is a state, not a verdict,
+names the designed idle path with its line numbers, and tells the reader to check WHICH process is
+parked before calling it a fault.
+
+**The rule this earns:** an instrument may report what it counted; it must not name a culprit. Every
+verdict string is a hypothesis that will outlive the evidence for it.
+
+### 11b. Fourth correction of the night, same cause, and I had already written the rule
+
+9b named it: *naming a state before reading the code that produces it*. Then I did it again, in the
+one place where it does the most damage. The carve that settles it is two greps and five minutes,
+and it must come BEFORE the wording, not after — the interpretation is the expensive part, not the
+number.
+
+**Where this leaves #56, stated with no verdict attached:** the swapper is idle-parked and correct.
+`SWMSG` never held `PSW1WAIT` in 421 visits, so `LALLOPAGE` never ran and `> Allocating memory` never
+printed. `5ACTSWAPPER`'s three callers all need an event — a page fault, an allocate answer, or a
+process queued at `SWPWAIT` — and `trapsAttempted=0` says no trap was ever raised. The open question
+is unchanged from section 8 and was never really about the restart: **what should be running that
+would fault, and why is nothing running?**
