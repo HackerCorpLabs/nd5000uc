@@ -1390,3 +1390,87 @@ write log names the callee, not the caller, and guessing from the call-site list
 **And per the standing rule this is a MACRO-ROUND result and must not be reported as a conclusion
 on its own.** Round 2 (microword B30 + real 68000 ACCP) is running against the same pack; the diff
 between the rounds is the next section.
+
+---
+
+## 19. ROUND 2 — the two-round rule earns itself: TWO separate bugs, and one nearly-false "pass" `[V]` 2026-08-29
+
+First run of this lane with the real components attached. `RETROCORE_ND5000_ROUND` gives four
+combinations; all four were run against the same pack (`DOMS-CSFIX.IMG`), same test, one switch:
+
+| round | ND-500 CPU | ACCP | boot | `place-domain` |
+|---|---|---|---|---|
+| 1 (macro) | functional `CpuND500` | hand-written | OK | **STALL** — the §18 livelock, 82,000 cycles |
+| `hw-cpu` | **real B30 microword** | hand-written | OK | **returns an ERROR in 2m04** |
+| `hw-accp` | functional `CpuND500` | **real 68000 `octo.bin`** | **NEVER BOOTS** | not reached |
+| `hw` (both) | real B30 | real 68000 | **NEVER BOOTS** | not reached |
+
+**The difference between the rounds is the bug list, and there are two independent bugs.**
+
+### 19a. `place-domain=returned` is NOT `place-domain=worked`
+
+The `hw-cpu` run reports `Passed`, `place-domain=returned run=returned`, in 2m04 against round 1's
+900-second stall. Read off the OUTCOME line alone that is a spectacular result: the real microcode
+does in two minutes what the functional CPU cannot do at all.
+
+It is an error path. The console:
+
+```
+ND-5000: place-domain cpu-stat
+> Loading Control Store
+Error when loading Control Store.
+ *** FATAL SYSTEM ERROR ***
+ND-500(0) error:      ND-500(0) timeout
+N100 STATUS 000000
+N500 STATUS 000000
+MAR 00000000000    MICRO P: 00000177777
+FATAL   * 21B:77B * ND-500(0) Monitor Internal / Fatal internrun
+NO WELL DEFINED PROGRAM IN MEMORY
+```
+
+It returned FASTER because it FAILED EARLIER. `MICRO P: 0o177777` is all-ones — the microprogram is
+not running at all.
+
+**This is the single most dangerous line in this whole investigation and it nearly went out as
+progress.** "Returned" means a prompt came back. It does not mean the command did its job, and the
+OUTCOME line cannot tell the two apart — `startMessagesSeen=0` was the only hint on that line, and a
+zero is easy to read as "not measured". The rule this earns: **a status word from a harness is a
+claim about CONTROL FLOW; only the console says what the machine did.** Never report an OUTCOME
+field without the transcript behind it.
+
+### 19b. Bug one: the real B30 fails the control-store load — #78 confirmed
+
+`Error when loading Control Store` on the `hw-cpu` round independently confirms task #78, which was
+opened on a weaker signal, and now has a full transcript behind it. The functional CPU sails through
+the same CS load, which is why this was invisible for as long as the macro round was the only round.
+
+### 19c. Bug two: the real ACCP firmware stops SINTRAN booting at all
+
+`hw-accp` isolates it: functional CPU, real `octo.bin`, and the ND-100 never reaches
+`SINTRAN III RUNNING` in five minutes. No IO device `Clock()` ever threw (`faults isolated: 0`) and
+the servicer moved nothing (`copy-family log: 0 transfers`), so this is not an exception being
+swallowed — the boot simply does not complete.
+
+That it is the ACCP and not the CPU is settled by the pair: `hw-cpu` boots fine, `hw-accp` does not,
+and `hw` (both) fails the same way `hw-accp` does. **The ACCP failure DOMINATES** — which means any
+future full-`hw` round tells you nothing about the CPU until the ACCP boot failure is fixed. Run
+`hw-cpu` for CPU questions until then.
+
+### 19d. Ordering
+
+These are independent and both are upstream of §18's livelock:
+
+ 1. **`hw-accp` boot failure** — blocks every real-hardware round that includes the ACCP.
+ 2. **#78, the B30 CS load** — blocks the real-hardware CPU round from getting past `place-domain`.
+ 3. **§18's macro livelock** — the round-1 symptom, and the only one of the three that can be worked
+    on the functional CPU today.
+
+Note what the standing rule bought here. The macro round says "the swapper is never handed work and
+place-domain stalls". Taken alone it points at the swapper hand-over path. The hardware rounds say
+the control store never loads and the ACCP cannot even boot the machine — both of which sit *before*
+anything the swapper does. **A macro-only conclusion would have sent the next session at the wrong
+end of the chain**, which is precisely what Ronny's rule exists to prevent.
+
+Artifacts kept out of the shared temp directory before the next run could overwrite them:
+ - round 1: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\round1-artifacts\`
+ - `hw-cpu`: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\round2-hwcpu-artifacts\`
