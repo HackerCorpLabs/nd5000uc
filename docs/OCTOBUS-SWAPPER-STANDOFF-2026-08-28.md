@@ -2312,3 +2312,63 @@ They add: on their lane the growable-segment path reports `calls=25 ok=0 noSlot=
 84 `LSWPAGE` calls come from somewhere else. §28's discriminator stands — they drive `LSWPAGE`, we
 do not — but **it is not evidence that their growable-segment path works**, and must not be used to
 justify wiring ours to match it.
+
+---
+
+## 30. B9 partial: `START-SWAPPER` issues ZERO ACCP commands — and what that does NOT mean `[V]` 2026-08-30
+
+Ronny, 2026-08-30: *"you need to start-swapper first and then validate with version and some other
+commands before testing dom files."* Correct, and it was the one path never exercised — the test run
+all week is `ShortBringup_Octobus_**NoStartSwapper**_PlaceAndRun_Capture`, whose own comment says it
+is *"deliberately WITHOUT status and WITHOUT start-swapper"*, while the full ladder starts the
+swapper but its own comment admits *"D-H (PLACE/RUN...) remain TODO"*. Neither did the ordinary
+thing. The ladder now carries a PLACE + RUN tail (added 2026-08-30) so it does.
+
+### 30a. The run DIED, and that is reported as a death, not a result
+
+`dotnet test` exited **127** with the console log ending immediately after test discovery. No
+OUTCOME line, no pass/fail. Same shape as the five unexplained testhost deaths already on file, and
+as the 2026-08-11 case where the "crash" turned out to be an external kill by a co-tenant session.
+**Cause not established. B9 is NOT answered.**
+
+### 30b. What DID survive, and it is a real measurement
+
+Two ACCP-exchange dumps written before the death — `after-status` (01:28) and `after-swapper`
+(01:43) — so the ladder reached `START-SWAPPER`. They are **byte-identical**:
+
+```
+6281bafb37131b76e89fe7f9d6318daa  sintran-octobus-accp-exchange-after-status.txt
+6281bafb37131b76e89fe7f9d6318daa  sintran-octobus-accp-exchange-after-swapper.txt
+# commands=147 unanswered=0 accpIdle=False
+```
+
+**`START-SWAPPER` issues ZERO ACCP commands.** This reproduces, on the CSFIX pack with current code,
+the observation the ShortBringup comment recorded earlier — so that observation is NOT stale, which
+was the open question about it.
+
+### 30c. THE LIMIT OF THAT NEGATIVE — do not over-read it
+
+The earlier framing was *"nothing crosses the octobus at all"*. **That is too strong, and the
+octobus skill's own trap #2 says why:** *"Before recording a NEGATIVE, check the setup does not make
+the positive INVISIBLE."*
+
+The ACCP exchange log records **ACCP-level commands**. The mailbox path does not use them — a
+mailbox activation is an `X5ACT` MEMORY WRITE plus a doorbell, which this log is **structurally
+blind to**. So a byte-identical ACCP exchange across `START-SWAPPER` says exactly one thing:
+
+> `START-SWAPPER` issued no ACCP commands.
+
+It does NOT say the command did nothing, and it cannot: §28 shows the same lane taking a `3START`
+(23B) through the mailbox with `startTaken=True`, which would leave this log untouched. "Did not
+happen" and "could not have been observed here" are different, and this instrument can only report
+the second.
+
+### 30d. Where B9 stands
+
+ - Reproduced and current: `START-SWAPPER` issues no ACCP-level traffic.
+ - Unmeasured: whether it produces MAILBOX traffic. The MICFU histogram and SWPFU counters answer
+   that, and they are printed by the same harness — the run just did not survive to print them.
+ - Unmeasured: the whole PLACE + RUN tail, which is the point of the new ladder step.
+
+Re-run needed. When it runs, read `micfu[...]` and `swpfu[...]` from the state line — NOT the MICFU
+trace listing, which is capped and produced §28a's wrong negative.
