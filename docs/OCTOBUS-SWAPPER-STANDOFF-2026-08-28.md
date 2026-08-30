@@ -2372,3 +2372,67 @@ the second.
 
 Re-run needed. When it runs, read `micfu[...]` and `swpfu[...]` from the state line — NOT the MICFU
 trace listing, which is capped and produced §28a's wrong negative.
+
+---
+
+## 22. §21 IS REFUTED. The machine was right both times; my probe was wrong. `[V]` 2026-08-30
+
+### 22a. `MUDOM` is SET — B1's root-cause candidate is dead
+
+The direct probe (commit `6e0451e81`) answered §21e:
+
+```
+CPU0 df@0o52222 CPUAVAILABLE=0x2003 type=3 (SAMSON) alive=True   MIFLAG=0x0003 MUDOM=SET
+CPU1 df@0o52270                     type=3 (SAMSON) alive=False  MIFLAG=0x0002 MUDOM=SET
+CPU2 df@0o52336                     type=3 (SAMSON) alive=False  MIFLAG=0x0002 MUDOM=SET
+CPU3 df@0o52404                     type=3 (SAMSON) alive=False  MIFLAG=0x0002 MUDOM=SET
+```
+
+`MUDOM` is set on all four datafields. So the IOX `100406` presence probe DID satisfy SINTRAN, and
+`X5STA` / `X5ACC` / `X5OCT` / `X5HWB` **are** initialised. **The gate is not the bug.**
+
+The carve in §21e stays correct and useful — `MUDOM` really is the 500-vs-5000 gate, it really has
+one writer, and the two failure shapes really are distinguishable. What is refuted is the guess that
+we were on the failing side of it. **B1's root cause is once again UNKNOWN.**
+
+### 22b. `5MBBANK` — the probe used the wrong shift
+
+§21b called `5MBBANK`=33 vs `5FPMAILBOX`=2129 an inconsistency in the live machine, on the reading
+that `AD SH 12` keeping the high half means `>> 4`. **Wrong.**
+
+**A bank is `0x20000` = 128 KB = 64 pages of 2048 bytes, so `bank = pages >> 6`.**
+`2129 >> 6 = 33` — **exactly** the measured `5MBBANK`. The machine was right; the recompute was
+wrong, and it had been printing `MISMATCH` on every run because of it.
+
+Same for the X5ACT line: `X500DF << 1 = 0x8800` **IS** `START_MESS`, so adding it pushed the window
+out by exactly that much. Corrected, `X5ACT_carved` = `(5FPMAILBOX << 11) + (1 << 8) + 0x0A` =
+`0x0042890A`, which **MATCHES** the discovered address. The `delta 0x8800` I reported was the
+constant being added twice.
+
+### 22c. The lesson, and it is a new one
+
+**A harness line that prints `MISMATCH` is making a claim about TWO things: the machine AND the
+harness's own recompute. I attributed the error to the machine both times, and both times it was
+the recompute.**
+
+That is not taxonomy #7 (a number that cannot be checked) — a MISMATCH line looks like the very
+opposite, a number WITH a check. It is closer to #13's amplifier: the comparison is only as good as
+the model behind the second operand, and an unverified model produces a confident, specific,
+wrong-direction accusation. **Before believing a MISMATCH, derive the expected side independently —
+here, from the physical meaning of a bank (128 KB / 2048 = 64 pages) rather than from a re-reading
+of the same instruction.**
+
+The `AD SH 12` decode is the trap: reading it as "shift the pair left 12, keep the high half" gives
+`>> 4` and is fluent, plausible, and wrong. The units settle it, not the mnemonic.
+
+### 22d. SHARED-TREE NOTE — the tree moved under this measurement
+
+`0efc22cd1` ("5MBBANK: the probe used the wrong shift, the machine was right") and `b023b6ce7`
+("Let two MPM watches share the ring instead of taking it from each other") landed **while this
+investigation was running**, from the other session in the same checkout. My `MUDOM` run therefore
+built against a tree containing a fix I had not made and did not know about — which is why the
+carved-mailbox line changed from `MISMATCH (delta 0x8800)` to `MATCH` between two runs I believed
+differed only in my own probe.
+
+**When a harness output changes and you did not change it, check `git log` before explaining the
+difference.** Two sessions, one checkout.
