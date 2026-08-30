@@ -183,7 +183,19 @@ Not started while the bug above them is open.
 |---|---|
 | Run a `.DOM` under real SINTRAN over the octobus (**THE GOAL**) | B1, B6, B7, B9 |
 | #72 fix-at-the-cause + regression test | B7 (cause not identified) |
-| #74 nd100x C ↔ ND-500 core seam | all of A |
+| ~~#74 nd100x/nd500x C ↔ ND-500 seam over ndbus/octobus~~ | **OUT OF SCOPE THIS PHASE** — see below |
+
+### #74 IS A LATER PHASE — do not start it, do not "prepare" for it
+
+> **Ronny, 2026-08-30:** *"integrating nd100x and nd500x over ndbus interface or octobus IS NOT to
+> be done now. That is a phase AFTER we have validated and tested RetroCore with 500 and 5000 cpu
+> thoroughly with nd-500-mon."*
+
+This is not "blocked and waiting" — it is out of scope until the gate below closes.
+
+**THE GATE:** RetroCore's own ND-500 and ND-5000 CPUs validated and tested **thoroughly against
+`nd-500-mon`**. That is the present phase, and it is exactly what the known bugs above are.
+Defining a seam against a lane that does not yet run means defining it against broken behaviour.
 | #50 adjudicate oracle divergences | #51 |
 
 ### #51 — register modelling, NOT diff-widening (title was wrong)
