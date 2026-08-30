@@ -2775,3 +2775,794 @@ of this document. The answer is that it correctly has none. Do not instrument it
 needs its own answer, because there the microprogram should be running. **Do not assume the macro
 stall and the hw-cpu stall have one cause just because they share a downstream chain** — that is the
 shape of error §22 and §23 both punished.
+
+## 34. LEAD 1 opened: the control-cache read falls through to the store `[V]`, and the CS sample mismatch has STRUCTURE `[V]` 2026-08-30
+
+Following §33's LEAD 1. Pure analysis of `accp-cs.log`, no runs.
+
+### 34a. The Control Cache sample test - a clean, named modelling gap `[V]`
+
+```
+Control Cache  sample test  failed
+Result  : 4040H 0001H DE02H 8018H 0000H 0000H 0000H 0000H
+Expected: 0000H 0000H 0000H 0000H 0000H 0000H 0000H 0000H
+Address :    0000H
+```
+
+`40400001DE028018` is EXACTLY the word the same log shows being written moments earlier:
+`WRITE @0o37760 hi=40400001DE028018 lo=0000000000000000`.
+
+So the firmware asked the **control cache** for address 0 and got back **the last word written to the
+control STORE**. We do not model a separate control cache, so the read falls through. The expected
+value is all zeros - an unwritten cache line.
+This one needs no pattern theory: it is a missing device, and the firmware named it.
+
+### 34b. The Control Store sample mismatch is NOT random `[V]`, but one pair cannot name the cause
+
+```
+Result  : 5640 51AF 4C92 BB59 8BB4 0393 5426 50DD    (what our store returned - and it IS what was
+Expected: 7698 B027 0AAA 2C91 0D8C F58B AFBE 6195     written: WRITE @0o0 hi=564051AF4C92BB59 ...)
+```
+
+Whole-word tests that FAIL (so do not re-run them): `E` is not `R` rotated or shifted by any of the
+127 bit amounts, not a halfword rotation, not halfword-reversed, not bit-reversed per halfword, not
+byte-swapped per halfword. Whole-word XOR popcount is 54/128 - superficially random.
+
+**Per halfword it is not random at all.** Across ALL EIGHT halfwords:
+
+```
+bits that ALWAYS differ : 0000000000001000     (bit 3, every halfword)
+bits that NEVER differ  : 0000000000000111     (bits 0-2, every halfword)
+bits 4-15               : unrelated
+```
+
+And bits 0-2 of the halfwords read, in order, `0 7 2 1 4 3 6 5` - a PERMUTATION of 0..7, i.e. a
+per-halfword positional tag, and it MATCHES between written and expected.
+
+Two things follow, and only two:
+ - **Halfword ordering and position are CORRECT.** The positional tag agrees. That rules out a
+   halfword shift, rotation or reversal in the link - which is what LEAD 1 was originally guessing at.
+ - The remaining difference is one systematically inverted bit per halfword (bit 3) plus twelve
+   unrelated bits. Those two facts do not sit together under a single simple cause, so **the honest
+   reading is that these are two DIFFERENT words of the firmware's generated sequence** that share
+   the positional-tag scheme - i.e. a sequence/address offset in the comparison, not a corrupted word.
+
+**NOT ESTABLISHED, do not adopt either:** that bit 3 is a stuck data lane (bits 4-15 would then have
+to match, and they do not); that the patterns are related by a shift (tested, they are not).
+
+**What would settle it, and it is cheap:** more Result/Expected pairs. One pair shows structure; three
+or four would show whether `Expected` is a fixed offset along the same generator. The firmware prints
+a pair per sample test, and the sample test runs at several addresses.
+
+### Ordering note
+
+34a is a defect we can name and fix; 34b is a lead that still needs data. Do 34a first - and check
+afterwards whether it alone changes SINTRAN's `Error when loading Control Store`, since a read-back
+verify that consults a cache we do not model would fail for exactly this reason.
+
+## 35. The ORACLE round boots - the earlier "real ACCP" failures were the timeout `[V]` 2026-08-30
+
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, `RETROCORE_ND5000_ROUND=hw`
+(microword B30 CPU **and** real 68000 ACCP firmware), `RETROCORE_HARNESS_TIMEOUT_SCALE=8`.
+Log `mudom-hw-s8.log`. **Passed, 36 m 28 s.**
+
+At scale 1 this same round failed at 5 m 02 s on `boot reached 'SINTRAN III RUNNING'`. At scale 8 it
+reaches `SINTRAN III RUNNING`, logs in, and runs `set-avail` fine. **The boot failure was the
+300,000 ms host wall-clock budget, exactly as the harness comment at
+`Nd100SintranNd5000OctobusBootHarnessTests.cs:3249-3254` warns.** Ronny was right on 2026-08-29 and
+the correction holds: the ACCP boots.
+Guest clock shows boot completing at 03.06 against a 02:42 start - roughly 24 minutes of host time
+for a boot the macro round does in about 5 seconds.
+
+### THE TEST PASSED AND THE ROUND DID NOT SUCCEED - read the capture name
+
+```
+----- `set-avail` (OK) -----
+----- @nd-500 (STALL) -----
+----- captured console (octobus-shortbringup-no-monitor) -----
+```
+
+`@nd-500` produced NO monitor banner, and the harness soft-bails to a `-no-monitor` capture instead
+of asserting. So `Passed!` here means "the fixture completed its bail path". **That is the third
+green-signal-that-means-less-than-it-looks tonight** (the others: Machines.Accp 142/142 vs the failing
+selftest in §32, and `place-domain=returned` being the error path in §31). On this lane, read the
+capture name and the OUTCOME line, never the pass/fail.
+
+Scope: the `@nd-500` wait had roughly 12 minutes of the run left. That is long against a macro round
+that answers in seconds, but the run ended at its own budget, so "the monitor never comes up" is NOT
+yet separable from "not within this window". Do not record it as the former.
+
+### What IS solid: almost nothing crosses the octobus on this round
+
+| measure | macro round (§31) | oracle round `hw` |
+|---|---|---|
+| station -> ND-100 frames | 896 | **18** |
+| `N5STA=1` in mailbox nbhd | 1222 | **16** |
+| MicroVersion / CpuParameter | `0x2E9A` / `0x03E1` | empty |
+| X5ACT activation candidates | 4096 | **0** |
+| discovered mailbox | header+extBlock found | blank |
+| servicer copy-family | 13 transfers | **0** |
+
+SINTRAN still reports `1 alive -> ND-500 subsystem initialised`, which again is not evidence that
+anything works (§32).
+
+### Still running, and it is the discriminator
+
+`hw-accp` (macro CPU + REAL ACCP) at scale 8. Reading:
+ - if `hw-accp` reaches the monitor, the microword CPU is what blocks it;
+ - if it stalls at `@nd-500` too, the real ACCP path is, and the microword CPU is not implicated.
+
+## 36. CORRECTION TO §34b: `Expected` is a FIXED CONSTANT, so the write path is the suspect `[V]` 2026-08-30
+
+§34b read the Control Store sample mismatch as "two different words of the firmware's generated
+sequence ... a sequence/address offset in the comparison". **Two independent runs refute that.**
+
+`accp-cs.log` (RealCpuSink) and `accp-suite.log` (an earlier run, different sink) print the SAME
+expected value:
+
+```
+accp-suite.log:  Result  : FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF   (address 0 never written)
+                 Expected: 7698 B027 0AAA 2C91 0D8C F58B AFBE 6195
+accp-cs.log:     Result  : 5640 51AF 4C92 BB59 8BB4 0393 5426 50DD   (what OUR sink stored at 0o0)
+                 Expected: 7698 B027 0AAA 2C91 0D8C F58B AFBE 6195   <- IDENTICAL
+```
+
+**`Expected` is a fixed constant the firmware always wants at address 0.** It is not per-run and not
+a member of a sequence, so the "sequence offset" reading in §34b is dead. The bit-3 / bits-0-2
+structure noted there is real but does NOT support that conclusion; ignore the conclusion, keep the
+measurement.
+
+That reframes the whole thing: the firmware writes, expects a SPECIFIC pattern back, and our sink
+faithfully returns what it stored. **So the corruption - if it is corruption - is on the WRITE path,
+not the read-back.** Either the firmware's shifted-in data is being stored wrong, or the store is
+expected to TRANSFORM it (the ACCP loads the control store through APR/ASR serial shift loops that
+run THROUGH the CPU - see the octobus skill - so a verbatim store may itself be the wrong model).
+
+### Two concrete oddities in the link trace, both `[V]`, neither yet explained
+
+**1. Two different gate values on the same command.** Census of the retained trace in `accp-cs.log`:
+
+```
+4x  cmd=0x0018 gate=0x04     <- the console LOAD-CONTROL-STORE path (verbatim, and it round-trips)
+1x  cmd=0x0018 gate=0x02     <- the selftest path, adjacent to MICRO-ARM
+```
+
+The console path with `gate=0x04` is provably faithful - its SHIFTs and its COMMIT match exactly
+(`SHIFT 1122 3344 ... F001` -> `COMMIT ... 112233445566778899AABBCCDDEEF001`, reply `- OK -`).
+Whether we treat `gate=0x02` differently from `0x04` is UNCHECKED and is the first thing to read.
+
+**2. Data shifted under one address, committed at another.**
+
+```
+SHIFT 3FF1 / ADDR-LATCH 3FF1 / SHIFT 4040 0001 DE02 8018 0000 0000 0000 0000 / ADDR-LATCH 0000 halfwords=7
+SHIFT 3FF0 / ADDR-LATCH 3FF0 / MICRO-ARM addr=0x3FF0 started=True
+COMMIT  cmd=0x0018 addr=0x3FF0 gate=0x02  40400001DE028018 0000000000000000
+```
+
+The eight data halfwords arrive while the latched address is `3FF1`; the commit then lands them at
+`3FF0`. That may be correct (a pipelined address/data convention) or an off-by-one in our latch
+handling. **NOT ESTABLISHED either way** - it is named here because it is exactly the shape that
+would make a write land one word off, and a one-word offset is what a "wrote X, expected Y" sample
+test would report.
+
+### Next, in order, and all of it is reading not running
+
+1. Read the `gate` handling in `OctobusND5000Station` / the control-store link: is `0x02` given the
+   same path as `0x04`?
+2. Read the ADDR-LATCH/COMMIT pairing rule against the ACCP manual's LOCSD/LOCSM description.
+3. Only then form a hypothesis about the constant `7698 B027 0AAA 2C91 0D8C F58B AFBE 6195`.
+
+## 37. §36 follow-up: the transform search is EXHAUSTED and empty - stop theorising, capture the trace `[V]` 2026-08-30
+
+### The link already declares the gap - read it before theorising further
+
+`Nuget\HackerCorpLabs.Emulation.Machines.Accp\src\Devices\Nd5000ControlStoreLink.cs:127-133`, in its
+own words:
+
+> **MODELLING ASSUMPTION, stated rather than hidden.** The 128-bit microword is taken from the EIGHT
+> 16-bit words written to `0x550000` between gate-on and the `0x0018` command, in the order written.
+> The clock pairs are counted and checked for phase order but are not modelled bit by bit: the
+> firmware emits 8 clock pairs per 16-bit word, which is not one clock per bit, so the exact serial
+> mechanism is NOT proven and is deliberately NOT invented here.
+
+So we stage 8 words verbatim where the hardware runs a real serial shift. That is the right shape of
+gap for "wrote X, expected Y". It also answers §36's gate question: the two gate bits are DOCUMENTED
+and deliberate - `0x741E` uses bit 2 (`0x04`), `0x764E` uses bit 1 (`0x02`), and
+`GateBitAlternate` handles both. **`gate=0x02` is not an unhandled case. Drop that suspicion.**
+
+### Transform search: NEGATIVE, and exhaustive enough to record so it is not repeated
+
+Does `E = 7698 B027 0AAA 2C91 0D8C F58B AFBE 6195` come from
+`R = 5640 51AF 4C92 BB59 8BB4 0393 5426 50DD` by any plausible serial re-ordering?
+
+Tested and ALL NEGATIVE: all 127 bit rotations and shifts, both directions; halfword rotation;
+halfword reversal; per-halfword bit reversal; per-halfword byte swap; per-halfword rotation; full
+128-bit reversal; 64-bit half swap then any rotation; complement then any rotation; and
+de-interleaving into 2, 4, 8 and 16 lanes with every per-lane rotation.
+
+**The two patterns also share NO halfword value at all**, so `E` is not a word-shifted view of `R`
+with new words entering either.
+
+`E` is therefore not a re-ordering of `R`. It is a DIFFERENT pattern.
+
+### What the second run says, and where the inference has to stop
+
+`accp-suite.log` read address 0 as all `FFFF` - the adapter's "nothing was ever written here" -
+while expecting the same constant `7698 ...`. If that is taken at face value, the firmware's write
+of the expected pattern to address 0 never reached the sink in that run at all.
+
+**I am not building further on that.** Two logs from different harness states, one of them from
+00:55 and possibly predating fixes, is exactly the material from which a plausible tower gets built
+(RULE #0b). The chain already has three inferential steps and no direct observation of the write.
+
+### The next step is a MEASUREMENT, not another theory
+
+The link trace in `accp-cs.log` is capped - it prints "last 140" entries, which is the `0x3FF0`
+window. **The address-0 window is not in it.** Get the full SHIFT / ADDR-LATCH / COMMIT sequence for
+the sample test's address-0 write and read it in order: what the firmware shifts, in what order,
+under which latched address, and what we commit. That is one diagnostic change (raise or filter the
+trace cap), and it replaces every remaining guess above with bytes.
+
+## 38. THE 2x2 IS ANSWERED: the CPU axis decides the outcome, the ACCP axis only decides the SPEED `[V]` 2026-08-30
+
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, pack `DOMS-CSFIX.IMG`, all four round
+modes. `hw-accp` at `RETROCORE_HARNESS_TIMEOUT_SCALE=8` finally landed: **passed, 4 h 36 m**
+(`mudom-hwaccp-s8.log`).
+
+| round | CPU | ACCP | monitor | how far | wall clock |
+|---|---|---|---|---|---|
+| `''` | macro | emulated | **OK** | `> Loading Swapper`, then STALL | 32 m |
+| `hw-accp` | macro | **real 68k** | **OK** | `> Loading Swapper`, then STALL | **4 h 36 m** |
+| `hw-cpu` | **microword B30** | emulated | n/a | **`Error when loading Control Store`** -> fatal | 2.5 m |
+| `hw` | **microword B30** | **real 68k** | STALL | never reached the monitor | 36 m, budget-limited |
+
+`hw-accp` is IDENTICAL to the macro round in every outcome field:
+`nd-500=OK place-domain=STALL run=STALL startMessagesSeen=1`, 896 station->ND-100 frames,
+13 copy-family transfers, `> Loading Control Store` then `> Loading Swapper`.
+
+**So the real 68000 ACCP changes NOTHING about what happens - only how long it takes (8.6x slower,
+276 min vs 32 min).** The two macro cells agree completely; the microword cell fails at the control
+store. **The CPU axis decides the outcome. #78 is on the microword CPU / control-store side**, which
+is where §33 revised it to, and the real-ACCP path is exonerated.
+
+### The `hw` cell is STILL not a clean measurement, and now we know why
+
+At 8.6x slowdown, every step needs 8.6x the macro round's wall clock. The `hw` round spent about 24
+of its 36 minutes booting and had roughly 12 left when its budget ended at `@nd-500`. That is not
+enough to call "the monitor never comes up" - it is the same host-wall-clock artefact as §35, one
+step later. **Do not score the `hw` cell.** If it is ever worth measuring, it needs scale >= 24, i.e.
+a budget of hours, and the three clean cells already answer the question without it.
+
+### What this closes and what it does not
+
+CLOSES: "is the real ACCP implicated in the octobus stall?" - **no**. Both macro cells reach exactly
+the same place with and without it. Combined with #81 (the card boots) and §32 (the green suite only
+ever licensed that claim), the ACCP is not where the remaining work is.
+
+DOES NOT CLOSE: the macro rounds' own stall after `> Loading Swapper` (that is #79, and §31 showed
+the swapper is idling CORRECTLY there), nor the microword control-store failure (#78, now pointed at
+the serial-shift modelling gap the link declares in §37).
+
+## 39. THE ADDRESS-0 WRITE, READ IN ORDER: the link mispairs data with address and drops most commits `[V]` 2026-08-30
+
+§37 said stop theorising and capture the trace. Done: `Nd5000RealCpuStartTests` now prints a 24-entry
+window before every COMMIT instead of the trace tail (the tail only ever showed `0x3FF0`, which is why
+this was never seen). Log `trace-window.log`, 8 commit windows out of 233,582 trace entries.
+
+### The address-0 window, verbatim and in order
+
+```
+SHIFT      3FF0
+ADDR-LATCH 3FF0 halfwords=0          <- address 3FF0 latched
+SHIFT      0718 E6A7 2F2A E711 E60C D40B 5C3E 0415     <- 8 data halfwords FOR 3FF0
+ADDR-LATCH 0415 halfwords=7          <- the 8TH DATA HALFWORD latched AS AN ADDRESS
+SHIFT      3FFB
+ADDR-LATCH 3FFB halfwords=0          <- address 3FFB latched
+SHIFT      5640 51AF 4C92 BB59 8BB4 0393 5426 50DD     <- 8 data halfwords FOR 3FFB
+ADDR-LATCH 10DD halfwords=7          <- again: 50DD masked to 14 bits = 10DD, latched as an address
+SHIFT      0000
+ADDR-LATCH 0000 halfwords=0
+COMMIT     cmd=0x0018 addr=0x0000 gate=0x04 564051AF4C92BB598BB40393542650DD
+```
+
+**Three facts, all directly observed:**
+
+1. **The committed data belongs to a different address than the commit.** `5640 51AF ... 50DD` was
+   shifted while `3FFB` was latched. It is committed at **`0x0000`**.
+   This is the whole of §36's "wrote X, expected Y": address 0 receives 3FFB's word.
+2. **The first group is never committed at all.** `0718 E6A7 ... 0415`, shifted under `3FF0`, is
+   overwritten in the staging buffer by the next eight shifts. It reaches the control store nowhere.
+3. **The 8th data halfword is being latched as an address**, masked to 14 bits:
+   `0415` -> `ADDR-LATCH 0415`, and `50DD & 0x3FFF = 0x10DD` -> `ADDR-LATCH 10DD`, both tagged
+   `halfwords=7`. `Nd5000ControlStoreLink.cs` says the "address is the NINTH GATED word" model was
+   REPLACED by the explicit `0x3010` latch - these `halfwords=7` latches look like a live remnant of
+   the retired model.
+
+The second window shows the same shape independently: groups shifted under `0002` and `0003`, then
+`ADDR-LATCH 0001`, then `COMMIT addr=0x0001` carrying **`0003`'s** data.
+
+### Why only 8 microwords ever land [D]
+
+The console reported `writes before=8 after=9` and the sink `microwords written: 8 addresses`, across
+a run in which the firmware clearly shifted many groups. **We COMMIT only on `cmd=0x0018`**; the
+selftest's other writes complete by some other signal, so nearly all of them are dropped, and the few
+that do commit carry the wrong group's data. Marked `[D]` - the drop is inferred from the count, the
+mispairing is observed.
+
+### What this does and does not establish
+
+ESTABLISHED `[V]`: the link commits data under an address it was not shifted with, drops preceding
+groups, and latches data halfwords as addresses. Any control-store image assembled through this path
+is wrong in both content and placement - which is a sufficient cause for SINTRAN's
+`Error when loading Control Store` on `hw-cpu`, since that command ends in a read-back verify.
+
+NOT ESTABLISHED: the correct pairing rule. The obvious reading - latch an address, shift 8 words,
+commit them THERE - is a guess until checked against the ACCP ROM's `0x76E6` address phase and
+`0x7776` shift loop. **Do not "fix" it to the obvious rule without that check**; §33's lesson was
+exactly this, and the retired ninth-word model shows this protocol has already fooled one carve.
+
+NEXT: read `0x76E6` / `0x7776` / `0x7714` in the ACCP ROM and derive the pairing rule from the
+firmware, then make the link obey it and re-run `hw-cpu`.
+
+## 40. RETRACTION of §39's defect claim: the link had already modelled all of it `[V]` 2026-08-30
+
+§39 read the address-0 trace and concluded the link "mispairs data with address, drops most commits,
+and latches data halfwords as addresses (a live remnant of the retired ninth-word model)".
+**I then read the code that produced the trace, and the defect claim does not survive.**
+
+### What `Nd5000ControlStoreLink.cs` already says, in its own comments
+
+- On `CommandAddressLatch` (`0x3010`, ROM `0x7714`): *"The word most recently written to `0x550000`
+  IS the control-store address"*, and then, precisely about what §39 flagged:
+  *"This is also what the old 'the address is the NINTH gated word' reading was really seeing: the
+  firmware does write it ninth, right after the eight halves. It is the address PHASE doing so, not a
+  ninth part of the microword."*
+  It sets `_addressIsNewestInRing = true` so a following perform takes the eight words BEFORE it.
+  **So `ADDR-LATCH 0415 halfwords=7` is EXPECTED BEHAVIOUR, not a remnant.** §39 point 3 is wrong.
+- `Commit()` has three explicitly-reasoned source paths - latch (`_pendingAddress`), staging
+  (`_address`), and ring with the address skipped when it is newest - each with a comment saying why.
+  The address/data pairing is not an oversight; it is modelled. **§39 point 1 is unsupported.**
+- `CommandOperation` (`0x2018`) is deliberately NOT a control-store write - it loads the MIR. The
+  comment records that conflating them previously committed to address 0 "several hundred times per
+  boot" and produced a retracted claim of 281 loaded microwords. **So the low commit count in §39
+  point 2 is the CORRECTED behaviour, not evidence of dropped writes.**
+
+### What still stands from §39
+
+Only the OBSERVATION, which is worth keeping: in the address-0 window the eight halfwords
+`5640 51AF 4C92 BB59 8BB4 0393 5426 50DD` are shifted while `3FFB` is latched, and the firmware then
+runs a fresh address phase latching `0000` immediately before the `0x0018`. Committing at `0x0000`
+FOLLOWS the most recent address phase. That is consistent with the protocol as carved, so it is not
+by itself evidence of a fault.
+
+### So the live explanation is the one the link declares itself (§37)
+
+> the firmware emits 8 clock pairs per 16-bit word, which is not one clock per bit, so the exact
+> serial mechanism is NOT proven and is deliberately NOT invented here
+
+The firmware writes a pattern and expects a DIFFERENT fixed pattern back. If the address/data pairing
+is correct - and the code argues it is - then the transform between them lives in the unmodelled
+serial mechanism. That is the open question for #78, and it needs the ROM's `0x7776` shift loop read
+bit by bit, not another trace reading.
+
+### THE LESSON, and it is the third instance tonight
+
+**Read the code that produces a trace BEFORE calling anything in that trace a defect.**
+Tonight: §32 -> §33 (TESTOBJ 29 was a test pattern), §34b -> §36 (Expected is a fixed constant),
+§39 -> §40 (the pairing was already modelled). Each time a trace looked wrong, a claim was written,
+and the file that emitted the trace already contained the answer - usually in a comment written by
+someone who had made the same mistake first and recorded the retraction.
+
+The control: for any anomaly seen in an instrument's output, open the emitter and search its comments
+for the field name BEFORE writing it up. That is one grep, and it would have prevented all three.
+
+## 41. The serial-shift hypothesis is WEAKENED too - the carve already answered it `[V]` 2026-08-30
+
+Applying §40's control (read the existing carve before deriving), `HANDOFF-ACCP-CONTROL-STORE-MODEL-
+CORRECTED-2026-08-04.md` already answers the §37/§40 question, from the ROM:
+
+```
+778a  lea     0x001144F0,A3      ; buffer start
+7790  lea     (0x10,A3),A4       ; END = start + 0x10 = 16 BYTES
+779c  move.w  #8,D3              ; 8 clock pairs per halfword
+77a0  move.w  (A3),(A2)          ; halfword -> 0x550000
+77aa  addq.l  #2,A3
+77ac  cmpa.l  A3,A4 / bne 779C
+```
+
+> **Neither - the firmware writes all 128 bits.** A3 walks `0x1144F0` to `0x114500` in steps of 2 -
+> 16 bytes, eight halfwords, 128 bits. The length is hard-coded, so every path through `0x7776`
+> sends eight; there is no four-halfword variant. `0x77B6` (shift in) is identical.
+
+**So the data is fully determined by the eight halfwords written to the port.** The clock pairs are
+timing, not a bit-serial data path. The verbatim staging model is therefore RIGHT, and §37's "the
+transform lives in the unmodelled serial mechanism" is NOT supported. Weakened, not disproven - the
+clock pairs still are not modelled - but nothing points at them carrying data.
+
+The same carve names the off-by-one-word failure it fixed:
+> **The shift ring needs NINE slots.** The address travels through the same `0x550000` port right
+> after the eight halves, so eight slots evicted the first half and the microword committed one word
+> out of step.
+
+**Already in:** `Nd5000ControlStoreLink.cs:330` - `RingSlots = WordsPerMicroword + 1`. Not the bug.
+
+### Incidental, and it reframes the test's pass condition
+
+`0x001144F0` is the shift engine's SOURCE BUFFER **and** `Nd5000RealCpuStartTests.VerdictBlock`.
+They are the same memory. So "word[6] comes back `0x0100`" is checking what the read-back path
+(`0x2010` / `0x2011` / `0x77B6`) shifted back INTO the firmware's own buffer - not an independent
+verdict register. Worth knowing before anyone treats that word as an oracle.
+
+### Where #78 actually stands now
+
+Every mechanism I can check is correct: address/data pairing (§40), gate bits (§37), nine-slot ring
+and full-128-bit write (here). The discrepancy is real and unexplained: the firmware writes
+`5640 51AF ...` at address 0 by our link's record and expects the fixed `7698 B027 ...`.
+
+**NEXT, and it is an instrument nobody has read yet: the READ-BACK path.** Every commit-window entry
+so far is a WRITE (`SHIFT` / `ADDR-LATCH` / `COMMIT`). The verify path issues `0x2010` then `0x2011`
+per word through `0x77B6`, and none of that has been traced. Capture which ADDRESS the sample test
+reads back and compare it with what was written THERE - the write side has now absorbed four
+hypotheses without yielding, which is itself a reason to stop testing it.
+
+## 42. The firmware NEVER writes the pattern it expects - and I am stopping the write-side audit `[V]` 2026-08-30
+
+### Two solid facts
+
+**1. Neither sample-test pattern is a ROM constant.** Scanned all 131,074 bytes of `AccpRom.cs`:
+`7698B0270AAA2C910D8CF58BAFBE6195` (expected) - **0 hits**;
+`564051AF4C92BB598BB40393542650DD` (written) - **0 hits**; even the single halfwords `7698` and
+`5640` - 0 hits. Both are COMPUTED at runtime by a generator on the 68000.
+
+**2. The firmware never writes the expected pattern to the control store at all.** The whole run
+commits eight microwords, to `0o0 0o1 0o37760 0o37761 0o37762 0o37763 0o37764`, and the sink logs
+each one. **None of them is `7698 B027 ...`.** The firmware expects at address 0 a value it never
+stored there.
+
+That reframes #78. The expected value cannot be explained by a prior write we mishandled, so it must
+come from hardware behaviour we do not model - the read path returning something derived rather than
+stored. Which is the same suspicion as §37 but now on the READ side and with a reason.
+
+`40400001DE028018` IS a ROM constant (offset `0x13b86`) - so §34a's control-cache finding stands and
+is strengthened: that is the firmware's own hard-coded test microword, written to the store, and the
+cache read returns it because no separate control cache exists.
+
+### The read-back path is ALSO correctly modelled
+
+Checked before instrumenting, per §40's control. `ReadData()` serves from
+`_controlStore.TryReadWord(_address, ...)` with the comment *"Read the word that lives AT THE
+ADDRESS, not whatever was staged last"*, and `_readbackIndex - 1` correctly compensates for `0x77B6`
+issuing `0x2011` BEFORE each word. `CommandVerify` rewinds the cursor. No defect.
+
+### STOPPING THE WRITE-SIDE AUDIT - six mechanisms, no defect, diminishing returns
+
+Audited and CORRECT: address/data pairing (§40), gate bits (§37), nine-slot shift ring (§41),
+full-128-bit write (§41), read-back address selection, read-back indexing.
+Hypotheses raised and killed: TESTOBJ 29 (§33), address mispairing (§40), unmodelled serial transform
+(§41), ROM constants (here).
+
+I also caught myself starting a seventh round: the per-halfword XOR of the never-committed `3FF0`
+group against the expected pattern is `7180 5680 2580 CB80 EB80 2180 F380 6580` - **low byte 0x80 in
+all eight**, i.e. bits 0-6 match and bit 7 always differs. Striking, and the `3FFB` group has a
+different signature (bit 3). **Two data points, two incompatible signatures, and I have no third.**
+The simplest account is that the firmware's generator emits values with structured low bits, in which
+case both signatures are artefacts of the generator and say nothing about the link. **Not pursued -
+this is exactly the RULE #0b shape that has already produced three retractions tonight.**
+
+### What would actually settle it, when someone returns to #78
+
+Instrument the firmware's own generator, not the link: find where the 68000 computes these patterns
+and log the seed and the call sequence. Then "wrote P, expected Q" becomes "the generator was
+advanced N times between the write and the check", which is answerable. Everything short of that is
+curve-fitting on two samples.
+
+## 43. #79 RESTATED: `LSWPAGE` is sent BY the swapper, not queued by SINTRAN `[V]` 2026-08-30
+
+Read from the NPL source, `MP-P2-N500.NPL` (not derived):
+
+```
+135443   SWPDECODER:
+135443          T:=5MBBANK; *AAX SWPFU; LDATX                % Swap-function
+135446          IF A >> SWFMAX GO FAR ESWPFATAL
+135451          A GOSW
+135451             FAR ESWPFATAL, LNEWSWAP,  FAR LSWPAGE, FAR LPRSUSPEND,
+135456             FAR LALLOPAGE, FAR LDATREADY, FAR LCLTSB;
+...
+136112   LSWPAGE:                                            % Disk I/O
+```
+
+`SWPDECODER` reads `SWPFU` **out of the swapper message** and dispatches on it. So `SWPFU` is written
+by the ND-500 SWAPPER - the program running on the ND-500 - and `LSWPAGE` is the swapper **asking
+SINTRAN for disk I/O**. It is a REQUEST INBOUND to SINTRAN, not work SINTRAN queues.
+
+**So this task's previous title - "SINTRAN queues no LSWPAGE" - was backwards**, and so was the
+question it framed. Corrected here.
+
+### The actual gating chain
+
+`LNEWSWAP`'s own comment states its job:
+
+```
+135470   % Start message currently being served by the swapper, if any,
+135470   % and find next process requesting the swapper.
+```
+
+So the swapper asks "who needs me?", and SINTRAN answers from the list of processes REQUESTING the
+swapper. §31 measured the swapper asking `LNEWSWAP` twice and being told nothing, then parking. The
+`5ACTSWAPPER` call-site table from the same run shows why `[V]`:
+
+```
+queued-on-swapwait-fifo      @0o135312  hits=0     <- NOTHING was ever queued
+call:TRAPDECODER-pagefault   @0o135567  hits=0     <- no page fault queued anything
+call:SWPD4-fifo-drain        @0o136237  hits=1
+```
+
+and, from the page-fault instruments in the same capture, `page-fault records posted: 0`.
+
+**Chain `[D]`, each link measured but the linkage inferred:** no page fault -> nothing queued on the
+swap-wait FIFO -> `LNEWSWAP` finds no requesting process -> the swapper idles correctly -> it never
+has cause to send `LSWPAGE`. The swapper is behaving properly at every step.
+
+### Which makes the real question a different one, and it is upstream
+
+> During `PLACE-DOMAIN`, what is supposed to make the domain request the swapper in the first place?
+
+`PLACE` (`006B SGLOA`) records disc location metadata ONLY and transfers no content
+([[nd500-domain-load-and-run-mechanism]]); the content arrives by demand paging. So the first access
+to an unmapped page should fault, queue the process, and wake the swapper. **No fault is posted, and
+§31's own instrument declared it could not see one because nothing outside segment 1 was translated.**
+
+That points straight back at the question closed as #71 ("why does the ND-500 never raise a page fault
+on this lane") - which should be re-opened rather than treated as settled, because the reason it
+mattered has now changed.
+
+**Do NOT conclude from this that the swapper or `LNEWSWAP` is broken.** Everything measured on the
+swapper side is correct behaviour for an empty request list.
+
+## 44. CORRECTION TO §43: an empty swap-wait FIFO is EXPECTED. The handover DID happen. `[V]` 2026-08-30
+
+§43's chain opened with "nothing queued on the swap-wait FIFO -> `LNEWSWAP` finds no requesting
+process". **`5ACTSWAPPER` in `MP-P2-N500.NPL` shows that link is wrong.** It has TWO paths:
+
+```
+144762   5ACTSWAPPER: A:=L=:"LREG"                  % Entry: X = message requiring service
+144775          SWPWAIT; CALL WN5STATUS             % Mark that proc. is waiting for swapper
+144777          X:=SWMSG; CALL RN5STATUS
+145001          IF A=PSWWAIT THEN                   % Swapper free?
+145006             AD:=CMSGTOSW; *AAX HSWPI; STDTX  %   hand the message straight over
+145011             SWACTIVE; *AAX SWPFU-HSWPI; STATX
+145054             X:=SWMSG; *AAX SWPST; STATX      %   save reason for activating swapper
+145071             3MONCO; *MICFU@3 STATX
+145073             CALL MCCO                        %   restart the swapper after the mon call
+145111          ELSE
+145112             % - Insert in Swap-wait-fifo     %   ONLY when the swapper is BUSY
+```
+
+**The FIFO is the BUSY path.** When the swapper is free (`PSWWAIT`) the message goes straight to it
+and the FIFO is never touched. So `queued-on-swapwait-fifo hits=0` alongside
+`HANDOVER-taken-SWACTIVE hits=1` is **exactly what a free swapper receiving one message looks like**
+- it is correct behaviour, not an absence of requests. §43's first link is retracted.
+
+### What that leaves, and it is a genuine tension
+
+The handover HAPPENED, so **a message DID require service from the swapper**. SINTRAN wrote the
+message pointer into `HSWPI` (§31 measured `swpInfo=0x00008E30`, non-zero), set `SWPFU := SWACTIVE`,
+recorded the reason in `SWPST`, and restarted the swapper with `3MONCO` (§31: `micfu[... 24B:1 ...]`,
+`restarts=1/1`).
+
+And `LNEWSWAP` begins by reading exactly that field:
+
+```
+135470   LNEWSWAP:
+135470          T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX   % AD:=X.SWPINFO
+135474          IF D><0 THEN                              % Any proc. currently served?
+```
+
+So `HSWPI` is non-zero and `LNEWSWAP` should take the "a process IS currently served" branch. **Yet
+the swapper asked `LNEWSWAP` twice and parked.** Those two facts are in tension, and that tension -
+not the FIFO, not `LSWPAGE` - is where #79 actually lives now.
+
+Also carved and worth keeping: `SWPST` records WHY the swapper was activated, discriminating
+`MICFU == 3SWMESS` (a message, reason taken from `SWFUN`) from everything else (a TRAP, reason taken
+from `TRAPN` - the page-fault case). That field is the direct answer to "what woke the swapper" and
+has never been read in a capture.
+
+### Next
+
+Read `SWPST` and `HSWPI` from a live capture at the moment of the handover, and follow `LNEWSWAP`
+from `135470` to see which branch it takes with `HSWPI` non-zero. That is a targeted instrument on
+two named fields, not another sweep.
+
+### Housekeeping note on this document
+
+This is the fifth correction tonight (§33, §36, §40, §41, §44). Every one moved the picture closer,
+and every one came from reading a SOURCE - the microcode, the ROM carve, the emitting C#, the NPL -
+rather than from another measurement. The measurements were mostly right; the readings of them were
+what needed fixing.
+
+## 45. #79 RESOLVED AS "NOT A DEFECT": the swapper subsystem is consistent end to end `[V]` 2026-08-30
+
+`LNEWSWAP`'s tail, from `MP-P2-N500.NPL`:
+
+```
+135764   WHILE A><D                          % More messages in Swap-fifo?
+136015      IF A/\160000><0 GO EMPTY         % Do not serve if pf
+136027      IF A=SWPWAIT THEN
+136037         CALL 5ACTSWAPPER
+136044         BREG=:B; GO NXTMSG
+136047      FI
+136047   OD
+136050   EMPTY: A:=0=:D; T:=5MBBANK
+136053          X:="N500DF".X500DF; *AAX X5SWO; STDTX
+136057          X:=SWMSG; *AAX HSWPI; STZTX  % HSWPI := 0
+136062          *AAX SWPIN-HSWPI; STZTX
+136065          GO NXTMSG
+```
+
+`LNEWSWAP` starts the message currently served (`HSWPI`), then walks the **Swap-FIFO** for the next
+process. The FIFO is filled ONLY by `5ACTSWAPPER`'s busy path (§44). Nothing was ever queued there,
+so `WHILE A><D` does not execute, control falls to `EMPTY`, which clears `X5SWO`, `HSWPI` and
+`SWPIN` and returns.
+
+**Put end to end, every step of the measured run is the designed behaviour:**
+
+| measured (§31) | why it is correct |
+|---|---|
+| `HANDOVER-taken-SWACTIVE` 1, `queued-on-swapwait-fifo` 0 | swapper was FREE, so the direct path ran and the FIFO is untouched (§44) |
+| `restarts=1/1` (`Seen == Taken`) | the `3MONCO` restart at `145071`-`145073` was forwarded, no MON gap |
+| `swpfu[LNEWSWAP:2]`, no `LSWPAGE` | the swapper asked for the next process; the FIFO was empty, so `EMPTY` answered and it had no page to fetch |
+| `PC=0x08008255 stopMode=WAIT` | the designed idle after `EMPTY` |
+| `page-fault records posted: 0` | nothing outside segment 1 was ever translated, because no domain ever ran |
+
+**Nothing in the swapper, `LNEWSWAP`, `5ACTSWAPPER` or the FIFO is faulty.** The subsystem correctly
+served exactly one request and then correctly found no more. #79 as originally posed - and as posed
+in §43 and §44 - has no defect behind it.
+
+One honest caveat: §31's `swpInfo=0x00008E30` comes from the harness's `LastStartSwpInfo`, which is a
+value recorded at start time, not a live read of `HSWPI`. Under this account `EMPTY` will have zeroed
+the live field. The two are not in conflict, but the probe does NOT confirm the live value either -
+do not cite it as evidence that `HSWPI` stayed non-zero.
+
+### So the blocker moves upstream, and it is a different question
+
+There is only ONE request because the domain never runs, and the domain never runs because
+**`place-domain` itself STALLS** - §31 and §38 both measured `place-domain=STALL run=STALL`, with the
+console stopping after `> Loading Swapper` and never printing `> Allocating memory`.
+
+**THE LIVE QUESTION IS NOW: what does `PLACE-DOMAIN` do between `> Loading Swapper` and
+`> Allocating memory`, and where does it stop?** That is a `nd-500-mon` / `FUNCS` path question
+(`006B SGLOA`, bracketed by `055B SPLAC` / `056B EPLAC`), not a swapper question.
+
+Everything above is MACRO-round evidence; per §38 it cannot be confirmed on the oracle round until
+#78 clears.
+
+## 46. THERE IS A RECORDED WORKING INSTANCE, and every stall tonight was measured at SCALE 1 `[V]` 2026-08-30
+
+`OCTOBUS-SWAPPER-HANDOFF-2026-07-25.md` section 7.7.9, "THE SWAPPER WORKS (2026-07-29)", console
+unedited:
+
+```
+ND-5000: status
+> Loading Control Store
+> Loading Swapper
+ZERO 0 / CARRY 0 / SIGN 0 / FLAG 0 / OVERFLOW 0
+
+ND-5000: start-swapper
+> Allocating memory - 7110B pages
+ND-5000: who-is-on
+===>     1 used by SYSTEM           on terminal    1    cpu  1
+```
+
+`OUTCOME: ENTER=OK login=OK nd-500=OK status=OK start-swapper=OK list=OK stop-system=STALL`
+
+### Two corrections this forces
+
+**1. `> Allocating memory` belongs to `START-SWAPPER`, not to `PLACE-DOMAIN`.** §45 (and the harness
+comment at `Nd100SintranNd5000OctobusBootHarnessTests.cs:2736`) framed it as part of place-domain.
+The working transcript splits it: `status` prints the two Loading lines, `start-swapper` prints
+`> Allocating memory`. So the SHORT BRING-UP never running start-swapper is a sufficient reason for
+it never to appear there - §45's "place-domain stalls before Allocating memory" is the wrong shape.
+
+**2. That same section says, in bold, what tonight repeated:**
+
+> The last two "STALL"s were the harness, not the machine ... Re-running with
+> `RETROCORE_HARNESS_TIMEOUT_SCALE=5` turned both OK with no code change - that is the proof, not an
+> argument ... every harness timeout is HOST WALL-CLOCK, so a STALL conflates "never happened" with
+> "not within N host seconds". A false STALL is first-class misleading evidence.
+
+**Every ladder and short-bring-up run tonight was at SCALE 1.** Only the two real-ACCP rounds got
+scale 8. So `status=STALL`, `place-domain=STALL`, `run=STALL`, `list=STALL` are all unproven.
+
+### The measured difference against the working baseline
+
+Full ladder tonight (`ladder2.log`, scale 1):
+`OUTCOME: ... status=STALL start-swapper=[prompt=OK started=1] list=STALL stop-system=STALL`,
+`Allocating memory` count = **0**, and after start-swapper:
+`startSeen=0 startMicfu=0B startTaken=False swpfu[(none)] restarts=0/0 micfu[1B:27 12B:1 30B:12 31B:13]`
+- **no 23B, no 24B: `start-swapper` produced no swapper activity at all.**
+
+Short bring-up tonight (§31, scale 1), which does NOT run start-swapper:
+`startSeen=1 startMicfu=23B startTaken=True swpfu[LNEWSWAP:2] micfu[1B:49 12B:1 23B:1 24B:1 31B:13]`
+- swapper activity DID happen, driven by place-domain's automatic swapper load.
+
+The run WITH `start-swapper` got no swapper activity; the run WITHOUT it got some. That inversion is
+the real signal, and in the working baseline `status` COMPLETED (it printed the ZERO/CARRY/SIGN line)
+whereas tonight it stalls after `> Loading Swapper`.
+
+### Running now
+
+Full ladder and short bring-up, both macro round, both at `RETROCORE_HARNESS_TIMEOUT_SCALE=8`
+(`ladder-s8.log`, `mudom-s8.log`). If the stalls clear, tonight's #79 chain was built on false STALLs
+and §31/§43/§44/§45 all need re-reading against the new capture. **That possibility is the reason to
+run it before doing anything else on this lane.**
+
+---
+
+## 34. #78 REFRAMED: it is not one hole, it is a FEATURE SET the engine lacks `[V]` 2026-08-30
+
+### 34a. What was actually run
+
+Implemented `TESTOBJ=29` (flippable, env-gated) and re-ran `Nd5000RealCpuStartTests`. The blocker
+**moved**, four times, each time to a different unimplemented feature — and **every one of them is a
+field of the SAME microword, the ACCP firmware's own word at `0o0`**:
+
+| # | stop message | field of word `0o0` |
+|---|---|---|
+| 1 | `Test condition TESTOBJ=29 not implemented yet` | `TESTOBJ=29` |
+| 2 | `Operand select A,IDU,DPA not implemented yet` | `A_OP=166` |
+| 3 | `Status operation STATUS=11 not implemented yet` | `STATUS=11` |
+| 4 | `Address B operand AB,CMBRET not implemented yet` | `AB=8` |
+
+And the word sets more that were never reached: `AA,DISP`, `SCAL=IX*8`, `MEMORY=915`, `ABR,NPCREL`,
+`TBC,PREL`, `EA2SAVE`, `DEST=D,SPEC,CC`, `ALU_TRUE=21`/`ALU_FALSE=36`, `AAP_CTRL=163`.
+
+**So #78 is not "one unimplemented condition". `CpuND5000` cannot execute the ACCP firmware's
+selftest microcode at all** — the gap is a feature set, and one word exercises at least four holes.
+
+### 34b. THE METHOD LIMIT — why I stopped, and why the sequence above is NOT a work list
+
+**The blocker sequence is only trustworthy as far as blocker #1.** Each fill was a GUESS
+(`TESTOBJ=29` polarity is undocumented and ungraded; the DPA freshness question is open; `STATUS=11`
+was made a conservative no-op). A wrong guess sends execution down a path the real machine never
+takes, so blockers #2-#4 may belong to that wrong path. **Stacking guesses to enumerate is
+self-invalidating**, and continuing would have produced a longer list with less meaning.
+
+All three speculative edits are **REVERTED**; the tree is clean and `TESTOBJ=29` throws again as
+before. Nothing unvalidated was committed.
+
+### 34c. Two of the four are UNDOCUMENTED HOLES, and neither can be graded the usual way
+
+ - **`TESTOBJ=29`** — `mnemonics.md` and ND-05.022.1 App. A both run `28 COND,LCZ` -> `32 COND,ENTER`.
+ - **`STATUS=11`** — the same tables run `9 ST,SAVM` -> `12 ST,ACCA`; 10 and 11 have no mnemonic.
+
+A sweep of all 16384 words of `MICRO-5800-B30.DATA` finds **TESTOBJ=29 in zero of them**. Both values
+exist only in microwords the ACCP firmware WRITES ITSELF. **So the ~11k-vector differential oracle
+that pinned `TESTOBJ=38` cannot reach either, and its silence about them carries no information**
+(taxonomy #8, a structurally blind instrument).
+
+Tempting pattern, and it does NOT hold: `SAVA 4 -> ACCA 12` and `SAVF 6 -> ACCF 14` are both `+8`,
+which would make `11 -> 3 K,1IFZ`. But `SAVM 9 -> ACCM 13` is `+4`. The rule breaks; deriving 11
+from it would be invention.
+
+### 34d. The one fill that IS defensible, and why
+
+`A,IDU,DPA` (166) is *not* a hole — `mnemonics.md:411` documents it as *"A-BUS IS DPA-BUS-REGISTER"*,
+and `D,DAC,DPA` (232) is *"DESTINATION IS DAC DPA-REGISTER"*. **One physical DPA**, written via the
+DAC and presented on the A-bus by the IDU, so both map to `regs.Dpa`. Giving the read its own
+storage would be the "one piece of hardware, two models" defect that the octobus station's duplicate
+control store already cost this project once (§ the `_controlStore` / `_realControlStore` split).
+
+Residual `[D]`: `CpuND5000` keeps a one-word-delayed DPA snapshot (`_dpaForEa`) because address
+arithmetic must see the PREVIOUS word's DPA. Whether an A-bus read sees fresh or delayed is
+**unverified**.
+
+### 34e. What to do instead of guessing
+
+The static decode is the trustworthy instrument here — it needs no execution and therefore cannot be
+invalidated by a wrong fill. **Decode every microword the firmware writes (`0o0`, `0o1`,
+`0o37760..4` — all in `tmp/accp-cs.log`), list every field value each one uses, and diff that set
+against what `CpuND5000` implements.** That yields the complete, guess-free gap list in one pass.
+
+Then the two undocumented holes need a real source, not a pattern: the ND-5000 hardware description
+(`ND-05.020.01`) rather than the microprogram guide's mnemonic table, since these values are used by
+hardware-level firmware rather than by the macro-instruction store.
