@@ -2,256 +2,190 @@
 
 **OUTSTANDING WORK ONLY.** Nothing finished is recorded here.
 
-**Lane:** this session owns **ND-5000 / octobus**. `nd500uc-47` owns **ND-500 / classic 3022**
-(#49, #66, the DOM corpus).
+**Lane:** this session owns **ND-5000 / octobus**. `nd500uc-47` owns ND-500 / classic 3022.
 
 ---
 
 ## Next
 
-**B9 — validate `start-swapper`.** B1 is CLOSED (root-caused, section 23: it is the designed
-"control store not loaded" gate, and `3RMICV` is answered 100+ times once the store is loaded).
-The `start-swapper` ladder run is the first thing that has never been measured on this pack.
+**1 — make PLACE-DOMAIN complete on the macro round.** It is the single thing standing between us
+and a real program running. Everything else on this list is behind it or beside it.
 
 ---
 
-## THE THREE RULES THAT ORDER THIS FILE  (Ronny, 2026-08-30)
+## THE GOAL, and how each step gets there
 
-> **1. "prioritize fixing known bugs before hunting features. because a feature may never ever
-> work because of known bugs."**
+> Run a real ND-500/ND-5000 program on the emulated CPU, driven by **REAL SINTRAN III** on the
+> emulated ND-100, with every **MON call FORWARDED** over the octobus. A run our C#
+> `SintranEmulation` answers DOES NOT COUNT.
 
-A known bug upstream of a feature makes that feature **unmeasurable** — you cannot tell "not
-implemented" from "fine, but the bug ate it". So the feature work below does not start while a
-known bug sits upstream of it. Known = **measured and reproducible**. A theory is not a bug; it
-goes in the investigation list.
+The macro round (`CpuND500` + real SINTRAN over octobus) **is the goal configuration** - real
+SINTRAN, real MON forwarding (last measured `restarts=1/1`, Seen == Taken, no gap). It is also the
+round that gets furthest. So the goal is reached by fixing the macro round, in this order:
 
-> **2. "dont dismiss error as noise."**
+```
+  1  place-domain completes        -> a domain can be placed
+  2  start-swapper posts its start -> the documented ladder works end to end
+  =  RUN a .DOM under real SINTRAN with MON forwarded   <-- THE GOAL
+  3  CS load works on the real B30 -> the ORACLE round can then VALIDATE all of it
+  4..8  correctness work behind the oracle
+```
 
-Every error line in a transcript is a bug until root-caused. I dismissed
-`INFO * 0B:6B * SINTRAN III File System / Not used` as noise on every single read of every single
-transcript. It is listed below as B2 and it is not noise.
-
-> **3. "all bugs are to be root caused and fixed, not ignored."**
-
-No bug gets closed as "benign", "expected" or "cosmetic" without a root cause written down.
-
-> **4. "ANALYSE THE DATA. DO NOT GREP FOR WHAT YOU ASSUME IS IN IT."** (RULE #0b, standing)
-
-Reading all 60 lines of one transcript surfaced four bugs that a week of grepping for
-`Error when loading Control Store` never found. Dump the whole thing, read every word, say what
-each line is.
+Steps 1 and 2 reach the goal. Step 3 is what proves we did it right rather than by accident.
 
 ---
 
-# KNOWN BUGS — root-cause and FIX, in this order
+## 1 — Make PLACE-DOMAIN complete on the macro round
 
-Every one of these is measured and reproducible on `DOMS-CSFIX.IMG`. None may be dismissed.
+**Measured state:** `place-domain` prints `> Loading Control Store`, then `> Loading Swapper`, then
+STALLS. `> Allocating memory` never appears. Reproduced on two packs and at two timeout scales.
+The swapper itself is NOT at fault - it is handed one message, serves it, correctly finds no more,
+and parks at `PC=0x08008255 stopMode=WAIT` (standoff section 45).
 
-### B1. `N5TIMOUT` before any command — **CLOSED 2026-08-30, root-caused, NOT a bug**
-
-```
-@nd-500
-ND-500/5000 MONITOR  Version J04 88. 6.16 / 88. 8.17
-ND-5000 timeout:      ACCP was terminated; Microprogram has stopped
-```
-
-Fires on entry to the monitor, **before** `define-swap-file`, **before** `place-domain`, in
-**every** run — macro, `hw-cpu`, `hw-accp`, and the ones I called working. This is the `3RMICV`
-watchdog going unanswered (`MP-P2-N500.NPL:1209` stamps it into the WATCHDOG buffer and arms a
-timer; the check is `RP-P2-N500.NPL:127642` → `N5TIMOUT` → `RSTARTALL`).
-
-**ROOT CAUSE (section 23 of the standoff doc), closed rather than dismissed:**
-
-The capture's own line numbers settle it — the timeout is at line 32, `> Loading Control Store` at
-line **39**, seven lines later. **At line 32 no control store has been loaded yet.** Neither ND
-generation has microcode ROM; the store is RAM and empty until `LOAD-CONTROL-STORE`. So nothing can
-answer, and *"Microprogram has stopped"* is TRUE about the machine at that instant.
-
-It is the DESIGNED trigger, not a fault: `RSTA5` bit 9 `5CLOST` (*"micro clock stopped = CS NOT
-loaded"*) -> `ECSLOAD 2032B` -> the monitor prints *"Loading Control Store"* and auto-loads. Line 32
-CAUSES line 39.
-
-**And the "3RMICV goes unanswered" mechanism is refuted by the same run:** the servicer trace shows
-`MICFU=0x01 3RMICV` answered repeatedly with `MicroVersion=0x2E9A`, plus `CACHE` and `PHYSWR`
-serviced, `polls=124072`, `active(x5act==0)=105`. The mailbox works after the CS load.
-
-**B3 (`MAR=0`) and B4 (`N500 STATUS 000000`) are read from the SAME fatal report at the SAME moment**
-- check their timestamp before treating them as separate bugs.
-
-### B2. File-system error DURING the control-store load — **NOT NOISE**
+**The premise on this item was WRONG and is now corrected (standoff section 73).** It is not
+"ours is 3START, never 3SWMESS". Measured on the live writes-only trace (871,514 entries):
 
 ```
-> Loading Control Store
-INFO * 0B:6B * ... * BAK01.37603B
-      SINTRAN III File System
-      Not used
+  writes to 0x428E3C (the cell LNEWSWAP tests):  314
+      0x0000  313        <- LNEWSWAP finds ZERO, takes the ELSE, restarts the ND-500 side
+      0x0005  1          <- 3SWMESS IS produced... as the LAST write of the run, after the stall
 ```
 
-Subsystem `0B`, error `6B`, while SINTRAN reads `CONTROL-STORE:DATA` off the pack. Present on
-**both** the macro and `hw-cpu` rounds. Root-cause it: what is `0B:6B`, what is `BAK01` doing at
-`37603B`, and what is "Not used" reporting. Related thread: the FATAL in B8 runs through the file
-system too.
+So the question is **why only ONE 3SWMESS message was built in the whole run, and so late** - not
+"who zeroes it". Our servicer never writes MICFU at all (verified by reading: the microcode answers
+with MICFU UNTOUCHED, which is why DECOMESS dispatches on STOPR).
 
-### B3. `MAR 00000000000` — no message address ever latched
+**Do this:**
+ - Read the cell-writer report (`RETROCORE_ND5000_CELLWATCH`, default `0x428E3C`) to name the site
+   that writes the single `0x0005`. It is NEITHER known stamper: `0o104024` is never entered, and
+   `0o062700` writes a RESIDENT record at `0x438A30`, outside the mailbox.
+ - **The report's PC is a NEIGHBOURHOOD, not the storing instruction** - corroborate with L.
+ - **Red-first**: the stall reproduces every run, so the failing assertion already exists.
 
-The MAR holds the message's ND-100 **word** address; the emulator byte base is
-`(MAR & 0xFFFFFF) * 2`. A zero MAR means no message was ever pointed at, which is exactly why the
-answer never arrives and it times out. Almost certainly the same root as B1 — prove it or separate
-them.
-
-### B4. `N500 STATUS 000000` — status reads all zeros
-
-Nothing set: not busy, not finished, no `5CLOST`, no page-fault bit. The bus reference already flags
-this shape: *"Emulator: STATUS reads 0 on reset/idle → bit 9 clear → no download ever attempted."*
-
-### B5. `MICRO P: 00000177777` — micro P all ones, microprogram not running
-
-### B6. `hw-cpu`: `Error when loading Control Store`
-
-Real B30 microword CPU + hand-written ACCP fails the CS load where the macro round succeeds — same
-pack, same bytes.
-
-**REFUTED, do not re-derive:** the staging-buffer-vs-real-store checksum theory. I changed the
-checksum source (`00ba80ca9`), rebuilt, re-ran — **three identical failures, no change**. That
-commit is a defensible tidy-up (one hardware, one model) and is **NOT** the fix.
-
-**Also ruled out by measurement:** the ACCP link (`Machines.Accp` 142/142 green, including
-`Nd5000ControlStoreLinkTests`, `Nd5000FirmwareLoadTests`, `Nd5000AttachedMachineTests`); and the
-pack image — `(SYSTEM)CONTROL-STORE:DATA` is **byte-identical** to `MICRO-5800-B30.DATA`
-(md5 `f8d28677…`), 16384 × 16, version word `0x2E9A`, model word `0x0038` = type 3 / ND-5800. It IS
-the ND-5000 microcode.
-
-### B7. macro: `> Allocating memory` is never reached
-
-The macro round DOES load the control store and DOES reach `> Loading Swapper`. It stops between
-that and `> Allocating memory`. (Earlier framing of this as "place-domain stalls, nothing works" was
-wrong and hid that the first two steps succeed.)
-
-### B8. `FATAL 21B:77B` runs through the FILE SYSTEM
-
-```
-FATAL * 21B:77B * ... * 147421B.12331B
-       ND-500(0) Monitor Internal
-       Fatal internrun
-```
-
-`0o147421` resolves at **offset 0** to `CSTCK` / `5CSTC` — *"CSTCK: FILE SYSTEM CURRENT STACK
-POINTER"* (`CC-P2-COMMON.NPL:403`). `0o12331` = `9FLER+4`, inside SINTRAN's error logger. Same
-file-system thread as B2.
-
-### B9. `start-swapper` has never been seen to produce output
-
-The full-flow capture ends at the command itself. **And the test I ran all week was
-`ShortBringup_Octobus_NoStartSwapper_...`, which skips it deliberately.** Run
-`FullFlow_Octobus_Login_Nd500_Status_StartSwapper_Capture` on `DOMS-CSFIX.IMG` — the Aug-28 capture
-predates both that pack and every change since, so it is stale.
-
-### B10. PROCESS BUG: I committed a fix without testing it
-
-`00ba80ca9` was written on a theory, committed, and only then tested — where it changed nothing.
-**Red-first, always:** run the test against the broken state, watch it fail, and check WHICH LINE
-fails, before committing a fix.
+**Do NOT** re-investigate the swapper, `LNEWSWAP`, `5ACTSWAPPER` or the swap-wait FIFO - all measured
+correct (sections 43/44/45). Do not read a STALL as "never happened" without checking the timeout
+actually fired (section 64).
 
 ---
 
-# THE METHOD FOR THE MICROCODE QUESTIONS  (Ronny, 2026-08-30)
+## 2 — Make START-SWAPPER post its start
 
-> *"analyse microcode. talk to llm for 500, run the compare logic running 5000 microcode cpu,
-> then 500 macrocode."*
+**Measured state:** during `start-swapper`, 53 messages flow but `startSeen=0`, `startTaken=False`,
+`swpfu[(none)]`. **`RUNSW` (FUNCS 054, `163621` in `030-S3SM5.dis`) DOES contain the code**:
+`163725 SAA 7` loads `MSWSTART` = 7B and `163726 JPL I 170` calls the sender. So the sending code is
+correct and execution never reaches it. Ahead of it sits a run of guarded precondition checks with
+early error returns (`163621`-`163716`).
 
-For anything about what the machine actually DOES: **run the differential oracle** — the microword
-`CpuND5000` on the real B30 store, then the functional `CpuND500` macrocode, and diff. The B30 store
-is the reference; neither CPU is. Surface both states plus the microcode or manual citation, and
-adjudicate per divergence.
+**Do this:** run the PC sampler over `start-swapper`, find which check the PC sits in, then fix that
+precondition. Same instrument as step 1.
 
-Existing machinery: `MacroInstructionOracle.RunBoth`, `MacroOracleState.Diff` /
-`DiffSemantic`, `MacroStepTests`, `MailboxOracleRunner`. Technique for a single routine: set
-`cpu.State.Mpc` to the entry found by NAME in `MICRO-5800-B30.LABE`, wrap `IMicroMemory` in a
-recording decorator, and read the write trace — that IS the answer, no field inference.
-
-**Read RAW `MICRO-5800-B30.DATA` (16 B/word at `octal_address * 16`), never a rendered `.md`** — the
-`.md` mis-renders ORCON/MARG. Mind the **one-word condition delay**: a word's `COND,*` tests the
-PREVIOUS word's flags, and a naive read comes out shifted by one and still looks plausible.
+**Do NOT** conclude from `micfu[]` that `3SWMESS` was never sent - that histogram counts only
+SINTRAN -> ND-500 messages and is structurally blind to it (section 68).
 
 ---
 
-# FEATURES — BLOCKED, and by what
+## 3 — Find out what the ACCP command word `0x0006` ACTUALLY is
 
-Not started while the bug above them is open.
+**DO NOT implement it as a control-store commit. That was tried on 2026-08-30 and RETRACTED.**
 
-| feature | blocked by |
-|---|---|
-| Run a `.DOM` under real SINTRAN over the octobus (**THE GOAL**) | B1, B6, B7, B9 |
-| #72 fix-at-the-cause + regression test | B7 (cause not identified) |
-| ~~#74 nd100x/nd500x C ↔ ND-500 seam over ndbus/octobus~~ | **OUT OF SCOPE THIS PHASE** — see below |
+**Measured, both ways, 27 s each** (stash only `Nd5000ControlStoreLink.cs`, run
+`LoadControlStoreCommand_DrivesTheAddressedWritePath`):
 
-### #74 IS A LATER PHASE — do not start it, do not "prepare" for it
+```
+  WITHOUT the 0x0006 case:  PASSES   writes 8 -> 9        one write, correct data
+  WITH    the 0x0006 case:  FAILS    writes 20972 -> 20974  two writes, first misaligned
+```
 
-> **Ronny, 2026-08-30:** *"integrating nd100x and nd500x over ndbus interface or octobus IS NOT to
-> be done now. That is a phase AFTER we have validated and tested RetroCore with 500 and 5000 cpu
-> thoroughly with nd-500-mon."*
+Two independent refutations of "0x0006 is a second perform":
+ - **Routine B** (`0x73F0`) issues the SAME `0x3010`/`0x0006`/`0x0010` triple but shifts NO DATA. A
+   commit opcode would commit garbage there every time.
+ - **The command encoding.** The family is `<flags><operation>`: `0x0018`/`0x2018` share operation
+   `0x18`; `0x2010`/`0x3010`/`0x0010` share `0x10`. **`0x0006` shares its operation byte with
+   nothing** - it is a different operation, not a selector variant of the perform.
 
-This is not "blocked and waiting" — it is out of scope until the gate below closes.
+The earlier "microwords 8 -> 20,972" is **not progress**: if `0x0006` is not a per-microword commit
+those were ~20,964 WRONG writes, which independently explains why the selftest verdict word never
+moved to `0x0100`. **A count that goes up is not evidence the data is right.**
 
-**THE GATE:** RetroCore's own ND-500 and ND-5000 CPUs validated and tested **thoroughly against
-`nd-500-mon`**. That is the present phase, and it is exactly what the known bugs above are.
-Defining a seam against a lane that does not yet run means defining it against broken behaviour.
-| #50 adjudicate oracle divergences | #51 |
+**Do this:** carve what the `0x3010` latch SELECTS (write vs read-back), then model the triple as
+select-then-perform. Routine B is the control for every step - it is the same triple with the data
+removed. Standoff sections 78, 79.
 
-### #51 — register modelling, NOT diff-widening (title was wrong)
+**Tree state:** the change is STASHED, tree at HEAD, that test GREEN.
 
-`MacroOracleState.Diff()` **already** compares P, L, R, B, X1-4, A1-4, E1-4, Z, S, C, O. `K` and
-`Pia` are excluded **deliberately and documentedly** — not a hole. What is actually missing:
-functional `CpuND500` has **TOS, LL, HL, THA**; microword `CpuND5000` has `IduLl`/`IduHl`/`IduTe`/
-`IduLimc` and **no TOS, no THA**. Model them first, and **verify whether `IduHl`/`IduLl` ARE the
-architectural HL/LL** — a diff between two registers that are not the same register manufactures
-divergences.
+## 4 — Implement every microword field properly
 
-### #75 — single-float `-0.0` TEST, carved 2026-08-30
+Throw, log and die on anything missing. Never tolerate. **Progress is measured in fields
+IMPLEMENTED, never in halts removed.** Before implementing any entry, RESTRICT its B30 count to
+reachable sites - raw sweeps have twice invented work that did not exist (`ABR,NEXT` 20 raw -> 0
+reachable; `ORA,ALTEN` 532 raw -> 0). Full work list on the task.
 
-`TESTF` (0o3000) and `TESTD` (0o3002) are the **same microcode**: identical words differing only in
-`ABS_ADDR`, converging on `TESTFD` @0o3171, both `DATATYPE = 7 = TYP,DR` ("controlled by ICA"). So
-the TEST body has **no per-width behaviour** for the chip to be faithful to — which points at our
-engine. Left: execute `TESTFD` for both widths, record whether the sign is sampled before or after
-the `ALU,AND A,SRF4` mask (`&0x7FC00000`), then adjudicate. Do NOT auto-fix.
+## 5 — Adjudicate the single-float `-0.0` TEST
+
+Measured at four operands: the microword computes S = "sign AND NOT zero" (arithmetically negative);
+the functional core returns the raw sign bit. They agree everywhere except `-0.0`. Manual 10.11 says
+raw sign bit; the `TEST_BI` precedent adjudicated the microcode OVER 10.11. **Ronny's call**, and it
+changes `Test.cs` for both widths.
+
+## 6 — Model TOS/THA on the microword CPU
+
+Not modelled at all. Also settle the `IduHl`/`IduLl` to PCB mapping BY EXECUTION (seed distinct
+values at `+0x3C`/`+0x40`/`+0x44`, context-load, read back) - the static decode suggests the names
+cross, and `MmsUnit`'s constants may be mislabelled.
+
+## 7 — Adjudicate the remaining engine divergences
+
+Once the register set is complete.
+
+## 8 — Lock the fix with a red-first regression test
+
+Prove it RED before the fix and GREEN after. A test never seen red is not evidence.
 
 ---
 
-# RETRACTED — do not re-adopt
+## NOT THIS LANE / DEFERRED
 
- - **"The lane is livelocked."** The 82,000-iteration 8-write cycle is SINTRAN's **histogram
-   sampler** (`MP-P2-N500.NPL:133230` `MIN "5HIDATA".S1 % Increment total number of samples counter`
-   → `133235 CALL GETC5PROC` → classify `LACTIVE/LIDLE/LSWPWAIT/LSWPPING/LCPU/LINMCALL`). A periodic
-   sampler ticking means **TIME PASSED**, nothing more. **Ranking an instrument by volume ranks by
-   elapsed time**, so the top entry is usually the clock, not the bug.
- - **"The real ACCP stops SINTRAN booting."** It boots; suite 142/142. That was my harness's
-   wall-clock window (`RunUntil` counts host milliseconds, not cycles).
- - **"`0x45A000` is a reused buffer."** Measured on a log capped at 17% of the run.
- - **`GETC5PROC`'s writes are a bug.** They are deliberate cache-defeating `*BSET BCM 120 DX`
-   read-modify-writes (`CC-P2-N500.NPL:657`, *"Fool the cache"*). Do not "fix" them.
- - **`BSWSTARTED`**, **"the swapper is never handed work"**, **"no page fault is raised"** (nothing
-   outside segment 1 was ever translated — the path is unreached, not defective).
+ - ND-500 classic 3022, the DOM corpus, NLL work — `nd500uc-47`.
+ - nd100x/nd500x integration over ndbus — **deferred by Ronny**, gated on RetroCore's own ND-500 and
+   ND-5000 CPUs being validated against `nd-500-mon` first. Do not start it, do not design the seam.
 
 ---
 
-## Rules that have cost time here
+## HOW TO RUN THE OCTOBUS HARNESS - copy this, do not retype it
 
-- **Known bugs before features. No error is noise. Root-cause and fix, never ignore.**
-- **Check `RetroCore\Nuget` for an existing machine BEFORE building anything.** There is a real
-  `Machines.Accp` with a green suite, and a **fast** layer: its own tests say *"they run in
-  milliseconds; booting the real firmware takes about twenty minutes"*. I used 30-minute boots for
-  everything.
-- **Never conclude about a component from YOUR ad-hoc wiring of it.**
-- **A harness OUTCOME field is not a result** — `place-domain=returned` was an error path that
-  returned faster because it failed earlier. Only the console says what the machine did.
-- **An NPL listing address is not a linked address, and the offset is PER MODULE**: `MP-P2-N500`
-  **+0o200**, `CC-P2-N500` **+0o17**. Prefer resolving a SYMBOL NAME over doing the arithmetic.
-- **`l07-kallsyms.txt` is HEX, and 1,420 of its addresses carry MORE THAN ONE symbol** (9% of
-  15,799). Use `pcsym.py`, which prints every alias.
-- **A capped log is self-consistent** — a total-vs-total check cannot catch saturation. Two runs
-  that did DIFFERENT things producing the SAME log proves a capture never reached its subject.
-- **A count with no denominator can only be believed, not checked.**
-- Microcode addresses are **OCTAL**; **SINTRAN IS ALWAYS OCTAL** (the only tell is the `B` on the echo).
-- **Shared-tree hygiene** — stage exact paths, never `git add -A`. Two sessions, one checkout.
-- **No new branches without written permission.**
-- **A test never seen red is not evidence.**
+**BOTH environment variables are required. Dropping the pack override does not fail loudly - the
+test goes INCONCLUSIVE and prints four zero-writes that look exactly like a real measurement.**
+Cost of learning that: one wasted run, 2026-08-30.
+
+```bash
+cd E:/Dev/Repos/Ronny/RetroCore
+export RETROCORE_ND5000_WATCH=swmess     # or runsw, for the START-SWAPPER blocks
+export RETROCORE_ND5000_PACK='C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\DOMS-CSFIX.IMG'
+dotnet test Emulated.Tests/Emulated.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false \
+  --no-build --filter "FullyQualifiedName~ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture"
+```
+
+ - **FILTER TO ONE TEST.** `~Nd100SintranNd5000OctobusBootHarnessTests` matches the WHOLE CLASS and
+   spends over an hour on `NllInstaller_RunFiveModules`, `NllFloppy` and `FullFlow` before reaching
+   the one you want. One test is ~2-4 min; the class is 33-75 min.
+ - **`DOMS-CSFIX.IMG` is the only pack** carrying `SWAP-FILE:DATA`, `CPU-STAT:DOM`,
+   `DESCRIPTION-FILE:DESC` AND the 262144-byte ND-5000 `CONTROL-STORE:DATA`. A stock DOMs pack has
+   the domains but the CLASSIC 147456-byte store and answers "Wrong microprogram".
+ - **Check line ~3 of the log says `----- pack override: ...DOMS-CSFIX.IMG -----` before reading
+   anything else.** If it is absent, the run measured nothing.
+ - Output is BUFFERED until each test ends, so a log that has not grown for 30 minutes is NOT
+   evidence of a hang. Check CPU delta per wall second instead (a live run sits at ~90-95% of a core).
+ - Every run restores a virgin pack (`EnsureWorkingCopy` ends in an unconditional `File.Copy`), so
+   killing a run cannot corrupt the fixture and no test can inherit another's swap file.
+
+---
+
+## STANDING RULES THAT ORDER THIS FILE
+
+ - **Known bugs before features.** A bug upstream of a feature makes the feature unmeasurable.
+ - **Every error line is a bug until root-caused.** No dismissing anything as noise.
+ - **Both rounds.** Macro CPU, then microword B30 + real 68k ACCP. A macro-only conclusion is not a
+   conclusion. (Step 3 is what makes the second round possible at all.)
+ - **/loop re-arm: 2 minutes max while iterating.** Longer only with a named run in flight.
+ - Full evidence trail: `docs/OCTOBUS-SWAPPER-STANDOFF-2026-08-28.md` — **read its top index first**;
+   it corrects itself repeatedly and six section numbers are duplicated.

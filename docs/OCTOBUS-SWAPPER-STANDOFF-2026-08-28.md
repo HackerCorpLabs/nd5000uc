@@ -1,5 +1,56 @@
 # The octobus swapper standoff — where `> Loading Swapper` actually stops
 
+> ## STATE OF PLAY, 2026-08-30 — READ THIS BEFORE ANY SECTION BELOW
+>
+> This file is written append-only and **corrects itself repeatedly**. Several sections are
+> RETRACTED by later ones but kept verbatim so the wrong version is not re-adopted. Reading it
+> front-to-back will hand you refuted conclusions as if they were current. Use this index.
+>
+> **SECTION NUMBERS ARE NOT UNIQUE.** Two workers appended here concurrently and numbered
+> independently, so **21, 22, 33, 34, 35 and 36 each appear TWICE with different content**:
+>
+> | number | first occurrence | second occurrence |
+> |---|---|---|
+> | 21 | "the machine is already dead before the first command" | "`5MBBANK`/`5FPMAILBOX` inconsistent" |
+> | 22 | "the X5ACT MISMATCH is the diagnostic" | "§21 IS REFUTED, my probe was wrong" |
+> | 33 | "those are TEST PATTERNS, not microcode" | "#79 carved to its end: nothing ever FAULTS" |
+> | 34 | "LEAD 1: control-cache read falls through" | "#78 reframed: a FEATURE SET the engine lacks" |
+> | 35 | "the ORACLE round boots" | "the catalog refutes §34's framing" |
+> | 36 | "`Expected` is a FIXED CONSTANT" | "`START-SWAPPER` NEVER RETURNS" |
+>
+> **Cite sections by TITLE, not by number.** Every reference in the tables below names the title so
+> it resolves unambiguously; do the same in anything you add. Renumbering is deliberately NOT done -
+> other documents and task descriptions already cite these numbers, and silently shifting them would
+> break those links without anyone noticing.
+>
+> **LIVE — the current account:**
+>
+> | question | answer | sections |
+> |---|---|---|
+> | Why do only 8 microwords reach the control store? | **ANSWERED.** The firmware has TWO control-store write routines. We implement `0x7420` (gate + `#$0018`, 1 caller, runs 8 times). The selftest uses `0x73B4` (shift inside + `#$3010`/**`#$0006`**/`#$0010`, 3 loop callers, ~20,964 runs) and `0x0006` is unmodelled, so every one of those writes is silently discarded. | **56**, 51, 52, 54 |
+> | Why does the sample test read back a different pattern? | Same root cause — it reads a word whose writes never arrived. Not a transform, not a pairing bug. | 53, 56 |
+> | Is the real 68k ACCP implicated? | **No.** The 2x2 shows the CPU axis decides the outcome; the ACCP axis only decides SPEED (8.6x). | **38** |
+> | Is the swapper subsystem broken? | **No.** It serves one request and correctly finds no more. Do not "fix" `LNEWSWAP`, `5ACTSWAPPER` or the FIFO. | **45**, 43, 44 |
+> | Why does `START-SWAPPER` never return? | **OPEN.** It should ANSWER immediately (`MP-P2-N500.NPL:133747`); a hang is one of six calls before that. `XTER500` is ELIMINATED. | **60**, 62 |
+> | Single-float `-0.0` TEST | **MEASURED at 4 operands.** The microword computes S = "sign AND NOT zero"; the functional core returns the RAW SIGN BIT. A semantic difference, not a flag glitch. Adjudication is Ronny's. | **63** |
+>
+> **RETRACTED — do not act on these:**
+>
+> | section | claimed | killed by |
+> |---|---|---|
+> | 32 | `TESTOBJ=29` is the cause; implement it | **33 ("those are TEST PATTERNS")** and 47 |
+> | 34b | the write/expected patterns differ by a transform | **36 ("`Expected` is a FIXED CONSTANT")** |
+> | 39 | the link mispairs data with address and drops commits | **40**, 54 — the pairing is modelled and correct; `0x0018` fires exactly 8 times |
+> | 47 (recommendation) | make the engine TOLERATE unknown fields | **Ronny overruled it** — implement every field, throw and die on anything missing (54). NOTE the second §35 ("the catalog refutes §34's framing") argued FOR tolerance and is also overruled. |
+> | 57 | `0x0055DE` is the source of `CSA: 00FFH` | **58**, then **59** found the real site at `0x00CDA8` |
+> | 61 | `XTER500` cannot exit because `X5PRO` reads 0 | **62** — that row was the mailbox HEADER, not a CPU block |
+>
+> **METHOD WARNINGS EARNED HERE:** §64 (a guard you cannot reach is not a guard — a blocking
+> `Run()` makes a 300 s cap a 70-minute hang, and `TIMEOUT_SCALE` cannot help); §48 (the def-json's
+> `MEMORY` field declares span 10 but width 4 — the only such field; do not decode it by span);
+> §58 (before connecting two things seen in the same window, read what is between them).
+>
+
 > **READ SECTION 14 FIRST (2026-08-29), THEN 12 AND 12c.** Section 14 shows this exact state was
 > already measured and named as this lane's open question on 2026-08-27, two days before sections
 > 7-11 re-derived it - so the "regression" framing below is too strong, and the diff read section 13a
@@ -4400,3 +4451,1204 @@ source and decides which instrument would even be meaningful.
 
 Do NOT re-open the swapper-side chain (§33): `SWPDECODER`, `LNEWSWAP`, `HSWPI` and `5ACTSWAPPER` are
 all carved and all behave as designed.
+
+## 60. `START-SWAPPER` should ANSWER IMMEDIATELY - so a hang is one of five calls before it `[V]` 2026-08-30
+
+The `MSWSTART` handler, from `MP-P2-N500.NPL` (source, not derived):
+
+```
+133642  IF A=MSWSTART THEN                       % Start swapper
+133645     SWPPING; CALL WN5STATUS               %   mark process "using Swapper"
+133654     X:=SWMSG; ... *AAX HSWPI; STDTX       %   MMESSAGE =: SWMSG.SWPINFO
+133661     3START; *MICFU@3 STATX                %   MICFU := 3START (23B)
+133663     5SWPROC; *SENDE@3 STATX; 5RECE@3 STATX
+133666     SWACTIVE; *AAX SWPFU; STATX           %   SWPFU := SWACTIVE
+133671     A:=300; ...                           %   priority 300
+133715     X.PSTAT BZERO SLICE=:X.PSTAT          %   swapper is not timesliced
+133732     *IOF
+133734     CALL SLOCK;    GO FAR N500ERR         % (1)
+133736     CALL XTER500;  GO FAR N500ERR         % (2)  stop nd-500
+133740     CALL ITO500XQ; CALL SUNLOCK           % (3)(4) queue swapper message
+133742  SWME1:
+133742     CALL XACTRDY                          % (5)
+133743     CALL LOWACT500; LTTMR=:TMR            % (6) reactivate nd-500
+133746     *ION
+133747     X:=5MMESSAGE; ANSWER; GO FAR XEILSTAT % <- RESTART THE PROCESS THAT ASKED
+```
+
+### Two things this settles
+
+**1. "START-SWAPPER produces no output" is EXPECTED, not a symptom.** Nothing in this handler prints.
+`> Allocating memory` comes later, from the swapper actually doing work (§46), not from here. Anyone
+treating the silence as the defect is chasing normal behaviour.
+
+**2. The handler does NOT wait for the ND-500.** It sets `MICFU := 3START`, `SWPFU := SWACTIVE`, a
+priority and a queue entry, then **answers the caller at `133747`**. So the monitor's `start-swapper`
+command is meant to return promptly regardless of what the ND-500 does next.
+
+**Therefore a start-swapper that never returns died BEFORE `133747`**, in one of six calls - and that
+is a much smaller question than "start-swapper hangs".
+
+### The candidate that fits this lane, stated as a HYPOTHESIS
+
+`CALL XTER500` (2) is the one to look at first. Its carved behaviour (bus-interface skill): *"read
+`RSTA5`; if `5ILOCK`: `TERM5`, poll until clear; timeout -> `5MCST` -> `ESPTIMOUT`"*. **`RSTA5` is a
+3022 register.** On the octobus lane there is no 3022, so what the station returns for that IOX
+decides whether the poll terminates. A poll that never sees its bit clear is exactly a command that
+never returns and prints nothing.
+
+`[D] NOT ESTABLISHED` - it has a documented timeout, and five other calls are equally unexamined.
+**The check is cheap and needs no new instrument:** the harness already logs ND-100 PC and PIL, so
+capture where the ND-100 is spinning during the hang and resolve it against the listing. That names
+the call outright instead of guessing between six.
+
+Ordering note: this is #79/P4. It is downstream of #78/P1 only in the sense that the oracle round
+cannot reach it - on the macro round it is directly measurable now.
+
+## 61. `XTER500` IS PATCHED ONTO THE OCTOBUS PATH - it polls `X5PRO`, and `X5PRO` was measured as 0 `[V]`/`[D]` 2026-08-30
+
+§60 guessed `CALL XTER500` hangs polling `RSTA5`. **Refuted - it never reads `RSTA5` on this system.**
+The body, `MP-P2-N500.NPL:2923`:
+
+```
+145172   XTER500: IF 5CPUSTOPPED><0 THEN EXITA FI   % already stopped -> immediate exit
+145202          0=:LOOPCOUNTER
+145203   *NNJ12=*
+145203          GO TER51                            % <<< PATCH: jump over the 3022 path
+145204          T:=HDEV+RSTA5; *IOXT                 %     (skipped) read 3022 status
+145210          IF A BIT 5ILOCK THEN ...             %     (skipped) TERM5 + poll 5ILOCK
+145230   TER51:
+145230          FOR LOOPCOUNTER DO
+145230              IDLEKICK; CALL XKICK500          % OCTOBUS kick
+145232              CALL GETC5PROC                   % read the running ND-5000 process
+145233              IF A=-1 GO OKRET                 % exit ONLY when it answers -1
+145236          OD
+145240   TER52: ESPTIMOUT                            % fall through = timeout -> error return
+```
+
+`*NNJ12=*` is a **patch marker** (the same `*NNxnn=*` convention the project rules describe). The
+patched system jumps straight to `TER51`, so **`XTER500` on this lane is an octobus kick loop, not a
+3022 status poll.** §60's hypothesis is dead, and so is the "there is no 3022 on this lane" reasoning
+built on it - SINTRAN already knows.
+
+### The exit condition, and the measurement that already exists
+
+`GETC5PROC` (`CC-P2-N500.NPL:657`) reads **`X5PRO`** out of the mailbox extension block:
+
+```
+023630   GETC5PROC: T:=5MBBANK; X=:D:=MAILINK; *AAX X5PRO
+023634           *BSET BCM 120 DX; LDATX      % Fool the cache
+023636           *BSET BCM 120 DX; LDATX
+023640           X:=D; EXIT
+```
+
+So `XTER500` spins until `X5PRO == -1`. And §31's capture already dumped every extension block:
+
+```
+extblk[0]@0x00428800: X5BEX=0000,0004 X5ACT=0030 X5PRO=0000   <- NOT -1
+extblk[1]@0x00428900: X5BEX=0000,BE30 X5ACT=0001 X5PRO=FFFF   <- -1
+extblk[2..4]                                    X5PRO=FFFF    <- -1
+```
+
+**`extblk[0]` holds `X5PRO = 0x0000`.** If `MAILINK` resolves to block 0, the exit condition is never
+met, and `XTER500` runs its full `LOOPCOUNTER` of octobus kicks before `TER52: ESPTIMOUT`. With
+`LOOPCOUNTER` initialised to 0 (i.e. a full wrap), that is a very large number of kick + mailbox-read
+iterations - **which is exactly what a command that produces no output and never returns looks
+like.**
+
+`[V]`: the patch, the loop, the exit condition, that `GETC5PROC` reads `X5PRO`, and the four measured
+`X5PRO` values.
+`[D]`: that `MAILINK` points at block 0, and therefore that the loop cannot exit.
+**>>> REFUTED THE FOLLOWING TICK - see section 62. `MAILINK` does NOT point at block 0, `X5PRO` reads
+-1, and `XTER500` exits normally. Do not act on the paragraphs below this line. <<<**
+
+### The next step is one lookup, not an instrument
+
+Resolve `MAILINK` - which extension block `GETC5PROC` actually reads. If it is block 0, #79 is
+explained outright and the fix is upstream: **why is `X5PRO` zero in block 0 when every other block
+holds -1?** If it is block 1, this account is wrong and the loop should exit, so the hang is
+elsewhere in §60's list of six calls.
+
+Either way this is a far better handle than "start-swapper hangs", and it came from the source, not
+another run.
+
+## 62. §61 REFUTED: `MAILINK` is not block 0 - and the harness dump invited the mistake `[V]` 2026-08-30
+
+§61 hypothesised that `XTER500`'s `GETC5PROC` loop cannot exit because `X5PRO` reads 0. **Wrong, and
+it took one lookup.**
+
+`MAILINK` is a field of the ND-500 CPU DATAFIELD, one per CPU:
+```
+5P-P2-MON60.NPL:562   A:=-1=:X.MAIL1LINK=:X.MAILINK        % initialised to -1
+MP-P2-N500.NPL:274    IF CPUAVAILABLE BIT 5ALIVE AND MAILINK><-1 THEN   % "Nd-500 cpu present?"
+```
+So `MAILINK` holds that CPU's **extension-block** address, and `-1` means "no CPU".
+
+§31's own capture states which address that is:
+```
+----- discovered mailbox ... header=0x00428800 extBlock=0x00428900 -----
+```
+**`0x00428800` is the mailbox HEADER. The per-CPU extension block is `0x00428900`** - corroborated by
+the carved `X5ACT_carved=0x0042890A`, i.e. extBlock + 0x0A.
+
+And `0x00428900` is the block whose dump line reads **`X5PRO=FFFF`** - which IS -1. So `GETC5PROC`
+returns -1 and **`XTER500` takes `GO OKRET` immediately. It is not the hang.**
+
+### The trap, and it is ours
+
+The capture prints the header as if it were a CPU block:
+```
+extblk[0]@0x00428800: X5BEX=0000,0004 X5ACT=0030 X5PRO=0000 QUEUE NON-EMPTY   <- THE HEADER
+extblk[1]@0x00428900: X5BEX=0000,BE30 X5ACT=0001 X5PRO=FFFF QUEUE NON-EMPTY   <- CPU 1
+```
+Labelling the header `extblk[0]` and decoding header bytes through the extension-block field names
+produces a plausible, wrong row - and I read `X5PRO=0000` off it and built a theory. **The dump
+should start at `extBlock`, or label index 0 as the header.** Worth fixing: it is a one-line change
+that removes a live trap from a diagnostic several people read.
+
+### Where #79 stands now
+
+`XTER500` is eliminated. From §60's list, the calls before the `ANSWER` at `133747` that remain
+unexamined are `SLOCK`, `ITO500XQ`, `SUNLOCK`, `XACTRDY` and `LOWACT500`.
+
+**Stop guessing between them.** §60 already named the measurement that settles it outright and needs
+no new instrument: **capture the ND-100 PC and PIL while the command hangs and resolve it against the
+listing.** That is one number and it names the call. Two hypotheses have now been spent guessing
+where one measurement would have answered.
+
+## 63. #75 MEASURED at four operands - and it refutes my own `SC3 OR SC4` mechanism `[V]` 2026-08-30
+
+Added `NegZeroScratchDiagTests` (reports, does not assert) and exposed the microword engine from the
+oracle so a scratch register can be inspected. Four operands, single-float `TEST`:
+
+```
+operand=0x80000000 (-0.0)  micro Z=1 S=0   functional Z=1 S=1    SC1=0x80000000 SC3=0 SC4=0
+operand=0x00000000 (+0.0)  micro Z=1 S=0   functional Z=1 S=0    SC1=0x00000000 SC3=0 SC4=0
+operand=0xBF800000 (-1.0)  micro Z=0 S=1   functional Z=0 S=1    SC1=0xBF800000 SC3=0 SC4=0
+operand=0x3F800000 (+1.0)  micro Z=0 S=0   functional Z=0 S=0    SC1=0x3F800000 SC3=0 SC4=0
+```
+
+### The refutation, first
+
+The `TESTF`/`TESTFD` carve concluded: *"the S that reaches macro status comes from `SC3 OR SC4`"*,
+because `0o3211` is `ALU,OR A,SC3 B,SC4 -> D,ALU,REG37, ST,SAVA` and neither register is written
+inside the instruction's 20 words. **The measurement kills that.** `SC3 = SC4 = 0` in ALL FOUR cases,
+so `SC3 OR SC4` is always 0 - yet S is 1 for `-1.0` and 0 for `+1.0`. **A constant cannot explain a
+varying output.** So `0o3211`'s `ST,SAVA` is not what decides the macro S, and the mechanism half of
+that carve is withdrawn. (Snapshot is post-instruction, so this does not prove the registers were
+zero *during* - but a value that is zero at the end and produces two different S values cannot be the
+source either way.)
+
+What the carve got RIGHT and is now confirmed live: **`SC1` holds the ORIGINAL operand in every
+case** (`0x80000000`, `0x00000000`, `0xBF800000`, `0x3F800000`). The magnitude mask at `0o3001`
+really does write nothing - `DEST=D,NONE`, `STATUS=(hold)` - and the sign survives in `SC1`.
+
+### The finding, which is better than the one-point divergence it replaces
+
+Read across the four operands, the two engines implement **different definitions of S**:
+
+| | -0.0 | +0.0 | -1.0 | +1.0 |
+|---|---|---|---|---|
+| microword | 0 | 0 | 1 | 0 |
+| functional | **1** | 0 | 1 | 0 |
+
+**The microword computes S = "sign AND NOT zero" - arithmetically NEGATIVE. The functional core
+returns the RAW SIGN BIT.** They agree on every operand except the one where those two definitions
+differ, which is exactly `-0.0`. This is not a one-off flag glitch; it is a semantic difference, and
+four points show it cleanly where one point could not.
+
+### Which sharpens the adjudication rather than settling it
+
+ND-500 Reference Manual 10.11, quoted in `Test.cs`, says `result.signbit XOR Overflow -> S` - the raw
+sign bit, i.e. the FUNCTIONAL answer. The microcode implements the arithmetic answer, and `-0.0` is
+not less than zero. The precedent in that same file - the `TEST_BI` carry case, where the B30
+microcode was adjudicated OVER manual 10.11 - points at the microword being right.
+
+**Still Ronny's call, and still not decided here.** What this contributes is that the question is now
+"which definition of S is correct" rather than "why does one flag differ", and the answer changes
+`Test.cs` for BOTH widths, not just the `-0.0` case.
+
+Files: `tests/NegZeroScratchDiagTests.cs` (new, reports only);
+`tests/MacroInstructionOracle.cs` gains `LastMicroCpu` so a diagnostic can read scratch registers
+without duplicating the 100-line engine setup.
+
+## 64. A TIMEOUT THAT CANNOT BE EVALUATED IS NOT A TIMEOUT - and it invalidates my scale-8 runs `[V]` 2026-08-30
+
+Every wait in this harness has the shape:
+
+```csharp
+while (sw.ElapsedMilliseconds < timeoutMs)
+{
+    Pump();          // -> _machine.Run(...)
+    ...
+    Thread.Sleep(1);
+}
+```
+
+**The deadline is only tested BETWEEN `Pump()` calls.** If `_machine.Run(...)` blocks, control never
+returns to the comparison and the timeout can never fire. A 300-second cap became a 70-minute hang.
+
+### What this costs, and it is mine
+
+I spent **132 minutes of wall clock** on two `RETROCORE_HARNESS_TIMEOUT_SCALE=8` runs
+(`ladder-s8`, `mudom-s8`), on the premise that a bigger window gives a slow command more time to
+finish. **If the block is INSIDE one `Run()` call, scaling the window changes nothing** - the loop
+never reaches the comparison either way. Both runs were stopped at 132 minutes having printed
+nothing, and their premise was unsound from the start.
+
+This is a new entry for the instrument-failure taxonomy, and it is NOT any of the existing ones:
+
+> **A guard you cannot reach is not a guard.** Before trusting a timeout, a retry limit or a
+> cancellation check, ask what has to RETURN for the check to be evaluated at all. A cap tested only
+> between iterations of a loop that can block inside one iteration is decorative. The tell is a
+> bound that is exceeded by orders of magnitude rather than slightly - 70 minutes against a
+> 300-second cap is not a slow machine, it is a check that never ran.
+
+It also generalises tonight's earlier lesson rather than replacing it. §35/§38/§46 established that a
+STALL conflates "never happened" with "not within N host seconds". This adds a third possibility:
+**"the harness never got to ask"** - and only that third one is immune to `TIMEOUT_SCALE`, which is
+exactly why raising the scale produced no new information.
+
+### The two instruments now in the harness are complementary, and both are needed
+
+Two lines of work reached this file. The result is not duplicated:
+
+ - **Worst-`Pump()` timing** (a FORK of this session, not another agent - see the attribution note
+   below): records the longest single `Run()` call and the PC/PIL it entered at. Answers *is the
+   block INSIDE one call* - i.e. can any timeout fire at all.
+ - **ND-100 PC/PIL histogram across pumps** (this session, §60): records where the ND-100 is seen
+   while a command is outstanding. Answers *WHICH routine* - one hot PC is a spin, a spread is
+   progress that never reached the marker.
+
+The first says whether a timeout was ever evaluable; the second names the code. Neither alone
+settles #79, and `start-swapper` is now bounded by a hard 300 s that `TIMEOUT_SCALE` deliberately
+does NOT scale - a scale factor is for telling slow from dead on commands that DO complete, and this
+one never has.
+
+Build asserted before use: `EXITCODE=0`, `Emulated.Tests.dll` stamped 12:15:29, the run started
+12:15:41 against it (log `ss.log`).
+
+### ATTRIBUTION CORRECTION, 2026-08-30
+
+I first wrote the worst-`Pump()` work up as a peer session's (`nd500uc-ad`). **It is not.** That
+session walked the parent chain of the running testhost and returned it:
+
+```
+[89704] testhost.exe  -> [52712] vstest.console -> [36404] dotnet test
+      -> [96168] bash.exe -> [50664] claude.exe --session-id 2c5cb8c6-... --fork-session
+```
+
+`2c5cb8c6-...` is THIS session, so PID 89704 belongs to a FORK of it - my own long-running subagent -
+and `nd500uc-ad` has started nothing and has no result to send. I had been waiting on a session that
+could never produce one.
+
+Worth recording as its own small lesson: **a process is not a peer's just because a peer mentioned
+it.** The parent chain is the answer and it takes one command - the same rule the project already has
+for killing by PID (never by name, prove ownership by walking `ParentProcessId` upward). I applied
+that rule correctly for killing and not at all for attributing.
+
+## 65. PLACE-DOMAIN DOES post a start; the explicit START-SWAPPER does not `[V]` 2026-08-30
+
+The fork's ladder measured, during `start-swapper`: 53 messages, `startSeen=0`, `startTaken=False`,
+`swpfu[(none)]` - SINTRAN never asks the ND-5000 to start the swapper, and the CPU is parked at
+`PC=0` in `WAIT` exactly as designed. Taken alone that reads as "the octobus lane never starts the
+swapper". **It is narrower than that.**
+
+The SHORT BRING-UP (§31), which never types `start-swapper`, measured the opposite:
+`startSeen=1 startMicfu=23B startTaken=True`, `swpfu[LNEWSWAP:2]`, `restarts=1/1`.
+
+| command | startSeen | startTaken | swpfu |
+|---|---|---|---|
+| `place-domain` (short bring-up, no start-swapper typed) | **1** | **True** | `LNEWSWAP:2` |
+| `start-swapper` (full ladder) | **0** | **False** | `(none)` |
+
+**`PLACE-DOMAIN` posts the 3START. The explicit `START-SWAPPER` command does not.** That is the
+defect's actual shape, and it matches the manual: ND-60.136.04A 8.10.10.4 says the swapper load
+"is done automatically when the first ND-500 process is initiated by the monitor", and ND-30.003.7
+classes explicit `START-SWAPPER` as part of the ADVANCED start (§46).
+
+### Where the sender lives, and why the NPL sources cannot answer it
+
+`MSWSTART = 7B` (`CARVE-ANSWER-N5SWAP-FUNCTION-VOCABULARY-2026-08-17.md:178`). Searching every NPL
+source finds `MSWSTART` **exactly once** - at the HANDLER, `MP-P2-N500.NPL:431`. **Nothing in the NPL
+sends it.** The sender is `RUNSW`, FUNCS entry `054`, at **`163621` in `030-S3SM5.dis`** - the ND-500
+system monitor segment, which is disassembled but has no NPL source. So this question was never
+answerable from the NPL tree, and the answer is in the `.dis`.
+
+Its body is raw ND-100 assembly with unresolved `JPL I nn` targets through a literal pool at
+`163717`-`163723`. The load-bearing question for it is narrow: **does `RUNSW` ever put `7` in A and
+call the message sender?** No `SAA 7` / `SAT 7` appears in `163621`-`163703`; the region uses
+`SAA 36`, `SAA 17`, `SAA 20`, `SAA 4`, `SAA 2`. Not conclusive yet - the value could be loaded from
+memory rather than as an immediate, and the routine continues past `163703`.
+
+### Also worth keeping from the older carve
+
+`CARVE-RUN-TO-WORK-POSTING-CHAIN-2026-07-20.md` records that `SWPINFO` is written on TWO distinct
+occasions - cold-start init (`SWMESS`/`MSWSTART`, `133654`) and per-fault work (`5ACTSWAPPER`) - and
+that on the D4/3022 lane in July the swapper WAS `3START`'d and executed, dying instead at
+`PC=0x0800913B` on an empty message. **That is a different failure from ours** and is 3022-lane; do
+not merge the two. Ours does not start at all on the explicit command, and starts fine via
+place-domain.
+
+### Next
+
+Finish `RUNSW` at `163621`: resolve the `JPL I` literal pool and find whether the `7` reaches the
+sender. That is a `.dis` read, needs no run, and it is the last unknown in this chain.
+
+## 66. `RUNSW` DOES load `MSWSTART` - so the question is REACHABILITY, and the PC sampler answers it `[V]`/`[D]` 2026-08-30
+
+§65 left one load-bearing question: does `RUNSW` (FUNCS `054`, `163621` in `030-S3SM5.dis`) ever put
+`MSWSTART` = `7B` in A and call the message sender? **It does.**
+
+```
+163725  170407   SAA 7              ; A := 7 = MSWSTART
+163726  135170   JPL I 170          ; -> 164116   the call
+163727  124165   JMP 165            ; -> 164114   (error return)
+163730  135167   JPL I 167          ; -> 164117
+163731  124163   JMP 163            ; -> 164114   (error return)
+```
+
+`[V]` - `SAA 7` is unambiguous, and `MSWSTART = 7B` is carved
+(`CARVE-ANSWER-N5SWAP-FUNCTION-VOCABULARY-2026-08-17.md:178`).
+
+**So the sending code EXISTS and is correct. The defect is that execution does not reach it** - which
+is a completely different question from the one this lane has been chasing, and a much smaller one.
+
+### The shape of the body says where it bails `[D]`
+
+`163621`-`163716` is a run of repeating blocks:
+
+```
+170417  SAA 17        \
+135051  JPL I 51       >  load a small code, call something, then
+144400  RAND 0 0      /   RAND 0 0 (clear A) - and a JMP I to a common exit
+```
+with `SAA 36`, `SAA 17`, `SAA 20`, `SAA 41`, `SAA 4`, `SAA 2` at different blocks, each followed by a
+`JPL I` and paired `JPL I` / `JMP I` returns into the literal pool at `163717`-`163724`. That is the
+shape of a SERIES OF GUARDED PRECONDITION CHECKS, each with an early error return, ahead of the
+`SAA 7` at `163725`.
+
+**If any one of those checks fails, `RUNSW` returns before the `SAA 7`, no `MSWSTART` is posted, the
+ND-5000 is never asked to start, and the command produces no output** - which is exactly
+`startSeen=0 startTaken=False swpfu[(none)]` with 53 messages of other traffic. `[D]` - the block
+structure is `[V]`, the interpretation as precondition checks is inference.
+
+### This is now a REACHABILITY question, and the instrument for it is already built
+
+Where does the ND-100 get to inside `163621`-`163726`? That is precisely what the PC/PIL histogram
+answers - and it is why the sampler mattered. It has NOT yet produced data on this path: it was wired
+into `RunNd500Command` only, the fork's run reported `NO SAMPLES`, and the short bring-up drives
+commands through `Step500`. **Both paths now sample** (`DumpHangPcHistogram`, shared), and the dump
+states explicitly when it collected nothing so an empty histogram is never read as evidence. Built
+but not yet re-run - the `Emulated.Tests` lock was held.
+
+**Next, in order:**
+ 1. Re-run with the corrected sampler and read the PC histogram during `start-swapper`.
+ 2. Resolve which of `163621`-`163716`'s checks the PC lands in, against the literal pool at
+    `163717`-`163724`.
+ 3. THEN ask why that particular precondition is false on this lane.
+Do not skip to 3 - which check it is has not been measured, and guessing between six of them is what
+§60 and §61 already cost.
+
+## 67. TENSION: a run with NO MICFU 5 still got a 3START `[V]` - the "no 5, so no start" chain needs settling 2026-08-30
+
+A parallel carve derived a clean chain for why `start-swapper` posts nothing:
+
+ - `SWMESS` (`MP-P2-N500.NPL:133635`) is the ONLY code that posts a start - `133661 3START; *MICFU@3
+   STATX` and `133666 SWACTIVE; *AAX SWPFU; STATX`, which are exactly the two effects the ladder
+   showed missing (`startSeen=0`, `swpfu[(none)]`).
+ - `SWMESS` is arm 05 of a dispatch gated on `D=3SWMESS`, and **`3SWMESS` = MICFU 5**.
+ - The ladder's trace shows `micfu[1B:27 12B:1 30B:12 31B:13]` - **no MICFU 5 at all**.
+ - Therefore: no 5 -> `SWMESS` never dispatched -> no `3START`.
+
+**The short bring-up contradicts the last step.** From `mudom.log` (§31), the run in which
+`place-domain` DOES start the swapper:
+
+```
+micfu[1B:49 12B:1 23B:1 24B:1 31B:13]      <- NO MICFU 5 either
+startSeen=1  startMicfu=23B  startTaken=True  swpfu[LNEWSWAP:2]
+```
+
+**A run with zero MICFU 5 nonetheless produced a `3START`.** So "no MICFU 5" cannot by itself be
+sufficient for "no start" - something starts the swapper on the place-domain path without a 5 ever
+appearing in the servicer's histogram.
+
+### Do not resolve this by preferring either reading
+
+Both numbers are real and from the same instrument. Possible accounts, none yet tested:
+ - the `micfu[]` histogram counts messages in ONE direction, and `3SWMESS` travels the other way, so
+   its absence from the histogram says nothing about whether `SWMESS` ran;
+ - `place-domain` reaches `3START` through a path that is not `SWMESS` at all;
+ - the two runs differ in some third way not yet identified.
+
+There is a THIRD data point that must be reconciled with both: **task #80 recorded `MICFU=0x05`
+observed at `SWPPING`** in an earlier run - i.e. a 5 that DID appear. So across three runs we have
+"5 present", "5 absent with a start", and "5 absent without a start". Any account has to fit all three.
+
+### Why this matters more than it looks
+
+`Nd500Generation.cs` records that the B30 dispatches MICFU 05 to `MSG_ILLEG` on the ND-5000, and then
+warns in its own words: *"THE MICROCODE READING IS SOUND; WHAT SINTRAN SENDS IS NOT SETTLED ... Do NOT
+hard-code 05 to illegal until the SINTRAN carve confirms what SINTRAN actually sends."* It also
+records that an EARLIER version of that claim was wrong because the grep behind it covered only the
+resident nucleus - **a scope-limited negative read as an absence**, which is the same trap twice more
+tonight (§37's transform search, §51's raw counts).
+
+So a conclusion here would feed straight into a generation-dependent hard-code that the code has
+already been burned by once. **Settle the three-run contradiction first**, and the cheapest way is to
+determine what the `micfu[]` histogram actually counts - one read of the servicer, no run.
+
+## 68. §67 RESOLVED: `micfu[]` counts only SINTRAN -> ND-500 messages, so it CANNOT show `3SWMESS` `[V]` 2026-08-30
+
+§67 flagged three irreconcilable data points about MICFU 5. One read of the code that populates the
+histogram settles all three.
+
+`Nd500MicrocodeServicer.cs:2085-2092`, inside the mailbox RECEIVE path:
+
+```csharp
+// Decoded RECEIVE trace: exactly what nd-500-mon/SINTRAN sent us
+host.ServicerLog($"MAILBOX RECV @word 0x{msgBase >> 1:X6}: ...");
+host.WriteNd100Word(staAddr, ... N5MessageStatus.Waiting);
+ushort micfu = host.ReadNd100Word(msgBase + (uint)(N5MessageOffsets.MICFU * 2));
+if (micfu < MicfuHistogramSize)
+    _micfuCounts[micfu]++;
+```
+
+**`micfu[]` tallies messages the SERVICER RECEIVES - what SINTRAN sends TO the ND-500.** It is a
+one-directional census of one message population.
+
+`3SWMESS` is not in that population. `5ACTSWAPPER` (`MP-P2-N500.NPL:145035`) READS `MICFU` out of a
+message it is handling and tests it:
+```
+145035   T:=5MBBANK; *MICFU@3 LDATX; COPY SA DD   % D:=X.MICFUNC
+145040   IF 3SWMESS=D THEN                        % Message to swapper?
+```
+That is SINTRAN inspecting a message on its own side. **So the absence of MICFU 5 from `micfu[]` is
+not evidence about whether `SWMESS` ran - the instrument is structurally incapable of showing it.**
+Taxonomy #8: a count that cannot be RELEVANT to the question asked of it.
+
+### All three data points now fit, with nothing left over
+
+| observation | explanation |
+|---|---|
+| ladder: no MICFU 5, no start | 5 would not appear here either way - says nothing |
+| short bring-up: no MICFU 5, but `startSeen=1` | consistent; the start came via a path this census does not cover |
+| task #80: MICFU 5 OBSERVED | a genuine SINTRAN -> ND-500 message carrying 5, which is a DIFFERENT event from `SWMESS` dispatching on `3SWMESS` |
+
+**So the chain "no MICFU 5 -> `SWMESS` never dispatched -> no `3START`" is NOT supported.** Its first
+step rests on an instrument that cannot see the thing it is being asked about. The chain's other
+links (that `SWMESS` is the only poster of `3START`, at `133661`/`133666`) stand on the NPL source and
+are unaffected.
+
+### The instrument has been caught this way ONCE ALREADY, and says so
+
+The comment immediately above the tally:
+
+> *"tally EVERY message here, at the single point where micfu is known and BEFORE the switch.
+> Counting after the switch missed every micro-function whose case returns early - the start path
+> does exactly that, so 23B starts were invisible in the tally even though `startSeen` said one had
+> arrived."*
+
+So this exact histogram has already produced one confident wrong absence and been fixed for it. That
+is a strong prior for treating a zero in it as "not covered" rather than "did not happen", and it is
+why §67 was recorded as a tension instead of a finding.
+
+### What still needs answering for #79
+
+Unchanged and now unobstructed: **does the ND-100 reach `RUNSW`'s `SAA 7` at `163725`** (§66)? That
+is a PC-reachability question about ND-100 code, and the `micfu[]` census was never going to answer
+it. The corrected PC/PIL sampler is the instrument; it is built and a validation run is in flight.
+
+## 69. TASK 1 LOCATED: during `place-domain` the ND-100 is IDLE, and nothing is trying `[V]` 2026-08-30
+
+First PC/PIL histogram this lane has ever had (log `mudom-pc2.log`, short bring-up, passed 32 min):
+
+```
+place-domain cpu-stat : 2049 samples, 99 distinct (PC,PIL)
+    PC=0x12C3 pil=0 x415 | 0x12C2 x391 | 0x12C4 x376 | 0x12C5 x374 | 0x12C6 x370
+run                   : 1852 samples - the SAME five PCs at pil=0
+```
+
+**~94% of samples sit in a FIVE-INSTRUCTION window at PIL 0.** Symbol: `0x12C2` = `0o011302` =
+**`PENT0+2`**. `PENT0` is where SINTRAN goes at the END of restart - `PH-P2-RESTART.NPL:685`,
+`CALL UPPOW  % POWWER UP TO OCTOBUSS ?` then `GO PENT0`. It is the PASSIVE/IDLE entry.
+
+**So `place-domain` is not spinning, not polling, not walking tables. The ND-100 is IDLE and the
+command is blocked waiting for something nothing is producing.**
+
+### The remaining 6% is one thing, and it is noise
+
+| sampled PC | linked | listing (-0o200) | what it is |
+|---|---|---|---|
+| `0xB616` | `0o133026` | `0o132626` | **`500HIST+2`** - the ND-500 histogram sampler |
+| `0xB6CD` | `0o133315` | `0o133115` | inside **`500H3:`** - its process-log-ALL branch |
+| `0x27AF` | `0o23657` | - | **`GETC5PROC+8`** - called BY that histogram at `133101` |
+| `0xB658` | `0o133130` | `0o132730` | the `% Until no more procs to start` loop region |
+| `0x7E78`/`0x472A` | | | `CMLTS`, `DACCE` - PIL-1 device work |
+
+`GETC5PROC` appears because the HISTOGRAM calls it, not because `XTER500` is polling - I assumed the
+latter for one step and the listing corrected it. This confirms §20: the dominant ND-500-side traffic
+is SINTRAN's clock-driven process-logging sampler, and it is not progress.
+
+### What this rules out
+
+A spin, a hardware poll, a table-walk data condition, and a retry storm - the whole family this lane
+has been chasing. In particular it refutes the expectation inherited from
+`CARVE-S3SM5-CSLOAD-VERIFY-LOOP-2026-07-21.md`, which predicted a data-condition spin in S3SM5 band
+`0o150000..0o155323` and named "a live PC histogram" as its `[OPEN] #1`. **The histogram now exists
+and the PC is nowhere near that band.**
+
+### Cross-check that validates §44/§45 rather than undermining them
+
+The harness's watch addresses are LINKED; NPL listing addresses are **+0o200** off (memory
+`feedback-friction-lessons-nd5000` #13, per-module). Converting:
+ - `5ACTSWAPPER-entry @0o145162` -> listing `0o144762` = `5ACTSWAPPER:` **exact**
+ - `HANDOVER-taken-SWACTIVE @0o145211` -> listing `0o145011` = `SWACTIVE; *AAX SWPFU-HSWPI; STATX`
+ - `queued-on-swapwait-fifo @0o145312` -> listing `0o145112` = `% - Insert in Swap-wait-fifo`
+All three labels are correct, so §44/§45's reading (swapper free -> direct handover, FIFO correctly
+untouched) stands. I checked because `145211` looked like it fell inside the ELSE branch; it does
+not, once the offset is applied.
+
+### NEXT for task 1
+
+The question is now **WHAT THE PLACE-DOMAIN PROCESS IS WAITING ON** - a process-state question. The
+ND-500 side already answered everything asked of it (§31: `ansMON=377B`, `restarts=1/1` Seen==Taken,
+swapper parked at the designed idle). So the missing wake-up is on the ND-100 side, and the probe is
+the SINTRAN RT/process state of the monitor process during the stall, not another PC histogram.
+
+## 70. THE `3SWMESS` STAMPERS FOUND: S3SM5 `062700` and `104076` `[V]` 2026-08-30
+
+§69 established that `LNEWSWAP` wakes the waiting ND-100 process ONLY on `MICFU == 3SWMESS`
+(`135604` -> `135631 GO FAR SWPD2`), that our served message carries `3START` instead, and that
+**no NPL source ever writes `3SWMESS`** - four occurrences across all NPL sources and symbol tables,
+every one a comparison. So the stamper had to be outside the resident driver. It is.
+
+### Values confirmed from the symbol table, not inherited
+
+`SYMBOLS/L07/N500-SYMBOLS.SYMB.TXT` (names truncated to 5 chars):
+```
+3SWME=000005      <- 3SWMESS = MICFU 5
+3STAR=000023      <- 3START  = 23B
+MICFU=000006      <- the MICFU field is word offset 6
+```
+
+### The two stampers, in `030-S3SM5.dis`
+
+```
+SITE 1 @ 062700                    SITE 2 @ 104076
+  062700  SAA 5                      104076  SAA 5
+  062701  STA ,X 6   ; MICFU := 5    104077  STA ,X 6   ; MICFU := 5   = 3SWMESS
+  062702  JPL I 12   ; call          104100  SAA 24
+                                     104101  STA ,X 7   ; SWFUN := 24B = MSWSWAIT
+                                     104102  SAA 1
+                                     104103  STA ,X 2   ; N5STA := 1   = MSGN500
+```
+
+Found by scanning every `SAA 5` / `SAT 5` in the segment for a following store at offset 6 - the
+constant alone has dozens of sites, so the field offset is what isolates it.
+
+**Site 2 builds a complete message**: `3SWMESS` + `MSWSWAIT` + `MSGN500`. `MSWSWAIT = 24B` is carved
+(`CARVE-ANSWER-N5SWAP-FUNCTION-VOCABULARY-2026-08-17.md`), and `MP-P2-N500.NPL:133775` handles exactly
+that: `IF A=MSWSWAIT THEN  % Restart Swapper and wait (after allocate page..)`.
+
+### So the chain is now complete end to end
+
+```
+S3SM5 062700/104076   stamp MICFU := 3SWMESS into the message
+        |
+MP-P2-N500 135604     IF 3SWMESS=D  -> 135631 GO FAR SWPD2  = RESTART THE ND-100 WAITER
+        |
+        else          restart the ND-500 process instead; the ND-100 waiter sleeps on
+```
+Measured on this lane: the served message carries `3START` (23B), so the ELSE runs and `place-domain`
+is never woken - and the ND-100 sits at `PENT0` idle for 94% of the command (§69).
+
+### NEXT - the same reachability question as task 2, and the same instrument
+
+Does our lane ever REACH `062700` or `104076`? Both are ND-100 code in S3SM5, so the PC/PIL sampler
+answers it directly - and neither address appeared anywhere in the 2049-sample histogram (which
+covered 99 distinct PCs). That is suggestive, NOT conclusive: a site executed once in a 32-minute run
+can easily be missed by a sampler, so **absence here is not evidence** (the same trap as §51's raw
+counts and §37's search). Use a PC WATCH on those two addresses, which counts every hit, rather than
+a sampler.
+
+`DiagPcWatchList` already exists and produced the `5ACTSWAPPER` call-site table with hit counts and
+registers - point it at `062700` and `104076`.
+
+## 71. THE TWO `3SWMESS` STAMPERS DISCRIMINATE: one runs, one never does `[V]` 2026-08-30
+
+PC WATCH (counts every hit, unlike the sampler) on the two S3SM5 sites found in §70, PIL filter OFF
+because S3SM5 does not run at level 12. Log `swmess-watch.log`:
+
+```
+3SWMESS-stamp@0o062700       hits=2            <- IS reached
+3SWMESS-stamp@0o104076       hits=0            <- NEVER reached
+CONTROL PENT0+2 (must hit)   hits=79,884,820
+```
+
+**One of the two stampers runs twice; the other never runs at all.** That `062700` fires also shows
+S3SM5-range addresses do hit, so the "displayed address IS the runtime address" assumption for that
+segment is not dead on arrival.
+
+Recall what each is (§70): `062700` is a bare `MICFU := 5`; **`104076` is the COMPLETE message build**
+- `MICFU := 3SWMESS`, `SWFUN := 24B (MSWSWAIT)`, `N5STA := 1 (MSGN500)`. It is the one that would
+produce a well-formed message for `LNEWSWAP` to wake the ND-100 waiter on, and it is the one that
+never executes.
+
+### I broke my own evidence, and the file had already warned about it
+
+The control fired **79,884,820** times and flooded the 60-entry register log, so the **PIL of the two
+`062700` hits cannot be read**. That matters: this harness documents a 2026-08-29 run where 232 hits
+on `0o145112` were ALL PIL=1 - unrelated level-1 code at the same 16-bit address - because the watch
+matches on PC alone. So `hits=2` is currently **[V] that the address executed** and **[OPEN] whether
+it was S3SM5**.
+
+The per-address COUNTS are separate counters and survived the flood; only the detail was lost. Fixed
+by swapping the control to a RARE address - `5ACTSWAPPER-entry` (linked `0xC672`), which hit exactly
+ONCE in the same run, so it proves liveness without swamping the log. Re-run in flight
+(`swmess-watch2.log`).
+
+**Choosing a control that fires 80 million times is a self-inflicted version of taxonomy #12** (a
+bounded evidence log whose budget the noise spends). The rule that follows: **a liveness control must
+be rare by construction, not merely known-good.** "It definitely fires" and "it does not destroy the
+log" are two requirements, and I only checked the first.
+
+### Where task 1 stands
+
+```
+S3SM5 104076  builds the 3SWMESS message   <- NEVER RUNS
+      062700  bare MICFU := 5              <- runs twice (PIL unconfirmed)
+        |
+MP-P2-N500 135604  IF 3SWMESS=D -> 135631 restart the ND-100 waiter
+        |
+        else       restart the ND-500 side; place-domain sleeps at PENT0 (94% idle, §69)
+```
+
+Next: confirm the PIL of the `062700` hits from the re-run, then find what gates `104076` - that is
+the routine whose non-execution leaves `place-domain` hanging.
+
+
+## 72. TASK 3 IMPLEMENTED - and its "next blocker" is noise, checked before chasing it `[V]` 2026-08-30
+
+### The fix
+
+`Nd5000ControlStoreLink` now implements `CommandPerformRoutineA = 0x0006`, the operation word of the
+`0x73B4` write routine (3 callers, all loops, ~20,964 executions per boot - against 8 for `0x0018`'s
+single caller). Those writes previously fell into `WriteCommand`'s `default:` and were discarded.
+
+```
+                          BEFORE      AFTER
+  microwords written        8         20,972    (addresses walk 0o0, 0o13, 0o26 ... stride 0o13)
+  discarded command words   21,263    299
+  START @0o0                ticks=0   ticks=10000
+                            'TESTOBJ=29 not implemented'  ->  'budget'
+```
+
+**The microprogram now EXECUTES instead of refusing at tick 0.** Build asserted `EXITCODE=0` before
+the run, per the project rule.
+
+The one design problem: routine A latches an address TWICE - a genuine address phase, then again
+after the data shift where the newest port word is the LAST DATA HALFWORD and the latch is junk
+(`ADDR-LATCH 10DD` = `50DD & 0x3FFF`). The link already measures the discriminator
+(`_halfwordsBeforeAddressLatch`: 0 = address phase, 7 = post-data), so `0x0006` commits at the
+former. Without that, every microword would land at a garbage address.
+
+### SCOPE - this does NOT touch `hw-cpu`
+
+`Nd5000ControlStoreLink` is referenced ONLY inside `Machines.Accp`; `OctobusND5000Station`
+references it ZERO times. The `hw-cpu` round loads the control store through the station's EMULATED
+ACCP handlers (`CMWWC`) - a different consumer. So this affects `hw`/`hw-accp` and does not by itself
+clear SINTRAN's `Error when loading Control Store` on `hw-cpu`.
+
+### And the newly-revealed "blocker" is NOT WORK
+
+Clearing the first stop exposed:
+```
+START @0o37760 ticks=1 stop='Operand select DEST=29 not implemented yet'
+```
+Before implementing anything for it, swept the image:
+
+```
+B30 words: 16384        DEST=29 count in B30: 0
+DEST values present near it: 24:8588  25:4  26:289  31:253  32:64  33:3
+```
+
+**`DEST=29` occurs ZERO times in the real microcode.** `0o37760` is one of the RAM TEST PATTERN words
+(§33, §47), so this is pattern noise - exactly as `TESTOBJ=29` was, and note BOTH fields read 29 in
+that same word, which is what a random pattern looks like.
+
+**So the next blocker is work REMOVED, not work added.** This is the second time the "restrict to
+reachable sites before implementing" guard has deleted phantom work (the first: `ABR,NEXT` 20 raw ->
+0 reachable). Keep applying it: a stop message names the first thing that refused, and if the input
+is noise that walk has no end (§33's lesson, now paid off twice).
+
+### Still owed for task 3
+
+The selftest remains RED - verdict block `0x001144F0` word[6] = `0000`, needs `0x0100`; and
+`stop='budget'` means the tick ceiling, not completion. The honest claim is exactly: **the writes
+land and the engine runs.** Validation is the `hw` round, which needs `TIMEOUT_SCALE>=8` (§38).
+
+
+## 73. TASK 1: the premise was WRONG - 3SWMESS IS produced, once, too late `[V]` 2026-08-30
+
+The task said *"LNEWSWAP only wakes the ND-100 waiter on MICFU 3SWMESS, and ours is 3START"*.
+The guard run refutes the second half.
+
+### The address chain, pinned two ways
+
+`swpInfo=0x00008E30` is bank-relative in WORDS. Word `0o43430` = `0x4718` -> byte `0x8E30` ->
+physical **`0x428E30` = SWPINFO**. Confirmed independently by the `CONTROL 5ACTSWAPPER@0o145162`
+hits, which carry `X=0o43430`. LNEWSWAP's `*MICFU@3 LDATX` reads word offset 6 -> byte +0xC ->
+**`0x428E3C`**.
+
+### The measurement (a denominator, so it can be CHECKED - not a single number)
+
+From the live writes-only trace (871,514 entries, chronological - NOT a teardown dump; its own
+header declares `writes-only log ... mailbox-nbhd[0x428000..0x42D000)=871514`):
+
+```
+  writes to 0x428E3C (the cell LNEWSWAP tests):   314
+      0x0000  (nothing to do)                     313
+      0x0005  (3SWMESS)                             1     <- the LAST write of the run
+  last 0x0000 write ...... trace line 294,853
+  the single 0x0005 ...... trace line 879,357     (584,504 events later)
+```
+
+**So 3SWMESS IS produced. Once, at the very end, after the stall.** On all 313 earlier passes
+LNEWSWAP finds ZERO, `IF 3SWMESS=D` is false, it takes the ELSE and restarts the ND-500 side instead
+of waking the ND-100 waiter - which IS the observed `place-domain` sleep at `PENT0` (94% idle).
+
+The final burst writes the whole block in ascending order - `FFFF FFFF 0006 0001 0000 0000 0005
+0005 003B 0840 0000 0001` - i.e. a complete message finally being BUILT.
+
+### Which stamper did it: NEITHER of the two we knew
+
+```
+  routine-entry@0o104024   hits=0     <- the routine is NEVER ENTERED; neither guard is the answer
+  EARLY-EXIT-1@0o104036    hits=0
+  EARLY-EXIT-2@0o104042    hits=0
+  PASSED-BOTH@0o104043     hits=0
+  3SWMESS-stamp@0o104076   hits=0
+  3SWMESS-stamp@0o062700   hits=2     PIL=1  X=0o141430
+  CONTROL 5ACTSWAPPER      hits=2     <- instrument ALIVE, so the zeros above are real
+```
+
+`0o104024` never runs, so the whole guarded build is dead code in this run. And `0o062700`'s
+`X=0o141430` = byte `0x18A30` -> physical **`0x438A30`**, which is OUTSIDE the mailbox neighbourhood -
+a resident SINTRAN record, **not** the cell LNEWSWAP reads. **A THIRD, UNIDENTIFIED SITE wrote the
+one `0x428E3C=0x0005`.** Finding it is the next step, and the watch is already built for it.
+
+### Instrument note
+
+`micfu[1B:52 12B:1 23B:1 24B:1 31B:13]` shows no `5` - and that proves NOTHING here. That histogram
+counts SINTRAN -> ND-500 messages only and is structurally blind to 3SWMESS (taxonomy #8, section 68).
+The writes-only trace is the instrument that can see it.
+
+
+## 74. THE ND-5800 B30 MICFU LEGALITY TABLE - byte-verified from the RAW image `[V]` 2026-08-30
+
+Carved straight out of `MICRO-5800-B30.DATA` (16 bytes/word, ABS_ADDR = bits 31..16), NOT a
+rendered `.md`.
+
+### How the table was located and CALIBRATED
+
+`MICRO-5800-B30.LABE` puts `MSG_ILLEG` at `0o15221`, referenced by ten arms in one consecutive
+run. Dispatch base = `0o15224`, index = MICFU. **Two independent calibration points, both exact:**
+
+```
+  arm 0o15246 -> 0o15660   and LABE says MSG_STARTP0 = 015660   (index 0o22 = STARTP0)
+  arm 0o15247 -> 0o15671   and LABE says MSG_START   = 015671   (index 0o23 = 3START)
+```
+
+A THIRD check falls out and was not designed in: **`0o25 3TRACO` targets `0o15671`, the SAME
+handler as `0o23 3START`** - which the bus reference states independently ("3START/3TRACO share a
+handler"). Three agreements, so the base is not a coincidence.
+
+### The table
+
+```
+  LEGAL   0o1 3RMICV  0o10 DMEMRD  0o11 DMEMWR  0o12 CACHE  0o13 RESIRD  0o14 RESIWR
+          0o22 STARTP0  0o23 3START  0o24 3MONCO  0o25 3TRACO  0o26 3WMONCO
+          0o30 PHYSRD  0o31 PHYSWR  0o34 3MONO  0o35  0o42  0o44  0o45  0o46 33MON  0o47
+  ILLEGAL 0o0 0o2 0o3 0o4 **0o5 3SWMESS** 0o6 0o7 0o15 0o16 0o17 0o20 0o21
+          **0o27 3FITRNSF** 0o32 0o33 0o36 0o37 0o40 0o41 0o43
+```
+
+### What it settles for TASK 1
+
+**MICFU `0o5` (3SWMESS) is ILLEGAL on the ND-5800 - it dispatches to `MSG_ILLEG`.** So 3SWMESS is
+never a MICFU the CPU executes.
+
+That RESOLVES the ambiguity section 73 flagged rather than confirming a fear: the `MICFU=5` that
+LNEWSWAP reads out of SWPINFO is a **marker for the ND-100 driver's own routing decision** ("is
+this a message to the swapper?"), NOT a command sent to the CPU. The two uses of the field are
+genuinely different, and this microcode result does **not** contradict LNEWSWAP. Conflating them
+would have produced a confident wrong answer in either direction.
+
+### What it exposes in OUR code (actionable, and NOT a blanket widening)
+
+`Nd500MicrocodeServicer` logs an "ND500 DIVERGENCE" when it services a MICFU the classic dispatch
+table rejects - but the guard is `Generation == Nd500Generation.ND500`, so it is silent on the
+ND-5000 lane. The B30 rejects `0o5` and `0o27` **as well**, so the same divergence exists un-flagged
+on our lane.
+
+**But it must NOT be widened wholesale: `0o22 STARTP0` is LEGAL on the 5800 and ILLEGAL on the
+classic.** The generations really do differ, which is exactly why the guard was generation-scoped
+in the first place. Extend it for `0o5` and `0o27` only.
+
+Honest status: the `micfu[]` histogram shows no `0o5` posted to the CPU in any run so far, so this
+is a LATENT gap, not an active bug. Worth closing because a serviced-but-illegal MICFU "fails
+quietly, by working" - the servicer's own comment makes that argument.
+
+### Also newly surfaced, for task 4
+
+`0o35`, `0o42`, `0o44`, `0o45`, `0o47` are LEGAL arms with real handlers and NO name in our tables.
+They are MICFUs the hardware implements that we may not model at all.
+
+
+## 75. OUR 22 MICFUs vs THE B30 TABLE - six we service that hardware rejects, four it has that we lack
+
+Cross-reference of `N5MicroFunction` (22 members, `N5MailboxProtocol.cs`) against the byte-verified
+table in section 74.
+
+### A FOURTH calibration point, from a source not used to build the table
+
+The five legal-but-unnamed arms resolve in `N500-SYMBOLS.SYMB` (names truncated to 5 chars):
+`0o35=3WMEP  0o42=3PRTR  0o44=3RPRE  0o45=3MPCL  0o47=3IDLE`. **`0o44 = 3RPRE = 3RPREG`** - and the
+servicer's own comment says the CLASSIC table's `0o44 3RPREG` lands on a word that is literally
+`ALU,ADIR A,P D,DP`, a read of the P register. Independent of the LABE, of MSG_START/MSG_STARTP0
+and of the 3TRACO agreement. Four confirmations; the indexing is settled.
+
+### MODELLED BY US, ILLEGAL ON THE B30 `[V]` on the arms
+
+```
+  0o5  MessageToSwapper   -> MSG_ILLEG      (guard added)
+  0o16 ExamineRegister    -> MSG_ILLEG
+  0o17 DepositRegister    -> MSG_ILLEG
+  0o20 RegisterRead       -> MSG_ILLEG
+  0o21 RegisterWrite      -> MSG_ILLEG
+  0o27 FileTransfer       -> MSG_ILLEG      (guard added)
+```
+
+The four register ones are NOT an alarm, and the reason is `[D]`: **`0o44 3RPREG` IS legal**, so on
+the 5800 register access plausibly moved to 3RPREG while the classic generation used `0o20`/`0o21`.
+That is self-consistent - SINTRAN's LOOK-AT-REGISTER has to work somehow, and 3RPREG is the arm that
+exists. Graded DERIVED: the arm targets are measured, the migration story is inference. Settle it by
+finding what FUNCS 000/001 (REGRE/REGWR) actually posts on this lane before changing any behaviour.
+
+### LEGAL ON THE B30, NOT MODELLED AT ALL
+
+```
+  0o42 3PRTR    0o45 3MPCL    0o46 33MON    0o47 3IDLE
+```
+
+Real handlers in silicon that our enum has no member for. Feeds task 4 - and note the MON-PATH-LEDGER
+test enforces a row per member, so adding any of these means adding ledger rows, not just enum values.
+
+### What NOT to do with this
+
+Do NOT mass-refuse the six. The servicer's existing argument applies unchanged: refusing a path
+nothing has been observed to take is a speculative behaviour change, and a serviced-but-illegal MICFU
+"fails quietly, by working" - so LOG it, and let a run that actually posts one make the case. No run
+so far posts any of the six to the CPU.
+
+
+## 76. DECODING RULE: `SAA n` before a `JPL I` is a HELPER SELECTOR, not a MICFU and not a SWFUN
+
+Nearly published a false fact 2026-08-30 and caught it on the store, so the rule is written down.
+
+`REGRE` (FUNCS 000, @142365) opens:
+
+```
+  142365  SAA 16        <- 0o16 is EXACTLY the MICFU value ExamineRegister
+  142366  JPL I 45   -> 142433
+  ...
+  142373  LDA ,X 41     <- the value that actually reaches the message
+  142377  LDX ,B -67
+  142400  STA ,X 7      <- ...is stored here, from LDA, NOT from the SAA
+```
+
+Read carelessly this says "REGRE posts MICFU 0o16", which chains straight into section 75's table
+("0o16 is ILLEGAL on the B30") and yields the dramatic conclusion that LOOK-AT-REGISTER cannot work
+on a 5800. **That conclusion would have been wrong**, and it would have looked well-sourced: a
+measured table, a real listing, and a number that matches on the nose.
+
+**The rule:** in this code `SAA n` immediately before `JPL I <helper>` is the SELECTOR the helper
+switches on. The value that lands in the message is whatever a LATER `STA ,X <offset>` stores, and it
+usually arrives from an `LDA`. Follow the STORE, never the nearest preceding constant.
+
+Same shape appears in RUNSW (section, task 2): its `SAA 36` / `SAA 17` are helper selectors, while
+the SWFUN values 0 / 20B / 41B come from the separate `STA ,X 7` stores. That reading is unaffected.
+
+**Consequence for section 75:** the `[D]` about register access migrating to `0o44 3RPREG` on the
+5800 is STILL UNSETTLED. It was not confirmed by this and must not be recorded as if it were. To
+settle it, find what REGRE's helper at `142433` does with its selector - that is the routine that
+knows whether a MICFU is posted at all.
+
+This is the number-coincidence trap: a value that matches a meaningful constant from a DIFFERENT
+namespace. The check is one question - "what actually WROTE the field?" - which is the same question
+[[verify-provenance-not-plausibility]] already names.
+
+
+## 77. CORRECTION TO SECTION 76 - right rule, WRONG STORE. Now genuinely `[OPEN]`
+
+Section 76 declared "`SAA n` before a `JPL I` is a helper selector, NOT a MICFU". **That is not
+established, and the reasoning behind it was faulty.**
+
+Reading the shared helper `0o63007` itself - the one BOTH RUNSW and REGRE call - shows it is a
+MESSAGE BUILDER:
+
+```
+  063012  LDX ,B -67     <- the message block
+  063013  STA ,X 6       <- MICFU := A        *** the MICFU store ***
+  063014  SAA 1
+  063015  STA ,X 2       <- N5STA := 1 (MSGN500)
+  063016  LDA ,B -60
+  063017  STA ,X 3       <- SENDE
+  063020  LDA ,B 0
+  063021  STA ,X 4       <- X5CPU
+```
+
+### What went wrong, because the shape will recur
+
+Section 76's rule - **follow the STORE, not the nearest preceding constant** - is correct. I then
+applied it badly: I followed REGRE's visible `STA ,X 7` at `142400` (offset 7) and concluded the
+`SAA` value never reaches the message. But the store that matters for MICFU is at **offset 6**, and
+it lives INSIDE the shared helper, off the page I was reading. **Following *a* store is not
+following *the* store for the field in question.** Name the field first, then find the store to
+THAT offset - across call boundaries if necessary.
+
+### What is actually known now
+
+`[V]` `0o63007` writes MICFU from `A`, and stamps N5STA=1 / SENDE / X5CPU. It builds the message.
+`[OPEN]` whether `A` at `063013` is still the caller's `SAA n`. It depends on the return path of the
+`JPL I` at `063011` (ND-100 convention: P+1 vs P+2, and the bus reference records SKIP=success /
+DIRECT=error), and on what the callee at the `063024` pointer leaves in A. **Not resolved, and I am
+not going to flip to the opposite confident answer to tidy this up.**
+
+### Consequences to respect until it IS resolved
+
+ - Section 75's `[D]` about register access moving to `0o44 3RPREG` stays `[D]`. It is now LESS
+   comfortable, not more: if REGRE's `SAA 16` does reach MICFU, REGRE posts `0o16`, which section
+   74 measured as ILLEGAL on the B30.
+ - RUNSW's `SAA 7` at `0o163725` is the same question. `7` would be an ILLEGAL MICFU, whereas
+   MSWSTART=7 as a SWFUN in offset 7 is exactly what the ladder expects - and `N5MailboxProtocol`
+   documents offset 7 as an OVERLAY ("SWFUN if MICFU=3SWMESS, else N500A"). Both readings are
+   live; the overlay is precisely what makes the two hard to tell apart.
+ - The task-2 watch is unaffected: its four block arms are branch addresses, which do not depend on
+   this at all.
+
+**To settle it:** resolve the `JPL I` return convention at `063011` and read the callee behind the
+`063024` pointer. One careful pass, no run needed.
+
+
+## 78. TASK 3 RETRACTED - and section 55 had already told me not to do it `[V]` 2026-08-30
+
+### The measurement
+
+`LoadControlStoreCommand_DrivesTheAddressedWritePath` (the EXISTING ACCP suite, 141/142 otherwise
+green) run both ways, 27 s each, by stashing only `Nd5000ControlStoreLink.cs`:
+
+```
+  WITHOUT my 0x0006 case:  PASSED   writes 8 -> 9        one write, correct data
+  WITH    my 0x0006 case:  FAILED   writes 20972 -> 20974  two writes, first misaligned
+```
+
+**I introduced the regression.** The baseline trace shows the console path completing through
+routine B's `0x0018` AFTER the address is re-shifted as the ninth gated word:
+
+```
+  11: SHIFT 0100                <- the address AGAIN
+  12: ADDR-LATCH 0100 halfwords=0
+  13: COMMIT cmd=0x0018 addr=0x0100 112233445566778899AABBCCDDEEF001   <- correct, ONE write
+```
+
+My arm commits before that with the address word still inside the 8-halfword window, producing
+`0100112233445566778899AABBCCDDEE`, and then the legitimate commit follows.
+
+### THE ARGUMENT THAT SETTLES IT, available with no run at all
+
+Section 55 recorded both routines:
+
+```
+  ROUTINE A @0x73B4   address phase, jsr $7776 SHIFT 128 BITS, then #$3010 / #$0006 / #$0010
+  ROUTINE B @0x73F0   address phase, NO SHIFT,                 then #$3010 / #$0006 / #$0010
+```
+
+**Identical triple; B shifts no data.** If `0x0006` meant "commit the shifted microword", routine B
+would commit garbage on every call. It cannot mean that. `0x0006` performs whatever operation the
+preceding `0x3010` latch SELECTED - A being the write (data shifted first), B the read-back. That is
+the natural reading of a write/read pair sharing one perform opcode.
+
+### The process failure, which is the more useful lesson
+
+Section 55 graded it `[D]`, not `[V]`, and said in its own words:
+
+> *"the implementation question is not 'add a case for `0x0006`'. It is: what does the
+> `0x3010`/`0x0006`/`0x0010` triple mean... **Routine B - same triple, no data - is the CONTROL that
+> answers it**, because whatever the triple does without data is what it does with the address alone."*
+
+**I added a case for `0x0006`.** The control was named one paragraph from the thing I implemented,
+and the grade on the claim was `[D]`. Same shape as the standing memory note: *writing down the
+objection is not obeying it.* A `[D]` grade is an instruction to go get evidence, not a licence to
+build on it - and the counts (8 vs ~20,964) were seductive precisely because they FIT.
+
+### What survives, and what does not
+
+`[V]` still true: `0x0006` is written ~20,964 times per boot and WAS being discarded by the
+`default:` arm. The routine-A/B structure and their ROM addresses stand.
+**RETRACTED:** "microwords 8 -> 20,972" as PROGRESS. If `0x0006` is not a per-microword commit, those
+were ~20,964 WRONG writes - which independently explains why the selftest verdict word never moved to
+`0x0100`. **A count that goes up is not evidence the data is right.**
+
+Tree state: the change is STASHED, tree at HEAD, that test GREEN.
+
+### Next
+
+Carve what the `0x3010` latch value SELECTS (write vs read), then model the triple as
+select-then-perform rather than as a second commit opcode. Routine B is the control for every step of
+that, exactly as section 55 said.
+
+
+## 79. THE COMMAND ENCODING REFUTES "0x0006 is a second perform" INDEPENDENTLY `[V]` 2026-08-30
+
+Section 78 killed the claim with routine B (same triple, no data). The command-word ENCODING kills it
+a second time, from a different direction - and this evidence was sitting in our own constants.
+
+`Nd5000ControlStoreLink` already names a family of `0x220000` command words:
+
+```
+  0x0018  CommandPerform          0x2018  CommandOperation
+  0x2010  CommandVerify           0x3010  CommandAddressLatch     0x0010 / 0x000F  clock pair
+  0x2011  CommandShiftInWord      0x0017  CommandMicroprogramArm  0x0015  CommandStrobe
+```
+
+The shape is `<selector><operation>`: `0x0018`/`0x2018` share operation byte **`0x18`**;
+`0x2010`/`0x3010`/`0x0010` share **`0x10`**; `0x2011` is `0x11`.
+
+**`0x0006` shares its operation byte with NOTHING in the family.** It is not a selector variant of
+the perform `0x18` - it is a different operation entirely.
+
+### Why I believed otherwise
+
+Section 55's wording: *"`0x0006` sits in the structural position `0x0018` occupies in the known
+path: after the address, as the operation."* That is an argument from **POSITION IN A ROUTINE**, and
+position is exactly the kind of evidence this project has been burned by before - it is the same
+class as "adjacency is not dispatch" (octobus skill trap 7) and the `.LABE` neighbour that produced
+two wrong dispatch claims. **The encoding is structural evidence; the position is circumstantial.**
+When the two disagree, the encoding wins.
+
+Two independent refutations now agree: routine B (behavioural) and the operation byte (structural).
+
+### Where that leaves the triple
+
+`0x3010` (latch address) -> `0x0006` (operation 06, meaning UNKNOWN) -> `0x0010` (ClockA). Whatever
+`0x06` is, it is performed with an address latched and a clock behind it, in BOTH the data-shifted
+(A) and no-data (B) routines. Carve `0x06` on its own terms; do not model it as a commit.
+
+
+## 80. RESOLVED (sections 76/77): `SAA n` DOES reach offset 6 - of a RESIDENT block, NOT the mailbox
+
+Section 76 said "selector, not a MICFU". Section 77 retracted that as unproven and left it `[OPEN]`.
+Here is the close, with the two halves separated - because they are different questions and mixing
+them is what produced both earlier errors.
+
+### Half 1: does `A` survive to the store? YES `[V]`
+
+```
+  063007  STF ,B -54     <- helper entry SAVES the caller's float accumulator (T,A,D) to B-54
+  063011  JPL I 13    -> 0o44030
+    044031  STA ,B -50   <- callee saves A
+    044032  LDA 46       <- ...and clobbers it
+    044045  LDA ,B -50   <- restores it
+    044051  LDF ,B -54   <- reloads the float accumulator - A comes back from the helper's own save
+    044053  EXIT         <- DIRECT return, so control lands on 063012
+  063012  LDX ,B -67
+  063013  STA ,X 6       <- stores the CALLER'S SAA value
+```
+
+So the `SAA n` value really does reach offset 6. Section 76's stated reason was wrong.
+
+### Half 2: is offset 6 of THAT block the mailbox MICFU? NO `[V]` by measurement
+
+The block comes from `,B -67`, and we have a MEASURED address for it. The guard run's
+`3SWMESS-stamp@0o062700` hit carries `X=0o141430` -> byte `0x18A30` -> physical **`0x438A30`**, which
+is OUTSIDE the mailbox neighbourhood `[0x428000..0x42D000)`. The cell LNEWSWAP reads is `0x428E3C`.
+
+**Different structure, different namespace.** `,B -67` offset 6 is a function code in the RESIDENT
+swapper-message record; the mailbox MICFU lives at `0x428E3C`. Section 76's CONCLUSION (different
+namespace) was right; its ARGUMENT (the SAA never reaches a store) was wrong.
+
+### The lesson worth keeping
+
+Two questions were being answered as one:
+ 1. *does this value reach a store?* - answered from the listing.
+ 2. *is that store the field I care about?* - answered only by an ADDRESS.
+Section 76 got 1 wrong and 2 right; section 77 corrected 1 and then doubted 2 along with it. **Ask
+which structure a store targets BEFORE arguing about what the value means** - the same "what object
+is this?" discipline as taxonomy #19, applied to a memory write instead of an instrument.
+
+### Consequences
+
+ - Section 75's `[D]` on register access is UNAFFECTED and stays `[D]`: REGRE's `SAA 16` goes to the
+   resident block, so it is NOT evidence that REGRE posts an illegal mailbox MICFU. The alarming
+   reading in section 77 is withdrawn.
+ - RUNSW's `SAA 7` likewise sets a resident SWFUN-style code, consistent with MSWSTART=7. The plan's
+   reading of the ladder stands.
+ - Task 2's watch is unaffected either way - its arms are branch addresses.
+
+
+## 81. TASK 1 ANSWERED: the single 3SWMESS is written from RESIDENT SINTRAN at 0o11162 `[V]` 2026-08-30
+
+Single-test run (31m57s), pack override confirmed on log line 3, test PASSED.
+
+### The answer
+
+```
+  CELLW #5997660  =0x0005  PC=0o11162  PIL=2  thread=15  L=0o12001
+```
+
+**One write of 0x0005 in the whole run, from PC 0o11162 at PIL 2, called from 0o12001.**
+
+`0o11162` is a LOW address - S3SM5 starts at `40000B` - so the writer lives in **RESIDENT SINTRAN**,
+not in the ND-500 system monitor. That is why neither S3SM5 stamper ever matched: `0o104024` is never
+entered and `0o062700` writes a different block. **The search was in the wrong segment all along.**
+
+### Reproducibility - the check the first measurement could not provide
+
+| | guard run (33 min, whole class) | this run (32 min, single test) |
+|---|---|---|
+| writes to `0x428E3C` | 314 | **314** |
+| `0x0000` | 313 | **313** |
+| `0x0005` | 1 | **1** |
+
+Two independent runs, identical split. Section 73's numbers are confirmed, not a one-off.
+
+### WHO WRITES THE 313 ZEROS - and a CORRECTION to section 80
+
+```
+  66  PC=0o104266      64  PC=0o63013      18  PC=0o133660     15  PC=0o145525
+  66  PC=0o104242      44  PC=0o104601     18  PC=0o133625     15  PC=0o135367
+```
+
+**`0o63013` is the `STA ,X 6` inside the shared helper** analysed in section 80 - and it writes THIS
+cell, at `0x428E3C`, sixty-four times.
+
+Section 80 concluded that the `,B -67` block is a RESIDENT record and therefore never the mailbox. It
+based that on ONE measured instance (`0o062700`'s hit carrying `X=0o141430` -> `0x438A30`). **That
+generalisation is WRONG.** `,B -67` is a per-context pointer: for some callers it is a resident
+record, for others it IS the mailbox message. Both are true, and the address decides which.
+
+So the half-2 answer in section 80 stands only for the instance it measured. **The `SAA n` value CAN
+reach the mailbox MICFU** - it just happened to be 0 on all 64 of these calls, which is why every one
+of them stores `0x0000`.
+
+**The generalisation error, named:** one address measured, a rule inferred for all callers of the
+same instruction. The fix is the same discipline that produced the correct half of section 80 - ask
+what object THIS store targets, per call site, not once for the routine.
+
+### What is still open
+
+Identify `0o11162`. No `.dis` in the carve set covers it (`003-S3CP`, `006-S3FS`, `030-S3SM5`,
+`045-S3ISYS` are all higher); the resident image is `MACM-1718K-loaded-image.bin`. Once named, the
+question becomes why that site runs ONCE, at the very end, instead of whenever the swapper needs work.
