@@ -3583,9 +3583,11 @@ firmware uses that B30 never uses is, by construction, invisible to the differen
 | `A_OP` | 166 (`A,IDU,DPA`) | **never** |
 | `STATUS` | 11 | **never** |
 | `TESTOBJ` | 29 | **never** |
-| `MEMORY` | 915 | **never** |
+| ~~`MEMORY`~~ | ~~915~~ | **WRONG - my instrument's error, see section 48** |
 
-**SEVEN out of seven enum fields take a value the real microcode never uses ONCE in 16384 words.**
+**SIX of the seven enum fields take a value the real microcode never uses ONCE in 16384 words.**
+(Was written as seven of seven; the `MEMORY` row is my own decoding error - see section 48. The
+conclusion is unaffected and was independently confirmed.)
 
 A genuine microword reuses the microcode's own vocabulary. A word in which every single field is an
 unprecedented value is not a microword - it is a random bit pattern. This is the fifth independent
@@ -3687,3 +3689,714 @@ work, not on the critical path: TESTOBJ 24/48/49; Q_REG 2/6/7; ABR 1 `ABR,NEXT` 
 Two structural absences worth recording separately: **`TIMING` is decoded at `Microword.cs:279` and
 read NOWHERE** — cycle time is not modelled at all; and **`TBC` has no dispatch** — only values 1
 and 3 act (`CpuND5000.cs:1654-1659`), 0/2/4/6/7 silently do nothing, with no branch-cache model.
+
+## 48. CORRECTION to §47, and a REUSABLE GUARD for every microword decode `[V]` 2026-08-30
+
+§47's table listed `MEMORY=915` as a value with no precedent in B30. **That was my instrument, not
+the machine** - the third time tonight a probe's own arithmetic produced a confident wrong number
+(cf. §22's `5MBBANK` shift and the `X5ACT` double-count).
+
+`microcode-5000-def.json` declares `MEMORY` as **bits 41..32 - a ten-bit span - while also declaring
+`width: 4`.** The two contradict each other. My decoder trusted the span, read ten bits, and got 915.
+The real encoding is `MemOp = (bit41 << 3) | bits34..32` = **11 = `RD,PX`, which IS implemented.**
+
+§47's table is annotated in place and its count corrected from seven of seven to **six of six**. The
+conclusion is untouched, and was independently confirmed from the other direction: word `0o0` takes
+five field values occurring zero times in all 16384 real B30 words, including a reserved bit that is
+0 in every real microword.
+
+### The guard, and it is one line
+
+**Any field where `highBit - lowBit + 1 != width` in `microcode-5000-def.json` has an UNRELIABLE
+span - do not decode it by span.** Swept the whole file:
+
+```
+MEMORY: bits 41..32 span=10 but width=4
+total 1
+```
+
+**`MEMORY` is the ONLY one.** Every other field and subfield in the definition is self-consistent, so
+every other decode in this document - including §75's `TESTF`/`TESTD`/`TESTFD` carve, which used
+ALU_TRUE, ALU_FALSE, COND_ALU, DATATYPE, A_OP, B_OP, DEST, STATUS, TESTOBJ, ABS_ADDR and SEQ - is
+unaffected. (The `TESTF` stub decode did print `MEMORY=527`; that value is unreliable and nothing was
+concluded from it.)
+
+Add this check to any future decoder before trusting a field: it costs one comparison and it caught a
+published number tonight.
+
+### Also corrected, from the same catalog
+
+"532 words use `ORA,ALTEN`" was **bit-aliasing** - `ORCON`'s bits 15..0 are shared with `SARG` and
+`MARG`, so counting `ORCON` values across all words counts immediates as opcodes. Restricted to words
+that actually consume `ORCON`: **zero**. Same shape as the `MEMORY` error and as §22.
+
+### And the sharpest lead of the night, from the same source
+
+`LOAD-CONTROL-STORE` typed at the console round-trips CORRECTLY in the very same log where the
+selftest's control-store path does not. **Two paths through the same link, one works and one does
+not - that difference is the bug**, and it needs no theory about serial mechanisms or field
+semantics. Start there, not at the field gap.
+
+## 49. THE WORKING PATH IS DEGENERATE - it cannot validate the rule the failing path depends on `[V]` 2026-08-30
+
+§48 named the sharpest lead: `LOAD-CONTROL-STORE` typed at the console round-trips correctly in the
+same log where the selftest's control-store path does not. Diffed the two, from `accp-cs.log`:
+
+**WORKS - console `LOAD-CONTROL-STORE 100 1122 ... F001`:**
+```
+SHIFT      0100
+ADDR-LATCH 0100 halfwords=0        <- address phase A
+SHIFT      1122 3344 5566 7788 99AA BBCC DDEE F001
+ADDR-LATCH 3001 halfwords=7        <- junk latch (F001 & 0x3FFF)
+SHIFT      0100
+ADDR-LATCH 0100 halfwords=0        <- address phase B - SAME ADDRESS
+COMMIT     addr=0x0100  112233445566778899AABBCCDDEEF001     -> reply "- OK -"
+```
+
+**FAILS - selftest, the address-0 window:**
+```
+ADDR-LATCH 3FFB halfwords=0        <- address phase A
+SHIFT      5640 51AF 4C92 BB59 8BB4 0393 5426 50DD
+ADDR-LATCH 10DD halfwords=7        <- junk latch (50DD & 0x3FFF)
+SHIFT      0000
+ADDR-LATCH 0000 halfwords=0        <- address phase B - DIFFERENT ADDRESS
+COMMIT     addr=0x0000  564051AF4C92BB598BB40393542650DD
+```
+
+### The structural difference, and it is the whole point
+
+Both paths have the SAME shape: `[address phase A] [8 data halfwords] [junk latch] [address phase B]
+[COMMIT]`. There are two possible pairing rules:
+
+ - **R1** - the commit binds to the LAST address phase (B). This is what the code implements.
+ - **R2** - the commit binds to the address phase that PRECEDED the data (A).
+
+**In the working path A == B == `0x0100`, so R1 and R2 give the identical answer.** The console
+round-trip therefore CANNOT distinguish them, and its `- OK -` is not evidence for either rule. **It
+has never validated the pairing rule at all.**
+
+**In the selftest path A = `0x3FFB` and B = `0x0000`.** R1 stores the word at 0; R2 stores it at
+`0x3FFB`. This is the ONLY observed case that discriminates, and it is exactly the case that fails.
+
+### What this does and does not establish
+
+ESTABLISHED `[V]`: the one path that works is degenerate for this question, so "the console path
+round-trips fine" carries NO information about the rule the failing path depends on. That retires the
+"two paths, one works, one doesn't, so compare them" framing as a route to the answer - the working
+path has nothing to say.
+
+NOT ESTABLISHED: that R2 is correct. §40 showed the code reasons explicitly about the address being
+written ninth (`_addressIsNewestInRing`), so R1 is a considered choice, not an oversight. **Do not
+flip it on the strength of this section** - that would be the same "obvious reading" mistake §33 and
+§39 already produced.
+
+### What would settle it, and it is small
+
+The ACCP ROM's `0x741E` write path calls the address phase (`0x76E6`) and the shift (`0x7776`) in a
+fixed order. Read WHICH of the two `0x3010` latches the `0x0018` at `0x7446` is meant to consume -
+that is a handful of instructions and it decides R1 vs R2 outright. `HANDOFF-ACCP-CONTROL-STORE-
+MODEL-CORRECTED-2026-08-04.md` already prints the address phase; the caller's ORDER is what is needed.
+
+## 50. R1 vs R2 SETTLED FROM THE ROM: the code's pairing is CORRECT, and a COMMIT is MISSING `[V]`/`[D]` 2026-08-30
+
+§49 said the working path cannot decide the pairing rule and named the small thing that can: the
+order of calls inside the `0x741E` write path. Dumped the ROM bytes (`romdump.py` over
+`AccpRom.cs`), window `0x7420`-`0x7458`:
+
+```
+007420: 4E56 FFE8            link   A6,#-24
+007428: 3D40 0014            move.w D0,(0x14,A6)        ; the ADDRESS parameter
+00742C: 426E 0016            clr.w  (0x16,A6)
+007430: 4EB9 0000 76E6       jsr    $76E6               ; <- ADDRESS PHASE
+007436: 08F9 0002 0011 44EE  bset   #2,$001144EE        ; <- GATE ON (bit 2 = 0x04)
+00743E: 13F9 0011 44EE 0033 0000   move.b $001144EE,$00330000
+007448: 33FC 0018 0022 0000  move.w #$0018,$00220000    ; <- PERFORM
+007450: 0839 0000 0066 0000  btst   #0,$00660000        ; <- status test
+```
+
+Opcodes `4EB9` (jsr abs.l), `33FC` (move.w #imm,abs.l), `08F9` (bset abs.l) and `0839` (btst abs.l)
+are unambiguous, so the CALL ORDER is `[V]`; the operand framing between them is `[D]`.
+
+**There is NO `jsr $7776` between the address phase and the perform.** The shift-out is not called
+here at all - the 128 bits must already have been shifted BEFORE this routine ran. (The `jsr $7776`
+in the earlier carve belongs to `0x773A`, the MIR path, which ends in `0x2018`, not `0x0018`.)
+
+So the write sequence is: **data shifted -> address phase -> gate -> perform.** The address phase
+that binds to a commit is the one AFTER the data. **That is R1 - exactly what the code implements.
+R2 is eliminated, and `Nd5000ControlStoreLink`'s pairing is CORRECT.** Do not change it.
+
+Mapping that onto the address-0 window confirms it: `SHIFT 0000 / ADDR-LATCH 0000` is the `0x76E6`
+address phase, the `COMMIT` is the `0x0018`, and the eight halfwords before them are the data.
+**Address 0 legitimately receives `5640 51AF ...`.**
+
+### And that exposes the actual defect - a MISSING commit
+
+Re-read the same window with the rule now known:
+
+```
+ADDR-LATCH 3FF0            <- address phase (for an earlier group)
+SHIFT 0718 E6A7 ... 0415   <- group 1
+ADDR-LATCH 0415 hw=7       <- junk latch
+SHIFT 3FFB
+ADDR-LATCH 3FFB hw=0       <- ADDRESS PHASE. Under R1 this binds to group 1.
+                              ** NO COMMIT APPEARS HERE **
+SHIFT 5640 ... 50DD        <- group 2
+ADDR-LATCH 10DD hw=7       <- junk latch
+SHIFT 0000
+ADDR-LATCH 0000 hw=0       <- address phase, binds to group 2
+COMMIT addr=0x0000 564051AF...   <- the only commit
+```
+
+**Group 1 had its address phase and never committed.** That is not a pairing error - it is a
+`0x0018` we never saw. This is the same defect as P1 (#78, "the bulk selftest microcode never
+reaches the control store - only 8 pattern addresses arrive"): **writes are being DROPPED, not
+misplaced.**
+
+### Where to look, and it is narrow
+
+`WriteCommand` dispatches on the exact word: `0x0018` commits, `0x2018` loads the MIR, `0x0017` arms,
+`0x3010` latches an address, `0x2010`/`0x2011` drive read-back, and **`default:` is "not modelled -
+and deliberately not guessed at"**. If the firmware completes most writes with a word that falls into
+that `default`, every one of them is silently dropped and the trace shows exactly what it shows here.
+**Instrument the `default` arm: count and log the unrecognised command words.** That is a few lines,
+it cannot be wrong, and it turns "writes are dropped" into "writes are completed by word 0xNNNN".
+
+## 51. THE DROPPED WRITES HAVE NAMES: 8 unmodelled command words, three of them exactly 89 times `[V]` 2026-08-30
+
+§50 said instrument the `default:` arm of `WriteCommand` and turn "writes are dropped" into "writes
+are completed by 0xNNNN". Done - a counter plus a first-sighting-only trace line, bounded by the
+number of DISTINCT words so it cannot bury the signal in a 233k-entry trace. Ran
+`Nd5000RealCpuStartTests`; log `unkcmd.log`.
+
+```
+microwords written: 8 addresses [ 0o0 0o1 0o37760 0o37761 0o37762 0o37763 0o37764 ]
+unknown command words: 21263 total, 8 distinct
+    0x0006 x20964      <- dominates
+    0x300F x89   \
+    0x4016 x89    >    <- IDENTICAL counts
+    0x8013 x89   /
+    0x0005 x20
+    0x0007 x4
+    0x0001 x5
+    0x001A x3
+```
+
+**21,263 writes to the command port match no modelled command and are silently discarded.**
+
+### The two things worth acting on
+
+**1. `0x300F` / `0x4016` / `0x8013` occur EXACTLY 89 times each.** Three distinct words with
+identical counts is a three-word SEQUENCE repeated 89 times - one per operation, 89 operations, none
+of them modelled. Against `microwords written: 8`, that is the shape of the missing bulk load.
+`0x8013` is independently interesting: the octobus skill records `0x0F` / `0x8013` as **the MFbus
+memory transaction**, so this trio may be a memory-transaction path rather than a control-store one.
+
+**2. `0x0006` at 20,964 is not the modelled clock.** `ClockA = 0x0010` and `ClockB = 0x000F`
+(`Nd5000ControlStoreLink.cs:204-207`); `0x0006` is neither, so a fifth of a boot's traffic on this
+port is an unrecognised strobe. If it is a clock phase the link does not know about, every shift it
+should have driven is uncounted.
+
+`0x0005` and `0x0007` are ACON codes 5 (`RAIBF`) and 7 (`MASKAIBF`) in the octobus skill's table -
+worth checking whether the same numbering applies on this port before assuming it does.
+
+### Status of the claim
+
+`[V]` that these words arrive and are discarded - it is a direct count with a denominator.
+`[D]` that they are what carries the missing writes. **Do not "implement" any of them yet**: the
+89-triple could equally be a path that legitimately does not touch the control store, and §33/§39/§47
+are three separate occasions tonight where the obvious reading of a trace was wrong.
+
+**NEXT, and it is small:** find `0x300F`, `0x4016`, `0x8013` and `0x0006` in the ACCP ROM - which
+routine writes each, and in what order. That says what the sequence IS before anything is modelled,
+and it is the same method that settled R1 vs R2 in §50.
+
+Instrumentation added (uncommitted): `UnknownCommands` + `UnknownCommandCounts` on
+`Nd5000ControlStoreLink`, reported by `Nd5000RealCpuStartTests`. Worth keeping either way - a link
+that silently discards a fifth of its input traffic should always have said so.
+
+## 52. THE LINK MODELS ONE PROTOCOL; THE ROM SPEAKS AT LEAST THREE `[V]` 2026-08-30
+
+Census of every `move.w #imm,$00220000` in the ACCP ROM (`cmdsites.py` - opcode `33FC`, immediate,
+then the literal port address, so there is nothing to interpret). **24 distinct command words:**
+
+```
+0001 x9   0002 x1   0005 x4   0006 x2   0007 x5   0008 x3   000F x4   0010 x2
+0015 x1   0017 x1   0018 x2   001A x1   2010 x1   2011 x2   2018 x1   300F x4
+3010 x2   4009 x1   400A x1   400C x1   400D x1   4016 x1   8013 x2
+```
+
+`Nd5000ControlStoreLink` models eight of these (`0x0010`/`0x000F` clock, `0x0018`, `0x2010`,
+`0x2011`, `0x2018`, `0x0017`, `0x3010`, `0x0015`). **Sixteen it does not.**
+
+### `0x0006` sits INSIDE the address phase, between the latch and the clock `[V]`
+
+Each `move.w #imm,abs.l` is 8 bytes, so consecutive sites 8 apart are consecutive instructions. Two
+near-identical routines:
+
+```
+0073CC: move.w #$3010,$220000      007402: move.w #$3010,$220000
+0073D4: move.w #$0006,$220000      00740A: move.w #$0006,$220000
+0073DC: move.w #$0010,$220000      007412: move.w #$0010,$220000
+```
+
+`0x3010` is the ADDRESS LATCH and `0x0010` is CLOCK A - both modelled. **`0x0006` is written between
+them and is not.** That is why it dominates the runtime census at **20,964** occurrences: it is part
+of a sequence the firmware runs constantly, and the link drops it every time.
+
+### A whole second command region the link never sees `[V]`
+
+`0x70D0`-`0x7260` carries `300F`, `400A`, `400C`, `400D`, `4009`, `4016`, `8013` and one `2011` -
+seven of them unmodelled, in a band well away from the write path (`0x7420`) and the address phase
+(`0x76E6`). At runtime `300F`/`4016`/`8013` each fire **exactly 89 times**, i.e. 89 passes through
+this region, against `microwords written: 8`.
+
+### What this settles
+
+**The link implements ONE write protocol and ONE read-back protocol. The ROM contains at least
+three.** "The bulk selftest microcode never reaches the control store" (#78/P1) needs no further
+theory: the firmware is driving a path the link does not implement, and the link discards it in
+silence. Same for the missing commit in §50.
+
+`[V]`: the words exist in the ROM, at those addresses, in that order, and arrive at runtime in those
+counts. `[D]`: that the `0x70D0` band is the bulk loader specifically.
+
+**NEXT:** disassemble `0x70D0`-`0x7260` properly (it is ~400 bytes) and name the routine. The
+`0x8013` there matches the octobus skill's note that `0x0F`/`0x8013` is **the MFbus memory
+transaction** - if that holds, this band is a memory-transaction path and the bulk load moves through
+MFbus rather than the shift port, which would explain every symptom at once. **Check it; do not
+assume it** - the skill's numbering is for a different port.
+
+## 53. `0x550000` IS SHARED: microword staging AND MF-bus data-high `[V]` - plus an open conflict 2026-08-30
+
+§52 guessed the `0x70D0` band might be MF-bus. **It is already carved** -
+`ACCP-COMPLETE-REFERENCE.md` §2.4 documents the whole thing, so §52's "next: disassemble it" was
+work already done:
+
+```
+0x00220000  COMMAND/PARAMETER port. High nibble selects a function, low byte carries the value.
+            0x300F open/select, 0x400A and 0x400C sub-functions, 0x000F strobe closing each triple.
+0x00440000  DATA, LOW half of a 32-bit value
+0x00550000  DATA, HIGH half   ("the code does swap D0 between the two writes")
+0x00660001  STATUS, bit 4 = transaction complete
+```
+
+### THE FINDING: one port, two meanings, and the link only knows one `[V]`
+
+`AccpMachine.cs:889-890` maps BOTH halves to the control-store link:
+
+```csharp
+new Nd5000LinkWindow(controlStoreLink, Nd5000WindowRole.DataLow,  0x00440000),
+new Nd5000LinkWindow(controlStoreLink, Nd5000WindowRole.DataHigh, 0x00550000)
+```
+
+and `Nd5000LinkWindow.cs:158` routes every DataHigh write to `_link.WriteData(word)` - the
+microword staging path. **But `0x550000` is ALSO the MF-bus DATA-HIGH register.** So every MF-bus
+data word the firmware writes is staged by the control-store link as if it were a microword halfword.
+
+Scale, from the same reference: MF-bus transactions run **20,968 times per boot, 64 clock pairs
+each** - and clock pairs are exactly what advances the link's shift ring. This is not a trickle.
+
+**That is a sufficient mechanism for #84**: address 0's committed word can be assembled from MF-bus
+traffic rather than the intended microword, which is precisely "wrote `5640 51AF ...`, expected
+`7698 B027 ...`" with no transform needed.
+
+### Cross-check that lands, and one that does not `[V]`
+
+My §51 runtime census against the reference's per-boot table:
+
+| word | mine | reference |
+|---|---|---|
+| `0x0005` | 20 | 20 |
+| `0x0007` | 4 | 4 |
+| `0x0001` | 5 | 5 |
+| `0x001A` | 3 | 3 |
+| `0x300F` / `0x4016` / `0x8013` | **89 each** | **1 each** |
+
+**Four match exactly; three are 89x.** That is not a run-length difference - a longer run would
+scale everything. Something makes the MF-bus open/select sequence repeat. The reference notes the
+completion bit is "polled in a software countdown loop; exhausting it prints the timeout", and the
+console does print `MFbus controller has incorrect CPU model setting` - flagged as unexplained in
+§32 and now plausibly related. **`[D]`, not established.**
+
+I checked the obvious cause and it is NOT it: `0x660001` bit 0 (MF-bus command done) IS modelled and
+deliberately held SET (`AccpMachine.cs:971-972`). So "we never signal completion, so it retries" is
+refuted before it was written up.
+
+### THE OPEN CONFLICT - do not resolve it by picking a side
+
+`Nd5000ControlStoreLink`'s `CommandOperation` case says `0x2018` is **the MIR load**, with a comment
+recording that treating it as a control-store write was a real bug producing a retracted "281
+microwords loaded" claim. `ACCP-COMPLETE-REFERENCE.md` says the `0x2018`-closed 64-pair transactions
+are **MF-bus transactions**, 20,968 of them.
+
+Both cannot be the whole truth about the same 20,968 events. Whoever takes this next must settle
+which - from the ROM, not from either document - **before** changing how `0x550000` writes are
+routed. Getting it wrong re-introduces a bug that has already been fixed once.
+
+## 54. THE COMMAND CENSUS: `0x0018` fires EIGHT times, and that reframes P1 `[V]` 2026-08-30
+
+§53 left a conflict between two tables of `ACCP-COMPLETE-REFERENCE.md` (`0x2018` as 4 per boot vs as
+the closer of 20,968 transactions) and the link's own model. Rather than choose, I counted every
+write to `0x220000`. Extended the instrument from unknown-only to ALL command words; log
+`cmdcensus.log`:
+
+```
+0x0010 x1756035   clock A            0x2011 x2320    read-back word
+0x000F x1714185   clock B            0x2010 x290     verify start
+0x3010 x  41939   address latch      0x2018 x 284    "MIR load" / "MF-bus closer"
+0x0015 x  20979   strobe             0x8013 x  89    0x300F x89   0x4016 x89
+0x0006 x  20964   *** UNMODELLED ***  0x0005 x20  0x0018 x8  0x0001 x5
+                                      0x0007 x4   0x0017 x4   0x001A x3
+```
+
+### Three results, all direct counts
+
+**1. `0x2018` fires 284 times. BOTH reference figures are wrong** - not 4, not 20,968. The ~20,970
+events that table meant are far better matched by `0x0015` (20,979) and `0x0006` (20,964). So the
+reference mis-attributes the closer of its own dominant transaction. Measured, not argued.
+
+**2. The dominant operation is `0x3010` x2, `0x0006`, `0x0015`** - note `0x3010` at 41,939 is almost
+exactly TWICE 20,970, which matches the trace shape seen throughout (an address phase AND a junk
+latch per operation, §39/§50). **`0x0006` is the one member of that quartet the link does not model.**
+
+**3. `0x0018` fires EXACTLY 8 times - and exactly 8 microwords are written.**
+```
+0x0018 x8        microwords written: 8 addresses [ 0o0 0o1 0o37760 0o37761 0o37762 0o37763 0o37764 ]
+```
+**The control-store write path is not dropping anything. It runs eight times and commits eight
+words.** §50's "a commit is MISSING" was me reading a gap between two address phases as a lost
+commit; the count says every `0x0018` the firmware issued was honoured.
+
+### So P1 (#78) is REFRAMED, for the third time and now on a count
+
+"The bulk selftest microcode never reaches the control store" is TRUE, but **not because we drop
+writes**. The firmware never issues `0x0018` for it. Whatever loads the bulk selftest goes through
+another path - and the ~20,970-operation sequence built from `0x3010`/`0x0006`/`0x0015` is the only
+candidate with the right volume.
+
+`[V]`: the counts. `[D]`: that the 20,970-sequence is the bulk loader.
+**Do not implement `0x0006` on that basis alone** - identify the routine that issues it first
+(`0x0073D4` and `0x00740A` are its only two ROM sites, §52), exactly as §50 settled R1 vs R2 by
+reading the caller rather than guessing from the trace.
+
+### Housekeeping: §47's recommendation was overruled, correctly
+
+§47 concluded the engine should be made to TOLERATE unknown microword fields. **Ronny decided the
+opposite and it is now the standing rule (task P3 / #83): implement every field properly; throw, log
+and die on anything missing.** Three reasons, recorded so it is not re-argued: tolerance hides real
+gaps in the B30 execution path, turning a loud correct halt into silent wrong execution; it is not
+what the hardware does, since faithfully executing an arbitrary word REQUIRES a complete field set;
+and the throw is a feature - it is how the four blockers in word `0o0` were found at all.
+
+## 55. THE 20,970-OPERATION SEQUENCE IS A SECOND CONTROL-STORE WRITE PATH `[V]` structure, `[D]` role 2026-08-30
+
+§54 said find the routine that issues `0x0006` before implementing anything. Disassembled its only
+two ROM sites (`rd2.py` over `AccpRom.cs`). **Two sibling routines, and they are unmistakable:**
+
+```
+ROUTINE A @ 0x73B4                        ROUTINE B @ 0x73F0
+  link    A6,#-24                           link    A6,#-24
+  move.w  D0,(0x14,A6)   ; address          move.w  D0,(0x14,A6)   ; address
+  jsr     $76E6          ; ADDRESS PHASE    jsr     $76E6          ; ADDRESS PHASE
+  jsr     $7776          ; SHIFT 128 OUT    (no shift)
+  move.w  #$3010,$220000 ; latch            move.w  #$3010,$220000 ; latch
+  move.w  #$0006,$220000 ; <-- UNMODELLED   move.w  #$0006,$220000 ; <-- UNMODELLED
+  move.w  #$0010,$220000 ; clock            move.w  #$0010,$220000 ; clock
+  clr.w   $0011314A      ; clear a flag     unlk / rts
+  unlk / rts
+```
+
+**A takes an address AND shifts a full 128-bit microword; B takes an address and shifts nothing.**
+That is the shape of a write/read pair - and neither touches `0x0018`, the gate, or the
+`0x660000` status test that the known write path at `0x7420` uses.
+
+### Why this is very likely P1's missing bulk load
+
+| | known write path `0x7420` | routine A `0x73B4` |
+|---|---|---|
+| address | `jsr $76E6` | `jsr $76E6` |
+| data | shifted BEFORE the call (§50) | **`jsr $7776` INSIDE, after the address** |
+| gate | `bset #2` on `0x1144EE` | none |
+| perform | `move.w #$0018` | `#$3010` / **`#$0006`** / `#$0010` |
+| status | `btst #0,$00660000` | none |
+| runtime count | **8** | **~20,964** |
+
+`0x0006` sits in the structural position `0x0018` occupies in the known path: after the address, as
+the operation. **So `0x0006` is a strong candidate for a second `perform`, and routine A for the
+bulk control-store write.** The counts fit: 8 words through the `0x0018` path, ~20,964 through this
+one, and `microwords written: 8`.
+
+`[V]`: the two routines, their instruction order, their ROM addresses, and the runtime counts.
+`[D]`: that `0x0006` is a perform and routine A is the bulk loader.
+
+### Before anyone implements it
+
+The data ordering DIFFERS from the known path and that matters: `0x7420` has its data shifted
+**before** the routine runs (§50, settled from the ROM), whereas routine A shifts **inside**, after
+the address phase. A model that assumes the `0x7420` convention here will pair address and data
+wrongly - which is the exact failure §39 mistakenly attributed to the existing code.
+
+So the implementation question is not "add a case for `0x0006`". It is: **what does the
+`0x3010`/`0x0006`/`0x0010` triple mean, and does the shift that precedes it belong to the address
+latched by that `0x3010` or to the earlier `jsr $76E6`?** Routine B - same triple, no data - is the
+control that answers it, because whatever the triple does without data is what it does with the
+address alone.
+
+`clr.w $0011314A` in A and not in B is a further discriminator worth carving: a flag one path clears
+and the other does not.
+
+## 56. P1 ANSWERED: there are TWO control-store write routines and we model the one used 8 times `[V]` 2026-08-30
+
+§55 found routine A at `0x73B4` and said find its callers. It has **three**, all `bsr.w`, and they
+are decisive.
+
+**Call site 1 (`0x7556`) - a loop that walks control-store addresses:**
+```
+007548: cmpi.w #7,D2          ; inner counter - 8 halfwords
+00754C: bne.s  (loop back)
+00754E: move.w (0x14,A6),D0
+007552: add.w  #$3FF0,D0      ; ADDRESS = parameter + 0x3FF0
+007556: bsr.w  routineA       ; <- WRITE
+00755E: addq.w #1,(0x14,A6)   ; next address
+007562: cmpi.w #4,D0
+007566: bne.s  (loop)
+```
+The `+0x3FF0` matches the existing carve's own note that the firmware's address parameter arrives as
+`parameter + 0x3FF0` over a 0x4000-word space - and the ND-5000 control store holds exactly 16384
+words.
+
+**Call site 3 (`0x762A`) - the start/stop microprogram test, in full:**
+```
+00761E: move.w (0x14,A6),$001144FE
+007626: move.w #$3FF1,D0
+00762A: bsr.w  routineA       ; write a microword at 0x3FF1
+00762E: move.w #$3FF0,D0
+007632: jsr    $00007A66      ; START   (named in Nd5000ControlStoreLink's own carve)
+007638: jsr    $000078B2
+00763E: jsr    $00007A84      ; STOP    (likewise)
+```
+
+### The answer
+
+**The ACCP firmware has TWO control-store write routines:**
+
+| | `0x7420` (modelled) | `0x73B4` routine A (NOT modelled) |
+|---|---|---|
+| callers | 1 (`0x74BC`) | **3, all in loops** |
+| protocol | address phase, gate `bset #2`, `#$0018`, `btst` status | address phase, `jsr $7776` shift, `#$3010` / **`#$0006`** / `#$0010` |
+| runtime count | **8** | **~20,964** |
+| what the link does | commits a microword | **discards every write - `0x0006` falls into `default:`** |
+
+`microwords written: 8` is therefore not a symptom of dropped commits, a mispaired address, a serial
+transform, a missing field, or a broken read-back - **every one of which was investigated tonight.**
+It is the exact count of the ONE write path the link implements. **The selftest's own write path was
+never implemented, so none of its ~20,964 writes has ever landed.** That is P1 (#78), and it also
+supplies §84/P2's mechanism: the sample test reads back a word its writes never reached.
+
+`[V]`: the routines, their callers, the loop structure, the protocol difference, the counts.
+`[D]`: nothing load-bearing remains - the only inference is that implementing routine A's protocol
+fixes it, which is a prediction to be TESTED, not assumed.
+
+### Implementation notes for whoever takes it (P1/#78)
+
+- The data ordering differs from `0x7420` and this WILL bite: routine A shifts **inside**, after its
+  address phase (`jsr $76E6` then `jsr $7776`), where `0x7420` has the data shifted before the call
+  (§50). Do not reuse the existing pairing assumption.
+- **Routine B (`0x73F0`) is a STATIC control only - it is DEAD CODE.** Verified 2026-08-30: the ROM
+  contains NO reference to `0x73F0` at all - no `jsr`/`bsr`, no 32-bit literal, and not even the
+  16-bit value anywhere in 131,074 bytes. Routine A ends in `rts` at `0x73EE`, so it is not reached
+  by fall-through either. It is still useful for READING what the triple means without a shift, but
+  it can never be a runtime control, and **all ~20,964 `0x0006` writes therefore come from routine A
+  alone** - which matches A having three loop callers and `0x0006` having exactly two ROM sites.
+- `clr.w $0011314A` appears in A and not in B; the flag has four ROM references
+  (`0x000E98`, `0x0055D8`, `0x0073E6`, `0x00B188`) and is worth carving alongside.
+- Red-first: the ACCP selftest's own verdict block already grades this. It is the regression test.
+
+## 57. The `0x0011314A` flag, carved - and one tempting link left EXPLICITLY OPEN `[V]`/`[OPEN]` 2026-08-30
+
+§56 listed `clr.w $0011314A` as a discriminator between routines A and B. All four ROM references:
+
+```
+000E94  move.w #$0001,$0011314A     ; SET, during init (beside move.w #$0001,$001143AA)
+0055D6  tst.w  $0011314A            ; TESTED
+0055DC  beq.s  +0x20                ;   ... skip if zero
+0055DE  move.w #$00FF,D0            ;   ... else D0 := 0x00FF
+0055E2  jsr    $00006986            ;   ... and call 0x6986
+0073E6  clr.w  $0011314A            ; CLEARED by routine A (the unmodelled CS write)
+00B184  move.w #$0001,$0011314A     ; SET, immediately after jsr $7A84 (STOP microprogram)
+```
+
+`[V]`: set at init and after STOP; cleared by the control-store write; tested on a path that loads
+the constant `0x00FF`. Shape: "the control store has not been written since the microprogram was
+stopped".
+
+### The tempting link, and why it is NOT being recorded as a finding
+
+The console prints `Start/stop microprogram test abc failed at CSA: 00FFH`, and here is a path that
+loads exactly `0x00FF` when this flag is set. It is very tempting to conclude that the `00FFH` is
+**this constant rather than a real control-store-address read-back** - which would matter, because
+anyone debugging that message by chasing CSA values would be chasing a literal.
+
+**NOT ESTABLISHED.** The string `failed at CSA` is at ROM `0x11B0F` and `Start/stop` at `0x117CB`,
+but I have not traced `0x6986` to either. Tonight has produced five retractions, every one from
+exactly this move - a plausible connection between two things seen in the same window, written up
+before the intervening code was read (§33, §36, §40, §44, §50).
+
+**What settles it, cheaply:** the census instrument is already in place. Break on the write of
+`0x00FF` to whatever `0x6986` formats, or simply follow `0x6986` to its output call. One read, no run.
+
+### Ordering note
+
+This is a side-carve, not a blocker. **P1 (#78) is answered and implementable without it** - §56 has
+the routine, the protocol, the callers and the counts. The flag matters when someone wants to know
+WHY the selftest reports what it reports, which is a question for after the writes land.
+
+## 58. §57's tempting link is REFUTED - and the real CSA reporter was already in a log we had `[V]` 2026-08-30
+
+§57 flagged, without adopting, that `0x0055DE move.w #$00FF,D0` might be the source of the console's
+`failed at CSA: 00FFH`. **It is not.** Checked as §57 said to, and it cost one read.
+
+The message is a linked record in a chain of format strings:
+
+```
+0x11AF4  ... 0x0B "completed OK"
+0x11B00  -> next 0x00011B0C, len 0x0F, " failed at CSA: "
+0x11B0C  -> next 0x00011B28, len 0x12, " failed$$Result  : "
+```
+
+**`0x00011B00` - the "failed at CSA" record - is referenced from code at `0x00C0C0`**, not from
+`0x6986`. So the `0x55D6` flag test and the CSA message are different paths, and §57's link does not
+hold. Recorded as refuted so it is not re-adopted.
+
+### The evidence for the real reporter was sitting in `accp-cs.log` the whole time
+
+That earlier run already carried a trap instrument on this exact address:
+
+```
+trap hits at 0xC0FC: 1
+  #  0 @ 8,574,088  D0=0x000000FF  A6=0x11008C  (0x20,A6)=0x00FF
+```
+
+`0xC0FC` is inside the routine that references the message record at `0x00C0C0`, and the printed
+value comes from **`(0x20,A6)`, a stack local** - `0x00FF` was already captured there, with its
+instruction count, hours before I started theorising about where the number came from.
+
+So the honest position on `CSA: 00FFH`: it is whatever `(0x20,A6)` holds at `0xC0FC`, and **that is
+now a one-hop question** - find what writes that local - rather than a guess between a constant and a
+read-back. Still `[OPEN]`, but bounded.
+
+### Why this section exists
+
+Six retractions tonight, five of them from adopting a plausible link before reading the code between
+the two ends. This is the first time the check was run BEFORE the write-up, and it took one command.
+The general form, now earned twice over:
+
+> **Before connecting two things seen in the same window, read what is between them.** If that is
+> expensive, the connection is a hypothesis and must be labelled one. If it is cheap - and here it
+> was a single string-reference search - there is no excuse for the label.
+
+## 59. `CSA: 00FFH` IS A HARD-CODED LITERAL, not a control-store address `[V]`/`[D]` 2026-08-30
+
+Closing the `[OPEN]` left by §57/§58. Every literal `0x00FF` store in the ROM was enumerated
+(`move.w #$00FF,...` - 73 sites, all but one in the `0x4D00`-`0x6700` console band where `D0 := 0xFF`
+is plainly an error-code convention). The exception is in the selftest region:
+
+```
+00CCFA: moveq  #10,D0
+00CCFC: lea    $001144F0,A0        ; the shift buffer / verdict block
+00CD08: jsr    $00007776           ; SHIFT 128 BITS
+00CD0E: move.w #$00FF,D0
+00CD12: andi.w #$00FF,D0
+00CD16: move.w D0,(0x16,A6)
+...
+00CD9A: move.l A2,(0x14,A1)
+00CDA2: moveq  #7,D1
+00CDA4: move.l D1,(0x1C,A1)
+00CDA8: move.w #$00FF,(0x20,A1)    ; <-- A LITERAL, at OFFSET 0x20
+```
+
+And the trap instrument already in `accp-cs.log` reported, at the reporter:
+
+```
+trap hits at 0xC0FC: 1
+  #  0  D0=0x000000FF  A6=0x11008C  (0x20,A6)=0x00FF
+```
+
+**Offset `0x20` on both sides.** `0x00CDA8` stores the constant `0x00FF` into offset `0x20` of a
+record; `0xC0FC` prints offset `0x20` of a record. `[V]` that the literal exists at that offset and
+that the reporter reads that offset; `[D]` that they are the same record - `A1` there and `A6` here
+were not proven to be the same pointer.
+
+### What it means, and it is worth knowing before anyone debugs that message
+
+**`failed at CSA: 00FFH` does not report a control-store address.** The `00FF` is a constant the
+firmware stores alongside `moveq #7` into an adjacent field. Chasing "why is the CSA 0xFF" is
+chasing a literal - the number carries no information about where the control store actually was.
+
+`0x00CD08` is also the THIRD caller of the shift engine `0x7776` (the others being routine A at
+`0x73C6` and the `0x7748` path, §56), so this routine shifts a microword and then records a fixed
+failure code. It sits in the same region as the `0x001100AC` transition the earlier log captured -
+`# 58 @ 8,570,915 PC 0x00CDA6 0x0011 -> 0x00FF  <== last before the print`.
+
+### Note on how this one went
+
+§57 suspected the `00FF` was a constant but pointed at the wrong site (`0x0055DE`); §58 refuted that
+path. The suspicion was right and the mechanism was wrong, and it only became a finding once the
+actual store was located. **That is the intended shape** - a hypothesis is allowed to be wrong, but
+it is not allowed to be written up as a finding before the site is in hand.
+
+---
+
+## 36. `START-SWAPPER` NEVER RETURNS — and everything before it works `[V]` 2026-08-30
+
+The measurement that had never been taken. Every earlier run this week used
+`ShortBringup_Octobus_**NoStartSwapper**_PlaceAndRun_Capture`, whose own comment says it is
+*"deliberately WITHOUT status and WITHOUT start-swapper"* — i.e. it skips the very command that
+hangs. `FullFlow_Octobus_Login_Nd500_Status_StartSwapper_Capture`, macro round, `DOMS-CSFIX.IMG`:
+
+```
+ND-5000: memory-configuration
+   ND-500 address zero:  004100  000000  00010200000  00000000000     <- correct
+ND-5000: status
+   > Loading Control Store
+   INFO * 0B:6B * BAK01.37603B   SINTRAN III File System   Not used
+   > Loading Swapper
+   ZERO 0 / CARRY 0 / SIGN 0 / FLAG 0 / OVERFLOW 0
+ND-5000: process-status
+   Proc. 1  SYSTEM  idle  0.0 s                                       <- works
+ND-5000: start-swapper
+                                                                      <- NOTHING. EVER.
+```
+
+**`START-SWAPPER` produced no output and did not return.** The run sat there ~70 minutes before being
+killed externally — so this is far stronger than the old 900-second-window claim, and the
+"did not finish in the window" caveat does not apply.
+
+**It is not pack-specific and not stale:** this reproduces the 2026-08-28 full-flow capture, which
+was taken on the *stock DOMs pack*. Two different packs, same behaviour.
+
+### 36a. What this corrects
+
+**The framing "place-domain stalls between `> Loading Swapper` and `> Allocating memory`" was an
+artefact of the test I chose.** `START-SWAPPER` is a MANDATORY step of the documented bring-up
+ladder —
+
+```
+SET-ND-500-UNAVAILABLE -> DEFINE-MEMORY-CONFIGURATION -> GIVE-ND-500-PAGES
+   -> LOAD-CONTROL-STORE (037B CSLOA) -> DEFINE-SWAP-FILE (046B)
+   -> LOAD-SWAPPER (007B LDSWA) -> START-SWAPPER (054B RUNSW) -> SET-ND-500-AVAILABLE
+```
+
+— and it has **never once been observed to complete**. Measuring `place-domain` while skipping it
+was measuring the wrong thing, and §33's finding (the swapper correctly idles because nothing ever
+faults) is entirely consistent with a swapper that was never started.
+
+### 36b. Where to look, and it is a SINTRAN-side read first
+
+`START-SWAPPER` is MON 60B subfunction **054B `RUNSW`**. Read what it does in `5P-P2-MON60.NPL` and
+the disassembled `030-S3SM5` FUNCS entry for 054B, and establish **whether it is waiting on an answer
+that never arrives or looping**, before building any instrument. The distinction is visible from the
+source and decides which instrument would even be meaningful.
+
+Do NOT re-open the swapper-side chain (§33): `SWPDECODER`, `LNEWSWAP`, `HSWPI` and `5ACTSWAPPER` are
+all carved and all behave as designed.
