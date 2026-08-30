@@ -2436,3 +2436,342 @@ differed only in my own probe.
 
 **When a harness output changes and you did not change it, check `git log` before explaining the
 difference.** Two sessions, one checkout.
+
+## 31. THE DISCRIMINATOR RAN: the stall is INDEPENDENT of `START-SWAPPER` `[V]` 2026-08-30
+
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, macro round (`RETROCORE_ND5000_ROUND=''`),
+pack `DOMS-CSFIX.IMG`. **Passed, 32.2 minutes.**
+Log: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\mudom.log` (39 MB).
+
+This test was built (harness comment at `Nd100SintranNd5000OctobusBootHarnessTests.cs:2713-2748`) to
+decide between two outcomes. **It landed on outcome 2.**
+
+### What the console actually printed
+
+```
+ND-500/5000 MONITOR  Version J04 88. 6.16 / 88. 8.17
+ND-5000 timeout:      ACCP was terminated; Microprogram has stopped     <- B1, before any command
+ND-5000: define-swap-file / File name: swap-file:data                   <- OK
+ND-5000: place-domain cpu-stat
+> Loading Control Store
+INFO    * 0B:6B * ... SINTRAN III File System / Not used                <- B2, inside the CS load
+> Loading Swapper
+                                                                        <- STALL. No "> Allocating memory".
+OUTCOME(short bring-up): nd-500=OK place-domain=STALL run=STALL startMessagesSeen=1
+```
+
+`STATUS` was never typed and `START-SWAPPER` was never typed. The stall is identical. **So
+`START-SWAPPER` is exonerated as the cause of the place-domain stall** — removing it entirely from
+the sequence changes nothing. Per the harness's own pre-registered reading, that is outcome 2: "the
+hang is real and independent of START-SWAPPER".
+
+Scope note, so this is not over-read: this does NOT say `START-SWAPPER`'s own hang (§30) is
+harmless, and it does NOT re-open whether `LOAD-SWAPPER` should be typed. It says only that the
+place-domain stall reproduces with neither command present.
+
+### Where it stops, precisely
+
+`> Loading Control Store` completes and `> Loading Swapper` is REACHED. The lane does not die at the
+control store on this round. It dies between `> Loading Swapper` and `> Allocating memory`.
+
+State line after PLACE-DOMAIN:
+
+```
+PC=0x08008255 stopMode=WAIT  startSeen=1 startMicfu=23B startTaken=True
+msgs=65  micfu[1B:49 12B:1 23B:1 24B:1 31B:13]  restarts=1/1  swpfu[LNEWSWAP:2]
+ansMON=377B ansSWPFU=1B ansArgc=4 ansArg0=0x00000001
+PSTP=0x0003A000 CTXBASE=0x0002A000 trapsAttempted=0 trapsPosted=0
+```
+
+Read from the STATE LINE, not the capped MICFU listing (§28a). Note `restarts=1/1` — `Seen == Taken`,
+so there is **no MON-forwarding gap** here; the ledger's `Seen > Taken` tell does not fire.
+
+### The swapper handover is CONSISTENT, and it is the designed idle
+
+```
+call:SWPD4-fifo-drain        @0o136237  hits=1
+5ACTSWAPPER-entry            @0o145162  hits=1
+HANDOVER-taken-SWACTIVE      @0o145211  hits=1
+queued-on-swapwait-fifo      @0o145312  hits=0
+bail:NOT-BSWSTARTED          @0o135551  hits=0
+INVARIANT callers=1 entry=1 outcomes=1 (bailed=0)  [consistent]
+```
+
+SINTRAN activated the swapper exactly once, from the FIFO drain; the handover was taken; nothing
+bailed. The swapper then asked `LNEWSWAP` twice, was told there is nothing to do, and parked at
+`PC=0x08008255 stopMode=WAIT`. **That is the designed idle, not a fault.**
+
+### So the discriminator is still `LSWPAGE`, and it is now sharper
+
+`swpfu[LNEWSWAP:2]` and **`LSWPAGE` absent**. SINTRAN woke the swapper, the swapper asked for work,
+and SINTRAN had none queued. The question is therefore NOT "why does the swapper not run" — it runs,
+correctly, and idles correctly. It is:
+
+> **After `> Loading Swapper`, what is supposed to put a page-swap request on the queue for a
+> PLACE-DOMAIN, and why does nothing put one there?**
+
+That is a SINTRAN-side read (`MP-P2-N500` / `030-S3SM5`), not another emulator instrument.
+
+### Two instruments that reported honestly, and are worth keeping
+
+- Page faults: `census: page-fault records posted: 0` AND `translate: NOTHING MEASURED - no address
+  outside segment 1 was translated in this run, so the shadow-fallback count says nothing either
+  way.` The instrument declared its own blind spot instead of letting 0 read as a finding. That is
+  taxonomy #8 handled at the point of measurement.
+- `PHYSWR source-buffer writes [0x42CBF0..0x42CC40): 5168 total, 0 NON-ZERO`. **Do not read this as
+  "the swapper image is all zeros".** The 13 copy-family transfers are 4-byte writes to ND-500
+  physical `0x96..0xC4` — the 13-word parameter block, not an image. An image transfer would be
+  13B/14B and thousands of bytes, and there is no 13B/14B in `micfu[]` at all.
+
+### Still open from this run
+
+- **B1** reproduces: the `N5TIMOUT` fires at `@nd-500` before any command, twice. §27/§22 killed the
+  `MUDOM` explanation; root cause is UNKNOWN again (#82).
+- **B2** reproduces: `INFO 0B:6B` lands *between* `> Loading Control Store` and `> Loading Swapper`.
+- Round 2 (`hw-cpu`) of this same test is running — the standing two-round rule. A macro-only
+  conclusion is not a conclusion.
+
+## 32. `TESTOBJ=29` is unimplemented, and it kills EVERY microprogram start the real ACCP attempts `[V]` 2026-08-30
+
+Ran the EXISTING suites rather than building an instrument (standing rule,
+`check-existing-machines-before-building`):
+`Nd5000RealCpuStartTests`, `Nd5000RealControlStoreTests`, `Nd5000ControlStoreLinkTests`,
+`Nd5000LoadControlStoreCommandTests`, `Nd5000CsaFailureTraceTests` in
+`Nuget\HackerCorpLabs.Emulation.Machines.Accp\tests`.
+Log: `C:\Users\ronny\.claude\jobs\2c5cb8c6\tmp\accp-cs.log`. **23/23 passed, 11 m 1 s.**
+
+### FIRST, THE THING THAT MATTERS MOST: green here does NOT mean the link works
+
+The suite passed 23/23 **while its own console output shows the ACCP selftest failing across the
+board.** That is not a contradiction and not a broken test — `Nd5000RealCpuStartTests` says so on its
+face: *"this fixture REPORTS what the engine did ... and asserts only what is independently known ...
+The pass condition — word[6] of the read-back at 0x001144F0 coming back 0x0100 — becomes an
+assertion only once a run has shown it honestly true."*
+
+**So the "Machines.Accp 142/142 green" that closed #81 licenses exactly one claim: THE ACCP BOOTS.**
+It never licensed "the control-store link works". Two different claims; only the first was measured.
+Anyone re-reading #81 should stop at that line.
+
+Measured this run: `verdict block @0x001144F0: [6]=0000`. The pass condition is `0x0100`. Not met.
+
+### THE DEFECT, and it is ours
+
+```
+microwords written: 8 addresses [ 0o0 0o1 0o37760 0o37761 0o37762 0o37763 0o37764 ]
+starts: 4
+START @0o0     ticks=0 stop='Test condition TESTOBJ=29 not implemented yet' trail=0
+START @0o0     ticks=0 stop='Test condition TESTOBJ=29 not implemented yet'
+START @0o0     ticks=0 stop='Test condition TESTOBJ=29 not implemented yet'
+START @0o37760 ticks=1 stop='Test condition TESTOBJ=29 not implemented yet' trail=37760 0
+```
+
+**All four starts die at tick 0 or 1 on the same unimplemented condition.** The engine never runs the
+firmware's test microprogram at all. Everything the console then reports downstream is a consequence:
+
+```
+Control Store  sample test ab failed      (read-back pattern != written pattern)
+Start/stop microprogram test abc failed at CSA: 00FFH
+A,MARG D,AIB test  failed    Result: 0000FFFFH  Expected: 00000000H
+ALU verify test    failed    Result: 87654321H  Expected: 87654322H   (then AAAAAAAA/55555555,
+                                                  Result always 87654321H - the seed, unchanged)
+Instruction Cache / Data Cache / Control Cache sample  failed
+Selftest  failed. Selftest status: 077CH
+```
+
+`87654321H` is the firmware's own seed (the link trace shows `SHIFT 8765` going in). It comes back
+unchanged because **no microword ever executed to change it** — not because a read-back path returns
+a constant. I nearly wrote the latter; `VERIFY ... lowHalf` is `0xFFFF` at `0x3FF2` and `0x4321` at
+`0x3FF0`, so it is not constant. Do not re-adopt the constant-readback story.
+
+### WHY THIS WAS INVISIBLE UNTIL NOW — taxonomy #8, the structurally blind instrument
+
+Swept all 16,384 words of `MICRO-5800-B30.DATA` for TESTOBJ (bits 58..53):
+
+```
+TESTOBJ hole codes present in B30: {38: 50}
+TESTOBJ=29 count in B30: 0
+```
+
+**`TESTOBJ=29` occurs ZERO times in the entire B30 image.** It exists only in the microwords the
+**ACCP firmware writes itself** for its selftest (addresses `0o0`, `0o1`, `0o37760`..`0o37764`).
+The ~11k-vector differential oracle runs B30 macro instructions, so it can NEVER reach this
+condition — its silence about TESTOBJ 29 carries no information whatsoever.
+
+29 sits in the SAME documented hole set as 38 (`Conditions.cs:164` lists the holes: 4-7, 12-15,
+22-23, **29-31**, 33, 38-39, 45-47, 50-55, 58; the ND-05.022.1 Appendix A table and
+`mnemonics.md` both run straight past them).
+
+### The precedent for resolving it, and why it does NOT transfer
+
+TESTOBJ 38 was settled as a normally-asserted `true` by the differential oracle — 11,242 pass vs
+11,202 with `false`, plus a corpus that flipped. **That method is unavailable for 29**: no B30 word
+uses it, so there is no differential signal at all.
+What IS available is a direct oracle the 38 work never had: the ACCP firmware's selftest is a
+PROGRAM WITH A KNOWN PASS CONDITION (`word[6] == 0x0100` at `0x001144F0`). Implement a candidate,
+run `Nd5000RealCpuStartTests`, and the firmware itself grades the answer.
+
+### Next, in order
+
+1. Decode the firmware's own selftest microwords at `0o0`/`0o1`/`0o37760..4` from the link trace
+   (`WRITE @0o0 hi=564051AF4C92BB59 lo=8BB40393542650DD` etc. are in the log) and read what the
+   TESTOBJ-29 word is testing from its ALU/A/B/DEST context — the same static method that worked on
+   `TESTFD`.
+2. Only then pick a candidate semantic, and let the firmware's `0x0100` verdict grade it.
+3. Re-run the `hw-cpu` short bring-up. If `Error when loading Control Store` survives, TESTOBJ 29
+   was not the whole of #78 — do not assume it is.
+
+**Unresolved and NOT explained by this:** `MFbus controller has incorrect CPU model setting.
+CPU model: ND-5800` is printed by the firmware in the same selftest. It may be independent.
+
+## 33. CORRECTION TO §32: those are TEST PATTERNS, not microcode. Do not implement to them. `[V]` 2026-08-30
+
+§32 said `TESTOBJ=29` is "the named cause" of #78 and that the fix path was to implement it, graded
+by the ACCP firmware's selftest verdict. **The grading pass ran and the framing is wrong.** Keeping
+§32 above unedited so the wrong version is not re-adopted; this section replaces its conclusion.
+
+### The grading measurement was NULL
+
+Both polarities, `Nd5000RealCpuStartTests`, logs `t29-false.log` / `t29-true.log`:
+
+```
+RETROCORE_ND5000_TESTOBJ29=0     RETROCORE_ND5000_TESTOBJ29=1
+START @0o0     ticks=0 stop='Operand select A,IDU,DPA not implemented yet'   (both)
+START @0o37760 ticks=1 stop='Operand select A,IDU,DPA not implemented yet'   (both)
+verdict block @0x001144F0 [6]=0000                                           (both)
+```
+
+**Byte-identical.** The engine now gets past the condition and dies on the NEXT unimplemented
+feature IN THE SAME WORD, so the firmware's verdict cannot discriminate the polarities at all.
+`TESTOBJ 29` stays `[OPEN]` and the knob's default is still an unvalidated guess.
+
+### And it would not have been worth implementing anyway
+
+Decoded the firmware's own written words (`fwdec.py`, from the `WRITE @...` hi/lo in `accp-cs.log`).
+**Word `0o0` is not microcode. It is a RAM test pattern.** Four independent confirmations:
+
+1. `hi=564051AF4C92BB59 lo=8BB40393542650DD` is EXACTLY the eight halfwords the console prints as
+   the Control Store sample test result: `5640H 51AFH 4C92H BB59H 8BB4H 0393H 5426H 50DDH`.
+2. Its decode lights up nearly every field at once with mutually exotic values -
+   `AAP1,UCTF` + `AAP2,MULABSA` + `ORA,ALTEN` + `AB,CMBRET` + `IX*8` + `EA2SAVE` + `TBC,PREL` +
+   `ABR,NPCREL` + `CSAVE` + `LCDECR` + `TESTOBJ=29` + `STATUS=11`. No hand-written microword looks
+   like this. `TESTOBJ=29` is an ARTEFACT OF THE PATTERN, not evidence that 29 means anything.
+3. Words `0o37761`..`0o37764` are a textbook walking pattern:
+   `3FF0` / `3FF0 3FF1` / `3FF0 3FF1 3FF2` / `3FF0 3FF1 3FF2 3FF3`.
+4. Word `0o37760-b` = `40400001DE028018` is exactly the Control Cache sample test's printed result
+   `4040H 0001H DE02H 8018H`.
+
+**So implementing `TESTOBJ 29`, or `A,IDU,DPA`, to satisfy these starts is modelling NOISE.** A
+random bit pattern cannot teach us what an undocumented field means. This is the mirror image of the
+`TESTOBJ 38` precedent: 38 was pinned by ~11k REAL vectors; 29 is reachable only from a pattern.
+
+### What the selftest is actually testing, and the two real leads
+
+The ACCP selftest is a **RAM/link test of the control store**, plus a start/stop test that arms the
+engine and reads the CSA back. That splits #78 into two independent questions:
+
+- **LEAD 1 (link, and the better one).** The Control Store sample test writes a pattern and reads a
+  DIFFERENT one back:
+  `Result: 5640 51AF 4C92 BB59 8BB4 0393 5426 50DD` vs
+  `Expected: 7698 B027 0AAA 2C91 0D8C F58B AFBE 6195`.
+  That is a link/shift-path mismatch and needs NO microword execution at all. It is much the closer
+  fit to SINTRAN's `Error when loading Control Store`, which is also a read-back verify.
+  Whether the two patterns are related by a shift is NOT yet established - do not assume it.
+- **LEAD 2 (execution).** The start/stop test expects the engine to ARM at an address and advance
+  the CSA. Ours throws on unimplemented fields instead. The question is not "implement these
+  fields" but "what should the engine do when handed arbitrary bits" - a design call, not a carve.
+
+### Revised statement of #78
+
+Not "TESTOBJ 29 is unimplemented". Rather: **our `CpuND5000` refuses to execute arbitrary control-
+store contents, and our control-store link returns a different pattern than the firmware wrote.**
+Only the second of those is plausibly what breaks SINTRAN's CS load, and it is where to look next.
+
+### The lesson, for the taxonomy
+
+**A stop message names the first thing that refused, not the thing that is wrong.** Fixing it just
+advances the refusal to the next feature in the same word - and if the input is noise, that walk has
+no end and every step of it looks like progress. Before implementing anything a trace demands, ask
+what WROTE the input: here, one `WRITE @` line in the same log answered it.
+
+---
+
+## 33. #79 CARVED TO ITS END: the swapper is idle because nothing ever FAULTS `[V]` 2026-08-30
+
+Pure SINTRAN-side carve, no new instrument, answering §31's reframed question: *after
+`> Loading Swapper`, what is supposed to put a page-swap request on the queue, and why does nothing
+put one there?*
+
+### 33a. The dispatch is driven by the ND-500, not by SINTRAN
+
+`SWPDECODER` (`MP-P2-N500.NPL:913`) reads the swap-function **out of the mailbox** and jumps:
+
+```
+135443   T:=5MBBANK; *AAX SWPFU; LDATX          % Swap-function
+135446   IF A >> SWFMAX GO FAR ESWPFATAL
+135451   A GOSW  FAR ESWPFATAL, LNEWSWAP, FAR LSWPAGE, FAR LPRSUSPEND,
+135456           FAR LALLOPAGE, FAR LDATREADY, FAR LCLTSB;
+```
+
+So `LSWPAGE` (arm 2, *"Disk I/O"*) is **requested by the ND-500 swapper**, not originated by SINTRAN.
+`LSWPAGE = 0` therefore does not mean SINTRAN failed to queue anything — it means **the swapper never
+asked for a page**, which is the correct behaviour for a swapper with no work.
+
+### 33b. Why `LNEWSWAP` answers "nothing to do" — first two lines of the handler
+
+```
+135470   LNEWSWAP:
+135470      T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX   % AD:=X.SWPINFO
+135474      IF D><0 THEN                              % Any proc. currently served?
+```
+
+It branches on `SWMSG.HSWPI`. **The harness already measures that exact cell:
+`HSWPI probe → LastStartSwpInfo=0x00000000`.** Zero → no process being served → fall through → no
+work → the answer we observe, and the park at `PC=0x08008255 stopMode=WAIT`.
+
+### 33c. Who sets `HSWPI`, and why it is zero
+
+`5ACTSWAPPER` (`MP-P2-N500.NPL:144762`):
+
+```
+144775   SWPWAIT; CALL WN5STATUS              % mark proc waiting for swapper
+145001   IF A=PSWWAIT THEN                    % swapper free?
+145006      AD:=CMSGTOSW; *AAX HSWPI; STDTX   % HSWPI := the requesting message
+145011      SWACTIVE; *AAX SWPFU-HSWPI; STATX % SWPFU := SWACTIVE
+```
+
+and it is cleared again at `136057` (`*AAX HSWPI; STZTX`) when the request completes.
+
+Measured on this lane: `5ACTSWAPPER-entry hits=1`, `HANDOVER-taken-SWACTIVE hits=1`, via the SWPD4
+FIFO drain, `queued-on-swapwait-fifo hits=0`. **Set once, served, cleared — so zero afterwards is
+correct, not corrupt.**
+
+### 33d. The end of the chain, and it points UPSTREAM
+
+`5ACTSWAPPER` has four callers: the MSWSWAIT tail (`134154`), **TRAPDECODER's trap-46 arm**
+(`135367`), the SWPD4 FIFO drain (`136037`), and `SWMC` = MON 510B (`141765`). Only the FIFO drain
+fired, once. **Trap 46 is the PAGE FAULT arm**, and `trapsPosted=0` was measured.
+
+```
+the domain never actually executes
+   -> no page fault is ever raised
+   -> TRAPDECODER's trap-46 arm is never reached
+   -> 5ACTSWAPPER is never called again
+   -> HSWPI stays 0, LNEWSWAP keeps answering "nothing to do"
+   -> the swapper idles CORRECTLY at PC=0x08008255, forever
+```
+
+**Every element of that chain is behaving as designed.** There is no bug anywhere in it. The chain
+is a CONSEQUENCE, and its head — "the domain never executes" — is #78: the control store does not
+load against the real microword CPU, so no microprogram runs, so nothing can fault.
+
+### 33e. What this closes and what it does NOT
+
+**CLOSES:** the whole "why does the swapper not get work" line of enquiry, which has consumed most
+of this document. The answer is that it correctly has none. Do not instrument it further; do not
+"fix" `5ACTSWAPPER`, `LNEWSWAP`, `HSWPI` or the FIFO.
+
+**DOES NOT CLOSE:** #78. And it does not by itself explain the MACRO round, where the CS load
+*succeeds* and `> Allocating memory` is still never reached — on that round the head of the chain
+needs its own answer, because there the microprogram should be running. **Do not assume the macro
+stall and the hw-cpu stall have one cause just because they share a downstream chain** — that is the
+shape of error §22 and §23 both punished.
