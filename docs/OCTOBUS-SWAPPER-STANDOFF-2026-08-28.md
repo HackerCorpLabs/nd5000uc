@@ -3566,3 +3566,124 @@ against what `CpuND5000` implements.** That yields the complete, guess-free gap 
 Then the two undocumented holes need a real source, not a pattern: the ND-5000 hardware description
 (`ND-05.020.01`) rather than the microprogram guide's mnemonic table, since these values are used by
 hardware-level firmware rather than by the macro-instruction store.
+
+## 47. QUANTITATIVE PROOF that the firmware's word `0o0` is noise - stop implementing to it `[V]` 2026-08-30
+
+Guess-free instrument (`fielddiff.py`): for every field, the set of values used anywhere in the
+16384-word B30 image, versus the values the ACCP firmware's own written words use. Anything the
+firmware uses that B30 never uses is, by construction, invisible to the differential oracle.
+
+**Word `0o0`, ENUM fields only (addresses and immediates excluded as meaningless here):**
+
+| field | value | in B30? |
+|---|---|---|
+| `ALU_TRUE` | 21 | **never** |
+| `ALU_FALSE` | 36 | **never** |
+| `AAP_CTRL` | 163 | **never** |
+| `A_OP` | 166 (`A,IDU,DPA`) | **never** |
+| `STATUS` | 11 | **never** |
+| `TESTOBJ` | 29 | **never** |
+| `MEMORY` | 915 | **never** |
+
+**SEVEN out of seven enum fields take a value the real microcode never uses ONCE in 16384 words.**
+
+A genuine microword reuses the microcode's own vocabulary. A word in which every single field is an
+unprecedented value is not a microword - it is a random bit pattern. This is the fifth independent
+confirmation of §33, and the first quantitative one.
+
+### What it settles
+
+**The four-blocker chase is over.** Implementing `TESTOBJ=29`, then `A,IDU,DPA`, then `STATUS=11`,
+then `AB,CMBRET` - each revealed by filling the previous - was walking a random pattern, and each
+fill was a guess that could send execution down a path the real machine never takes. The walk has no
+end and every step looks like progress. **Do not resume it, and do not "complete the gap list" by
+decoding these words: there is no gap, the input is noise.**
+
+### What #78 is actually left with
+
+The ACCP selftest fails because **our engine THROWS on unknown field values**. Real hardware does not
+refuse a bit pattern - it does *something* with it, harmlessly, and the firmware's start/stop test
+then just checks that the CSA advanced. So the honest statement is:
+
+> `CpuND5000` treats "field value I do not model" as a fatal refusal. For executing REAL microcode
+> that is correct and valuable - it is how the engine stays honest. For executing an arbitrary
+> pattern it is wrong, and it is why the card's selftest can never pass against us.
+
+**That is an ENGINE ERROR-POLICY decision, not a carve** - the same thing §33 named as LEAD 2. It
+needs Ronny, because "make the engine tolerate unknown fields" trades away the property that has
+caught real bugs all year. It should NOT be decided by whoever happens to be chasing the CS load.
+
+And it may not even be on the path: the CS-load failure on `hw-cpu` is a SINTRAN `LOAD-CONTROL-STORE`
+read-back verify (§39/§40), which involves no microword execution at all. The selftest and the CS
+load are two different failures that have been read as one.
+
+---
+
+## 35. THE CATALOG REFUTES §34's FRAMING: the requirement is TOLERANCE, not semantics `[V]` 2026-08-30
+
+A read-only catalog of every unimplemented microword feature in `CpuND5000`, cross-referenced
+against what the ACCP firmware's own words actually use, plus a B30 occurrence sweep per value.
+
+### 35a. Word `0o0` is a TEST PATTERN, not microcode
+
+§34 treated the four blockers in word `0o0` as a feature gap to implement. That framing is wrong.
+
+ - The firmware's own console prints that word as a **test vector** (`accp-cs.log:53`):
+   `Control Store sample test ab failed / Result: 5640H 51AFH 4C92H BB59H ... /
+   Expected: 7698H B027H 0AAAH 2C91H 0D8CH F58BH AFBEH 6195H`, immediately followed by
+   `Start/stop microprogram test abc failed at CSA: 00FFH / MIR 5640H 51AF...`.
+ - The word simultaneously takes **five field values that occur ZERO times in all 16384 B30 words**
+   (TESTOBJ 29, STATUS 11, A_OP 166, AAP TYPE 5) — **including reserved bit 36 = 1, which is 0 in
+   every single real microword.** Hand-written microcode does not look like that.
+
+**So the requirement is that the CPU must TOLERATE arbitrary field values and still start, stop and
+read MIR back — NOT that these values must be given semantics.** Inventing meanings for TESTOBJ 29
+and STATUS 11 would be solving a problem that does not exist, and both are undocumented holes that
+cannot be derived anyway.
+
+**`TESTOBJ=29` is the ONLY blocker the firmware has ACTUALLY hit** — all four starts stop there, and
+word `0o37760` (a plain jump to 0) **executed correctly**. A_OP 166 / STATUS 11 / AB 8 are only what
+the same word would hit next; they appeared solely because §34 filled the earlier ones with guesses.
+That is the §34b method limit confirmed from the other side.
+
+### 35b. The two upstream bugs that make the verdict unmeasurable
+
+Known bugs before features — the `0x001144F0` word[6]==`0x0100` gate is unreachable until both clear:
+
+ 1. **`Loading control store with selftests...` produces ZERO writes.** The log's own summary reads
+    `microwords written: 8 addresses [0o0 0o1 0o37760 0o37761 0o37762 0o37763 0o37764]`. Every later
+    test — ALU verify, Register test a-d, Instruction Cache, Data Cache — reports
+    `Result: 87654321H`, the firmware's own sentinel, i.e. **no answer at all**. The bulk selftest
+    microcode never reaches the emulated control store.
+ 2. **`Control Store sample test ab failed`.** Wrote `5640 51AF 4C92 BB59 8BB4 0393 5426 50DD`,
+    expected `7698 B027 0AAA 2C91 0D8C F58B AFBE 6195` on read-back — the CS write/read-back path
+    disagrees **before any word executes**. **The clue that makes this tractable: the manual
+    `LOAD-CONTROL-STORE 100 1122 ...` round-trip in the SAME log reads back CORRECTLY.** Two paths,
+    one works, one does not. The difference between them is the bug.
+
+### 35c. Two measurement corrections worth keeping
+
+ - **`microcode-5000-def.json` has a field-definition defect.** It declares `MEMORY` as bits 41-32
+   (10 bits) while `src/Microword.cs:305` shows the real encoding is
+   **`MemOp = (bit41 << 3) | bits34-32`**, a 4-bit code; bits 40/39-38/37/36/35 are separate fields
+   (AD_ARTI / EA_SAVE / MEMOT / reserved / ADACT) that the 10-bit span swallows. So the alarming
+   "MEMORY=915" is `MemOp = 11 = RD,PX`, **which is implemented**. Not a 1009-value hole.
+ - **"532 B30 words use `ORA,ALTEN`" is an ALIASING ARTEFACT.** Bits 15-0 are shared with
+   `SARG`/`MARG`/`LARG`, so a naive sweep counts constants as field values. Restricted to words that
+   actually consume it (`OR_ENABLE=1`, `A_OP=63`): 601 words, distribution `{0: 19, 1: 582}` —
+   **`ALTEN` occurs ZERO times**, which independently confirms `Conditions.cs:104`'s claim that ALT
+   addressing is absent from this microcode generation.
+   **General lesson: never sweep a field whose bits are aliased by an immediate without first
+   restricting to the words that consume it.** This is the §22 shape again — an instrument's own
+   arithmetic producing a confident wrong number.
+
+### 35d. Real gaps, correctly deprioritised
+
+Documented, oracle-reachable (B30 count > 0), and **not** firmware blockers — so they are ordinary
+work, not on the critical path: TESTOBJ 24/48/49; Q_REG 2/6/7; ABR 1 `ABR,NEXT` (20 words) and 3
+`ABR,NEXTL` (6); B_OP 26; AB 12-15 (4 words each, all in one block at `0o3014`-`0o3071`); several
+`A,SPEC,*` singles.
+
+Two structural absences worth recording separately: **`TIMING` is decoded at `Microword.cs:279` and
+read NOWHERE** — cycle time is not modelled at all; and **`TBC` has no dispatch** — only values 1
+and 3 act (`CpuND5000.cs:1654-1659`), 0/2/4/6/7 silently do nothing, with no branch-cache model.
