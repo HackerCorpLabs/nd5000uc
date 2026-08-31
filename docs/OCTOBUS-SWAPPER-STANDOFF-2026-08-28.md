@@ -5652,3 +5652,2758 @@ what object THIS store targets, per call site, not once for the routine.
 Identify `0o11162`. No `.dis` in the carve set covers it (`003-S3CP`, `006-S3FS`, `030-S3SM5`,
 `045-S3ISYS` are all higher); the resident image is `MACM-1718K-loaded-image.bin`. Once named, the
 question becomes why that site runs ONCE, at the very end, instead of whenever the swapper needs work.
+
+
+## 82. THE -0.0 FLOAT TEST IS OUR BUG, BYTE-PROVEN: the microcode has NO width-specific sign path
+
+Ronny adjudicated 2026-08-30: investigate as our bug, change nothing. The trace confirms it in one
+step, and the evidence is byte-level rather than inferential.
+
+### The entry stubs are the same code
+
+```
+  TESTF   0o3000: 4000001E7E0085000000020F06010004
+  TESTD   0o3002: 4000001E7E0085000000020F06030004
+                                          ^^^^  differs ONLY in the jump target word
+  TESTF+1 0o3001: 20000001288180000000000006790000
+  TESTD+1 0o3003: 20000001288180000000000006790000   BIT-IDENTICAL
+```
+
+Both fall into the SAME shared body, `TESTFD` @ `0o3171` (the LABE confirms: `TESTFD 003171*
+003001 003003`). **There is no width-specific sign handling anywhere in the B30 float-TEST path.**
+
+### Therefore the chip is not the source of the disagreement
+
+Our engine reports single `-0.0` S=0 and double `-0.0` S=1. Identical microcode cannot produce that
+split by itself - and it does not, because **the double answer never comes from the microcode**. It
+comes from a C#-side net-effect recompute scoped to `Mpc 003171` + `InstrDt 5`, which
+`DoubleTestFlagTests` documents in its own words. So:
+
+```
+  single -0.0  ->  runs the REAL microcode      ->  S=0
+  double -0.0  ->  runs OUR C# recompute        ->  S=1
+```
+
+**The asymmetry is ours.** `FloatTestFlagTests` already suspected this ("SELF-INCONSISTENT with the
+double path ... tilts it toward an OUR-engine bug"); this is the proof, and it also matches the
+precedent in the same file, where the double `Z` case turned out to be a plain C# bug against the
+cited reference rather than a microcode tie-break.
+
+### The near-miss worth recording
+
+I first asked Ronny to adjudicate this as a principled microcode rule, "S = sign AND NOT zero", and
+he approved that framing. **It was wrong, and applying it to both widths would have CREATED a
+divergence on the double path that currently agrees** (functional S=0 vs microword S=1). The
+existing tests said so plainly; I had not read them before asking. An approval obtained on a bad
+framing is not a mandate - re-asking with the corrected evidence cost one message and avoided
+writing a self-inflicted defect into `Test.cs`.
+
+### What to do next
+
+Do NOT change `Test.cs`. The question is now narrow: what does the shared `TESTFD` body actually
+compute for the sign, and is the C# recompute at `Mpc 003171` masking a fault in that path rather
+than fixing one? Remove or bypass the recompute and see what the microcode gives for double `-0.0` -
+if it also gives S=0, the two widths agree again and the whole divergence collapses into one
+question about `TESTFD`'s sign source.
+
+Also check what `0x7FC00000` really selects: it is NOT an IEEE-754 single magnitude mask (`0x7FFFFFFF`
+would be), and the ND-500 float format is not IEEE - so "magnitude mask" may itself be a
+mis-description carried forward in the comments.
+
+
+## 83. CORRECTION TO 82: the -0.0 divergence DOES NOT EXIST any more. It was fixed; only the comments lie
+
+Ran the suites instead of reading their prose. **`FloatTestFlagTests` + `DoubleTestFlagTests`: 12/12
+PASS.**
+
+`FloatTest_NegZero_KnownDivergence` asserts:
+
+```csharp
+  Assert.That(r.Micro.Sgn, Is.EqualTo(1),                  "float -0.0: S=1 ... microword measures 0");
+  Assert.That(r.Micro.Sgn, Is.EqualTo(r.Functional.Sgn),   "S must match functional (microword diverges here)");
+```
+
+**Both pass.** So the microword reports **S=1** for single `-0.0` and it EQUALS the functional core.
+The double suite passes on the same basis. There is no divergence to adjudicate.
+
+### Everything that was built on the stale text
+
+ - **Task 5's premise** ("microword says sign AND NOT zero, functional says raw sign bit") - FALSE today.
+ - **My section 82 framing** ("our engine reports single S=0, double S=1") - FALSE today. Its
+   byte-level facts survive (TESTF/TESTD stubs differ only in the jump target, both entering TESTFD
+   @0o3171 - that is measured and still true), but the DIVERGENCE those facts were explaining is gone.
+ - **`FloatTestFlagTests`' own mechanism note** - independently wrong on its face: it says the sign is
+   read off the value masked with `0x7FC00000`, but that mask CLEARS BIT 31, so every negative float
+   would report S=0. The suite's own `-1.0` case (`0xBF800000`) expects and gets **S=1**. The stated
+   mechanism cannot be what the microcode does.
+ - **The question I put to Ronny twice** was built on all of the above.
+
+### The rule this cost, again
+
+*Status headings in this tree have lied; check the CODE before investigating anything marked open -
+more than half the time it is already done.* That is written in the octobus skill, it is in memory,
+and I still spent this stretch reasoning from a test's COMMENTS and NAME rather than running it. **A
+test named `..._KnownDivergence` whose assertions demand AGREEMENT is a fixed bug wearing its old
+label.** Read the assertions, not the name; and run it before theorising about it - this one takes
+394 ms.
+
+### What is actually left here
+
+Nothing blocking. Two clean-ups, both cosmetic-but-load-bearing because they mislead:
+
+ 1. Rename `FloatTest_NegZero_KnownDivergence` / `DoubleTest_NegZero_KnownDivergence` - they now PIN
+    correct behaviour, so the names invert their meaning - and delete the stale mechanism paragraph
+    that the `-1.0` case refutes.
+ 2. The DOUBLE flags still come from the C# recompute at `Mpc 003171` + `InstrDt 5` rather than from
+    the microcode. That is a real design note (our code, not the chip, produces the double answer),
+    but it is NOT a divergence and NOT urgent. Its own comment documents the reason: the two-word
+    float-test path loads only one 32-bit half into SC1, so the high half never reaches the flag
+    logic.
+
+
+## 84. SECTION 83 IS WRONG - the -0.0 divergence IS real. My green suite EXCLUDED the deciding test
+
+Section 83 claimed the divergence no longer exists, on the strength of "12/12 PASS". **Retracted.**
+
+### The measurement that settles it
+
+Run the test directly, filtered by its exact `FullyQualifiedName`:
+
+```
+  FloatTest_NegZero_KnownDivergence   FAILED  [304 ms]
+    float -0.0: S=1 (sign bit set) - microword measures 0
+    Expected: 1   But was: 0
+```
+
+**Microword S=0, functional S=1 for single `-0.0`. The divergence is real**, exactly as the task
+originally said.
+
+### How the green suite lied, and it is a NEW instrument failure worth naming
+
+I ran both suites with a CLASS-level filter and read "Passed: 12, Skipped: 0". But the two files hold
+**5 + 8 = 13** cases. The thirteenth is `FloatTest_NegZero_KnownDivergence`, marked **`[Explicit]`** -
+which NUnit does not run under a class filter **and does not report as skipped**. It simply is not in
+the totals.
+
+So the suite reported a clean 12/12 while silently omitting the ONE case the whole question turned on.
+Every number in that report was true. The report was still worthless for the question I asked of it.
+
+**Taxonomy entry: A PASS TOTAL THAT SILENTLY OMITS CASES.** Distinct from the earlier entries -
+this is not a number that cannot be checked (#7) or one that cannot be relevant (#8); it is a number
+whose DENOMINATOR is quietly smaller than you think, and "Skipped: 0" actively reinforces the wrong
+reading. **The check: reconcile the expected case count against the reported total, and grep for
+`[Explicit]`/`[Ignore]` before believing any green suite.** 13 expected, 12 reported - one line of
+arithmetic would have caught it, and I did that arithmetic only because the `[Explicit]` attribute
+caught my eye afterwards.
+
+### What survives from sections 82 and 83
+
+ - `[V]` **The byte-level facts stand.** `TESTF 0o3000` and `TESTD 0o3002` differ ONLY in the
+   jump-target word; `TESTF+1` and `TESTD+1` are bit-identical; both enter `TESTFD @0o3171`. There is
+   no width-specific sign path in the microcode.
+ - `[V]` **The double path passes only via OUR C# recompute** (`Mpc 003171` + `InstrDt 5`), which never
+   uses the microcode's flags. That asymmetry remains the prime suspect for why the two widths behave
+   differently in our engine.
+ - `[V]` **The mechanism note in `FloatTestFlagTests` is still wrong on its own terms**, independently
+   of all the above: it says the sign is read off the value masked with `0x7FC00000`, but that mask
+   CLEARS BIT 31, so every negative float would report S=0 - and the suite's own `-1.0` case
+   (`0xBF800000`) expects and gets S=1. Whatever yields S=0 for `-0.0`, it is not "the sign read after
+   that mask".
+
+### Standing instruction, unchanged and now correctly based
+
+Ronny: investigate as OUR bug, change nothing. `Test.cs` stays as committed. The next step is to trace
+`TESTFD` and find where the sign actually comes from for a 32-bit operand - and why `-0.0` differs
+from `-1.0` on that path.
+
+
+## 85. Identifying 0o11162 is BLOCKED on a base address - and the check that caught it
+
+Section 81 found the single 3SWMESS write at `PC=0o11162 PIL=2 L=0o12001`, in RESIDENT SINTRAN. The
+obvious next move is to disassemble it. **That is blocked, and the reason matters more than the block.**
+
+No `.dis` in the carve set covers that range (`003-S3CP`, `006-S3FS`, `030-S3SM5`, `045-S3ISYS` all sit
+higher). The only resident artefact is `MACM-1718K-loaded-image.bin` (31,352 bytes = 15,676 words).
+Reading word `0o11162` out of it at face value gives `146056`, which looks like a plausible ND-100
+register operation - so a decode would have "worked".
+
+**The falsification came from the OTHER address.** `L=0o12001` is a RETURN ADDRESS, so it must point at
+code. Dumped as ASCII, `0o11770..0o12015` reads:
+
+```
+  ===..== M A C M - 1 7 1 8 - K ==..========
+```
+
+`0o12001` is inside the image's own **version banner**. A return address cannot point into a text
+string, so **this image's word offsets do not correspond to the running PC address space** - it needs a
+load base that is not yet established.
+
+Had I decoded only `0o11162`, nothing would have contradicted me and the identification would have gone
+into the record as fact. This is [[verify-provenance-not-plausibility]] and taxonomy #13 (a listing
+address is not a linked address) in the same shape as the `+0o200` MP-P2-N500 offset.
+
+**The technique worth reusing: when you have TWO addresses from one measurement, check the one whose
+TYPE constrains it.** A PC can point at anything that decodes; a RETURN address must point at code. The
+constrained one is the calibration, and here it cost one ASCII dump.
+
+### To unblock
+
+Establish the load base of the resident image (or find the module that owns `0o11162`), then re-read
+both addresses. Until then `0o11162` stays `[OPEN]` - the MEASUREMENT of where the write comes from is
+solid, only the NAME of the routine is missing.
+
+
+## 86. TASK 1: the 3SWMESS is MOVED into the mailbox, not stamped there. Resident routine 0o11144 `[V]`
+
+Section 85 was blocked on a load base. Unblocked: the right artefact is
+`versions\L-VSX-500
+esident\SINTRAN-DATA_commoncode.bin` (resident "Common Code Restart/Start",
+**seg addr 0B, base 0x0000**, 64512 words), which the carver documents in
+`EXTRACTING-RESIDENT-CODE.md` - and it ships a disassembly, `SINTRAN-DATA_commoncode.dis`.
+`MACM-1718K-loaded-image.bin` was simply the wrong file (the MACM area is based at **30000B**).
+
+**Calibration re-run on the constrained address:** at this base `0o12001` decodes as `LDD I 22`
+among plausible instructions, no longer landing inside a text banner. Base accepted.
+
+### The code
+
+```
+  011144                                  <- routine entry (see call site below)
+  011150..011156   compare / JMP -6       <- a SEARCH LOOP over a list
+  011157  144075   SWAP SX DA             ; swap X and A
+  011160  052000   LDT ,X 0               ; T := mem[X]
+  011161  002000   STZ ,X 0               ; mem[X] := 0        <- writes a ZERO
+  011162  144075   SWAP SX DA             <- THE RECORDED PC
+  011163  012000   STT ,X 0               ; mem[X] := T        <- writes the VALUE
+  011164  054357   LDX -21
+  011165  146142   EXIT
+```
+
+**Call site confirmed, and it reconciles the whole measurement:** `0o12000 JPL I 20` resolves through
+the pointer word at `012020`, which holds **`011144`** - the routine entry. It returns to `0o12001`,
+**exactly the `L` the cell report recorded**. PC, L and the call chain all agree.
+
+### What it means
+
+This is an **exchange / dequeue primitive: move a word from one cell to another and ZERO the source.**
+The `0x0005` attributed to `0o11162` was actually stored by `STT ,X 0` at `011163` - precisely the
+"PC names a neighbourhood, not the storing instruction" caveat, now vindicated rather than merely
+warned about.
+
+**So this routine did not DECIDE to send 3SWMESS - it MOVED it.** The value was stamped into a staging
+cell somewhere else and transferred into the mailbox MICFU by a generic word-mover. That explains every
+dead end in sections 73 and 81 at once: no S3SM5 "stamper" was ever going to match the mailbox write,
+because the mailbox write is a MOVE, not a stamp.
+
+It also explains the zero census. The same primitive writes `0` at `011161` on every pass (it clears
+the source), which is exactly the shape of "313 zeros and one value" - most passes move nothing
+interesting, and the zeroing half is what the trace mostly sees.
+
+### Next
+
+The question moves UPSTREAM and gets sharper: **which staging cell feeds this exchange, and who stamps
+`3SWMESS` into it?** The search loop at `011150..011156` walks a list to pick the entry - find what
+list, and the sender is the thing that queued onto it. That is a much better question than "which
+stamper writes the mailbox", which was unanswerable because nothing does.
+
+
+## 87. CAVEAT on section 86: the single `0x0005` may be a LINK VALUE, not 3SWMESS
+
+Reading `0o11144` in full changes what its write MEANS, and the earlier reading must not stand
+unqualified.
+
+```
+  011144  STX -1              ; save X
+  011145  RADD CLD SX DT      ; T := X            (the item to find)
+  011146  LDX 20              ; X := mem[0o20]    <- LIST HEAD
+  011147  RADD CM1 CLD 0 DD   ; D := -1           <- the queue SENTINEL
+  011150  SKP IF DX UEQ SD    ; end of list?
+  011152  LDA ,X 0            ; A := the LINK FIELD at offset 0
+  011153  SKP IF DA UEQ ST    ; is this the node we want?
+  011155  RADD CLD SA DX      ; advance to next
+  011156  JMP -6              ; loop
+  011157..011163              ; the exchange, writing mem[X+0]
+```
+
+**It is a linked-list UNLINK: head at `mem[0o20]`, sentinel `-1`, link field at OFFSET 0.** The `-1`
+sentinel matches the documented mailbox "queue sentinel -1", so this is very likely the message-queue
+chain.
+
+### The problem this creates for section 81's reading
+
+The primitive reads and writes **offset 0 of a NODE** - the LINK. Our observed write landed at
+`0x428E3C`, which is MICFU only if the node base is `0x428E30`. If instead the node base IS
+`0x428E3C`, then the word written is a **link/index**, and the value `5` is a NODE NUMBER that merely
+COINCIDES with `3SWMESS = 5`.
+
+That is exactly the number-coincidence trap recorded in sections 76 and 79 - a value matching a
+meaningful constant from a DIFFERENT namespace. I have now hit that shape three times tonight, and it
+is the one that survives every check except asking what the field IS.
+
+### Both readings are still live
+
+ - **MICFU reading:** `MP-P2-N500` genuinely reads MICFU at SWPINFO+6 and compares it to `3SWMESS`.
+   That code is real and quoted. A message whose MICFU is 5 is a real thing.
+ - **LINK reading:** this primitive genuinely writes offset 0 of a chain node, and message designs of
+   this era commonly REUSE a field as the queue link while the message sits on a free/pending chain -
+   `N5MailboxProtocol` already documents offset 7 as an overlay, so overlaying is the house style here.
+
+### What settles it, cheaply
+
+ 1. Read `mem[0o20]` (the list head) during a run and see whether the chain nodes are message bases
+    (`0x428E30`-style) or the `+0xC` cells.
+ 2. Instrument the OTHER cells of that message at the same trace index (`#5997660`) - if `N5STA`,
+    `X5CPU` and the rest were written around it, it is a message being built; if only that one word
+    moved, it is a link.
+ 3. The cell-writer report already supports this: point `RETROCORE_ND5000_CELLWATCH` at `0x428E30`
+    (the message base) and re-run - the write pattern around the same trace index answers it.
+
+**Until then, section 81's "3SWMESS IS produced, once" is `[D]`, not `[V]`.** The 314/313/1 split and
+the writer's identity remain `[V]` - it is only the MEANING of the 5 that is now open.
+
+
+## 88. THE HEADLINE WAS WRONG: 3SWMESS is posted **11 times**, not once. My watch read the wrong half
+
+Sections 73, 81 and 86 all rest on "314 writes to `0x428E3C` = 313 zeros + exactly ONE `0x0005`".
+**That measurement was blind to most of the traffic.**
+
+### What the trace actually holds
+
+```
+  MICFU set to 5:    1  via a 16-bit write to 0x428E3C
+                    11  via BYTE writes to 0x428E3D      <- my watch never saw these
+```
+
+And the byte-write census at `0x428E3D` is where the REAL MICFU traffic lives:
+
+```
+  176 x 0x0C  (0o14 RESIWR)      9 x 0x0F        4 x 0x00
+   91 x 0x19  (0o31 PHYSWR)      7 x 0x0A        3 x 0x11
+   11 x 0x05  (3SWMESS)          7 x 0x01 (3RMICV)   5 x 0x1E
+```
+
+313 byte writes to the odd half, against 314 sixteen-bit writes to the even half. **The 16-bit writes
+are mostly ZEROING; the byte writes carry the function codes.** So "313 zeros and one 3SWMESS" was a
+true statement about half of a word and a false one about the machine.
+
+### The instrument failure, named
+
+**WATCHING AN ADDRESS INSTEAD OF A FIELD.** The cell-writer report matches `wl[i].Addr == cellWatch`
+exactly. A 16-bit field can be written as one word write at the even address OR as byte writes to
+either half, and an exact-address match sees only the first kind. Nothing about the output hints at
+the gap: 314 samples looks like plenty of data, and the split was stable across two independent runs -
+**reproducibility confirmed the wrong number twice.**
+
+This is the same family as taxonomy #8 (a count that cannot be relevant) and #21 (a denominator quietly
+smaller than you think), but the mechanism is new and worth its own name: the FIELD and the ADDRESS are
+not the same object, and a watch keyed on one measures the other.
+
+**The fix, in the instrument:** match the whole field - `(addr & ~1u) == (cellWatch & ~1u)` - and print
+which half each write touched, so a byte-vs-word split can never again read as a single clean series.
+
+### What this does to task 1
+
+ - **RETRACTED:** "3SWMESS IS produced, once, at the very end, after the stall." It is produced
+   **eleven** times.
+ - **RETRACTED:** the whole "LNEWSWAP finds zero on 313 of 314 passes" framing, which was built on the
+   zeroing half.
+ - **STILL `[V]`:** the final 12-word block build at `0x428E30..0x428E46` IS a message being
+   constructed (that is what settled section 87 in favour of the MICFU reading over the link reading).
+ - **STILL `[V]`:** routine `0o11144` is a list-unlink/exchange primitive, and its call chain
+   reconciles PC and L exactly.
+
+The question returns to something honest and open: **with 3SWMESS posted eleven times, why does
+place-domain still stall?** That is a different investigation from the one I have been running, and it
+starts from a corrected instrument.
+
+
+## 89. With the corrected reading: a COMPLETE swapper message is built, and N5STA takes UNDOCUMENTED values
+
+Section 88 forced a re-read of the trace with byte writes included. Decoding the first 3SWMESS burst
+IN ORDER (rule: decode the bytes, do not grep for what you expect):
+
+```
+  0x428E34/35 = 0x0003     N5STA := 3 (ANSWER)      - the previous message is answered
+  0x428E3E/3F = 0x0007     offset 7 := 7            - SWFUN = MSWSTART
+  0x428E34/35 = 0x0001     N5STA := 1 (MSGN500)     - message TO the ND-500
+  0x428E3C/3D = 0x0005     MICFU := 5               - 3SWMESS
+  ...
+  0x428E3C/3D = 0x0005     MICFU := 5 again
+  0x428E3E/3F = 0x0007     SWFUN := 7 again
+  0x428E34/35 = 0x0006     N5STA := 6               - ???
+```
+
+**A COMPLETE swapper message is being built**: `MICFU=3SWMESS` with `SWFUN=MSWSTART(7)` and
+`N5STA=MSGN500`. That is the message the ladder is supposed to produce - so the earlier framing
+("3SWMESS never reaches the mailbox") is dead twice over.
+
+### The anomaly: N5STA values that do not exist
+
+Full census on this one block, BOTH halves:
+
+```
+  0x0001 MSGN500  (posted)     99
+  0x0003 ANSWER   (answered)   34      <- 65 posts with no answer
+  0x0005                        5      <- NOT a documented status
+  0x0006                        3      <- NOT a documented status
+  0x0000 free                 148
+```
+
+`N5MessageStatus` documents free=0, MSGN500=1, WAITING=2, ANSWER=3, 5ERANSWER=4. **5 and 6 are outside
+that set**, and the servicer services only `N5STA == 1`. A message parked at a status nothing services
+would stall exactly the way place-domain does.
+
+### Grading this honestly
+
+`[V]` the counts and the byte sequence above - they come from the never-evicted writes-only trace.
+`[V]` the field mapping: `swpInfo=0x8E30` -> base `0x428E30`; N5STA at word 2 = byte +4 = `0x428E34`;
+MICFU at word 6 = byte +12 = `0x428E3C`. Both consistent with every earlier pin.
+`[D]` that N5STA 5/6 is a DEFECT. It is equally possible that these are legitimate values our
+`N5MessageStatus` enum simply does not model - the same shape as section 74's four legal MICFUs with no
+enum member. **An undocumented value is evidence our MODEL is incomplete before it is evidence the
+machine is wrong.**
+
+### The checks, in order, before anyone calls this a root cause
+
+ 1. Search the microcode and `N500-SYMBOLS` for status constants 5 and 6 - if they have names, our enum
+    is the thing that is wrong.
+ 2. Establish WHO writes 5 and 6 (the corrected cell watch, pointed at `0x428E34`, now reports both
+    halves and the writing PC).
+ 3. Only then ask whether the servicer should handle them. The 65 unanswered posts are the symptom to
+    explain; the status values are a candidate explanation, not yet the explanation.
+
+
+### 89.1 Check 1 result: the status family STOPS at 4 in SINTRAN's own symbols
+
+`N500-SYMBOLS.SYMB` (names truncated to 5 chars):
+
+```
+  MSGN5=000001   WAITI=000002   ANSWE=000003   5ERAN=000004
+  N5STA=000002   <- the FIELD OFFSET (word 2), not a status value
+```
+
+There is **no symbol for status 5 or 6**. So `N5MessageStatus` is COMPLETE with respect to the symbol
+table, and the "our model is merely incomplete" explanation is weaker than section 89 allowed - though
+still not excluded, since a generation-specific value need not appear in the L07 table.
+
+Grade unchanged: `[V]` that 5 and 6 are written and unnamed; `[D]` that this is the stall's cause.
+
+**Check 2 is the discriminator and needs one run:** point `RETROCORE_ND5000_CELLWATCH` at `0x428E34`
+(the corrected watch now covers both halves and prints the writing PC). If the 5/6 writes come from the
+SAME resident exchange primitive at `0o11144` that section 86 identified, then they are a LINK value
+landing in the status field - a structural aliasing bug, not a status at all. If they come from
+message-building code, they are real statuses. **Those two answers point in opposite directions, which
+is what makes the run worth spending.**
+
+
+### 89.2 WITHDRAWN: "N5STA takes undocumented values 5 and 6" - I applied the WRONG STRUCT to this block
+
+Caught before it hardened. The harness reports **two** blocks:
+
+```
+  swpInfo = 0x00008E30   ->  physical 0x428E30   <- the block I have been decoding
+  swMsg   = 0x00428D30                            <- a DIFFERENT block
+```
+
+`0x428E30` is **SWPINFO**, and SWPINFO is NOT the mailbox message. `N5MailboxProtocol` gives it its own
+layout (`SWPFU` at 101B, `SWPST` at 103B), and `MP-P2-N500`'s LNEWSWAP reads its status through a
+SEPARATE accessor - `CALL RN5STATUS` - not from word 2. **Word 2 of SWPINFO is not N5STA**, so
+"N5STA = 5 / 6" was the message struct applied to the wrong block.
+
+The 12-word build reinforces it: read as a message it gives `SENDE=1`, `X5CPU=0` and `0xFFFF 0xFFFF` in
+words 0-1 - which is not a clean message, but IS exactly a 32-bit `-1`, i.e. the queue sentinel this
+family uses for a link field.
+
+**What survives:** MICFU at word 6 is pinned independently and repeatedly - `LNEWSWAP` reads
+`*MICFU@3 LDATX` at that offset, and section 81's address chain confirmed it two ways. So the
+**3SWMESS counts stand** (11 byte-writes + 1 word-write). It is only the STATUS reading that is
+withdrawn.
+
+**Third time tonight for this exact shape** - section 76/77 (SAA value vs which struct), section 87
+(link vs MICFU), and now this. The recurring lesson is one question, asked before any decode:
+**WHICH STRUCT IS THIS BLOCK?** Offsets are meaningless until that is answered, and a wrong struct
+produces field values that look like real data every time.
+
+**Correct next step:** get SWPINFO's actual layout (`SWPFU=101B`, `SWPST=103B` are the only pins we
+have) before decoding anything else at `0x428E30`, and point the corrected cell watch at the fields
+those symbols name rather than at message offsets.
+
+
+## 90. TASK 5 MECHANISM FOUND: `TESTFD` FORCES the ALU output to zero, and saves the sign FROM that
+
+Decoded from the authoritative `microcode-5000-def.json` field split, not from guesswork. The ALU
+fields are **4-bit op + 2-bit carry** (`ALU_TRUE` = 127..124 op, 123..122 carry), so a raw 6-bit value
+is `op<<2 | carry` - which is why the 16-entry mnemonic table looked like it did not cover values
+16/20/24/28.
+
+### The flag-saving word
+
+```
+  0o3171   TESTOBJ = 9  -> COND,MZRO    "Z FROM ALU OPERATION"
+           COND_ALU = 1 -> conditional ALU
+             TRUE  branch: op 0  = ALU,FZRO   FORCE ZERO ALU OUTPUT
+             FALSE branch: op 5  = XOR        of A,SC1 and B,SC14
+           DEST = D,NONE      STATUS = 5 -> ST,SAVC  "SAVE STATUS FROM ALU IN COMPARE"
+```
+
+**With the documented ONE-WORD CONDITION DELAY, `COND,MZRO` tests the flags left by the PREVIOUS
+word.** So the word behaves as:
+
+```
+  previous ALU result was ZERO  ->  force the ALU output to 0, save status from THAT   ->  S = 0
+  previous ALU result non-zero  ->  XOR(SC1, SC14), save status from the real result    ->  S = sign
+```
+
+### It explains both measured cases, which the old story could not
+
+ - `-0.0` (`0x80000000`): the preceding operation yields zero, `MZRO` is true, the output is FORCED to
+   zero, and the sign saved off a zero is **0**. Matches the measured `Micro.Sgn = 0`.
+ - `-1.0` (`0xBF800000`): non-zero, so the XOR branch runs and the sign survives. Matches the passing
+   `-1.0` case.
+
+The `FloatTestFlagTests` comment claimed the sign is read off a value masked with `0x7FC00000`. That was
+refuted independently (the mask clears bit 31, so EVERY negative float would give S=0). Its INTUITION -
+"the operand becomes zero and the sign comes off the zeroed value" - was directionally right; the
+mechanism is `ALU,FZRO` on a zero condition, not a mask.
+
+### What this does to the adjudication
+
+**It weakens "our bug" and strengthens "the chip really does this".** The forced-zero is a deliberate
+structure in the microcode, executed by the real B30 store - not an artifact of our decoding. On this
+reading the microword's `S=0` for `-0.0` is FAITHFUL, and the functional core (S=1, raw sign bit) is
+the divergent side.
+
+Grades, kept honest:
+`[V]` the field decode of `0o3171` - op split from the def-json, mnemonics from the generated table.
+`[V]` the one-word condition delay - already documented and used to settle the AFLAG dispatch.
+`[D]` that for `-0.0` specifically the PRECEDING word yields zero. That is the last link, and it is
+inference from the two measured outcomes rather than from tracing the preceding word's operands.
+
+**To close it:** trace the word before `0o3171` on a `-0.0` operand and confirm its ALU result is zero.
+That converts the last `[D]` into `[V]` and settles whether Ronny's tie-break should stand as
+"microcode is right, change the functional core" - the OPPOSITE of where the stale comments pointed.
+Do not change any code until that trace is done; the standing instruction is unchanged.
+
+
+## 91. TASK 5 CLOSED `[V]`: the microcode is FAITHFUL - S=0 for single -0.0 is real chip behaviour
+
+The last `[D]` from section 90 is now verified. The word executed immediately before `0o3171` is the
+entry stub's second word:
+
+```
+  0o3001   ALU,AND   A,SRF4   B,SC1  ->  D,NONE      (no status save - it only sets the micro-flags)
+  0o3171   COND,MZRO tests those flags (one-word delay)
+             TRUE  -> ALU,FZRO  -> ST,SAVC saves status from a ZERO output
+             FALSE -> XOR(SC1,SC14) -> status from the real result
+```
+
+`A_OP 148 = A,SRF4` and `B_OP 8 = B,SC1` - decoded from `microcode-5000-def.json`. **SRF4 is exactly
+the mask the old comment named (`0x7FC00000`)**, and the chain checks out on BOTH measured operands:
+
+```
+  -0.0 = 0x80000000 AND 0x7FC00000 = 0          -> MZRO true  -> ALU,FZRO -> S = 0   (measured S=0)
+  -1.0 = 0xBF800000 AND 0x7FC00000 = 0x3F800000 -> MZRO false -> XOR      -> S = 1   (measured S=1)
+```
+
+Two independent operands, both predicted correctly. That is a 2-point calibration of the whole chain.
+
+### The old comment was HALF right, and the half it got wrong is what misled everyone
+
+It named the mask correctly (`ALU,AND A,SRF4 = &0x7FC00000`) but described the sign as being "read off
+that zeroed result instead of the original bit 31". Read literally that is refutable in one line -
+the mask clears bit 31, so every negative float would give S=0, and `-1.0` does not. The real
+mechanism is a CONDITIONAL ALU that FORCES the output to zero when the masked value is zero. Same
+intuition, different machine.
+
+**A partially-correct explanation is more dangerous than a missing one**: it survives casual checking
+because part of it verifies, and it discourages anyone from re-deriving the rest. This one stood long
+enough to be quoted into a task, a plan and two questions to Ronny.
+
+### The verdict, which is the OPPOSITE of the stale framing
+
+The forced-zero is deliberate structure in the real B30 store. **The microword's S=0 for single `-0.0`
+is FAITHFUL**, and the functional `CpuND500` (raw sign bit, S=1) is the divergent side. Section 82's
+"our engine is at fault" reading is withdrawn; section 90's tentative version is now confirmed.
+
+Also settled: the double path never runs this microcode at all - our C# recompute at `Mpc 003171` +
+`InstrDt 5` supplies its flags - which is why the two widths disagree in our engine while the
+microcode has no width-specific sign path (section 82's byte-level facts, still true).
+
+**Remaining decision is Ronny's, and it is now on correct evidence:** make the functional core match the
+microcode, or keep manual 10.11's raw sign bit and record the microword as intentionally divergent.
+
+
+## 92. TASK 2 REFUTED: RUNSW DOES reach `SAA 7`, the start IS posted, seen and taken `[V]` 2026-08-31
+
+Full octobus ladder with `RETROCORE_ND5000_WATCH=runsw`, 1 h 20 m, test PASSED, pack override
+confirmed on log line 3.
+
+### Every arm hit - including the one the plan said was unreachable
+
+```
+  RUNSW blk1@0o163642           hits=1
+  RUNSW blk2@0o163647           hits=1
+  RUNSW blk3@0o163664           hits=1
+  RUNSW blk4@0o163702           hits=1
+  RUNSW all-passed@0o163717     hits=1
+  RUNSW SAA7 MSWSTART@0o163725  hits=1     <-- REACHED
+  RUNSW sender R2@0o104236      hits=80
+  CONTROL 5ACTSWAPPER           hits=2     <-- instrument alive
+```
+
+**All four precondition blocks pass and `SAA 7` (MSWSTART) executes.** PLAN.md item 2 said *"the
+sending code is correct and execution never reaches it"* and listed the guarded checks at
+`163621`-`163716` as the thing to find. **That is refuted:** the checks all pass.
+
+### And the servicer SEES the start
+
+```
+  [at START-SWAPPER verdict]  startSeen=1  startMicfu=23B  startTaken=True
+                              restarts=1/1  swpfu[LNEWSWAP:2]
+                              promptReturned=FALSE
+```
+
+The earlier "`startSeen=0 startTaken=False swpfu[(none)]`" figures that framed this task come from
+snapshots taken BEFORE start-swapper runs - the run holds 4 such early snapshots and 11 later ones
+reading `startSeen=1`. **Reading a pre-command snapshot as the command's result is what created this
+task's premise.**
+
+### What is actually wrong
+
+Not "the start is never posted". The start is posted, seen and taken - and then
+**`promptReturned=False`: the monitor never returns its prompt.** That is a HANG AFTER a successful
+post, which is a different investigation from the one this task described.
+
+Note the MICFU profile also changed against the short bring-up: `micfu[1B:42 12B:1 23B:1 24B:1
+30B:12 31B:13]` - `30B` (PHYSRD) x12 now appears, so real work follows the start.
+
+### Why this run can be believed
+
+The four block arms DISCRIMINATE (a run where one blocked would show the later arms at 0), the
+control hit, and the sender arm's 80 hits are consistent with it being the SHARED FUNCS sender rather
+than RUNSW's alone - which is exactly why the block arms, not the sender, carry the evidence. That
+distinction was written into the watch before the run.
+
+
+## 93. THE ND-500 CONFORMANCE CORPUS WAS THREE WEEKS STALE, AND NOTHING COULD SEE IT `[V]` 2026-08-31
+
+Ronny asked for the big JSON suite to be tested and updated after the single-float TEST change. Doing
+that surfaced a larger problem than the change itself.
+
+### The suite could not be run by the documented command
+
+`TestComprehensiveExportAndRun` is `[Explicit]` at CLASS level. `dotnet test --filter` **cannot select
+explicit tests**, so:
+
+```
+  --filter "FullyQualifiedName~RunConformanceCorpus"                      -> No test matches. EXIT 0.
+  --filter "FullyQualifiedName=<fully.qualified.name>"                    -> No test matches. EXIT 0.
+```
+
+**Both reported success while running nothing.** A first, broader run reported `689 passed, 4 skipped`
+and exit 0 with the corpus never touched. The fixture's own comment documents this and even warns that
+`nd500x/docs/SYNC-FLOAT-NATIVE-REBASE.md` still instructs people to run a filter that selects nothing.
+The documented workaround - comment the attribute out, run, restore - is what was used here.
+
+### What it found once it could run
+
+```
+  40,082 cases loaded and executed
+   3,922 FAILED on the UNMODIFIED engine (baseline)
+   3,923 FAILED with the single-float change  ->  exactly ONE case moved
+```
+
+The one case is **`Test_F_NegZero`** (index 19013), the single-float TEST of `-0.0` - precisely the
+adjudicated change. `Test_D_NegZero` (19018) still passes, confirming the single-only scoping.
+
+### The 3,922 are a STALE FIXTURE, not engine bugs
+
+```
+  corpus in bin/ generated : 2026-08-10 13:18
+  engine changes since     : through 2026-08-30, including
+       a4e788463  "a divide-by-zero that says where the zero came from"
+       e856a1148  "integer divide: adjudicate + fix two edge-case findings"
+       5fe5eaa6e  "ND500 Conformance Corpus: exact trap bits ... and the trap fixes behind them"
+```
+
+The failing family is `Div_DivByZero_TRAP_*` with `I1 mismatch: expected 0x64, got 0x7F` - exactly what
+those commits changed. The corpus is a BUILD ARTEFACT (not source-controlled), so the copy in `bin`
+predates three weeks of deliberate, adjudicated engine fixes.
+
+**The trap I avoided:** regenerating blindly would have rewritten all 40,082 goldens from the current
+engine and made 3,922 mismatches VANISH with no record. Checking the corpus timestamp against the
+engine's commit history BEFORE regenerating is what distinguished "stale fixture" from "3,922 new
+bugs" - and those two look identical in the failure count.
+
+### Why this matters beyond tonight
+
+`nd500-conformance.json` is the **shared** fixture: nd500x reads the same file under the same name.
+A guard rail that (a) cannot be selected by the documented command, (b) is a build artefact nobody
+regenerates, and (c) is not listed in `DOCS/Known-Test-Failures.md`, is a guard rail that silently
+stops guarding. It went three weeks and ~3,900 divergences without anyone seeing a red light.
+
+
+## 94. RETRACTION of section 93's diagnosis: the 3,920 are NOT a stale fixture. They are REAL mismatches
+
+Section 93 concluded "the 3,922 are a STALE FIXTURE, not engine bugs" from a timestamp
+(corpus 2026-08-10) correlated with commit TITLES about divide-by-zero fixes. **I tested it by
+regenerating, and it failed.**
+
+```
+  baseline, engine unmodified   : 3922 failed / 36160 passed
+  with the single-float change  : 3923 failed / 36159 passed
+  after FULL regeneration       : 3920 failed / 36162 passed
+```
+
+**Regeneration removed only THREE failures.** The `Div_DivByZero_TRAP_*` cases survive it with
+**identical** values - `I1 mismatch: expected 0x00000064, got 0x0000007F`. If their expectations were
+produced by executing the current `CpuND500`, regeneration would have overwritten them and they could
+not still disagree. **They are therefore SPEC-DERIVED**, and the ~3,920 are real
+engine-versus-specification mismatches.
+
+### What the 3-case delta does tell us
+
+One of the three is `Test_F_NegZero` - my adjudicated change, whose golden regeneration correctly
+updated. So the generator DOES bake some expectations from the engine and others from a spec; the
+corpus is a MIXTURE. That is worth knowing before anyone reasons about it again.
+
+### The error, and why it was seductive
+
+The stale-fixture story explained every fact I had: a three-week-old artefact, engine commits whose
+titles named the exact failing family, and a plausible mechanism. **It was circumstantial and I graded
+it `[V]`.** A timestamp plus a commit title is a CORRELATION; the regeneration was the experiment, and
+it takes 7 minutes.
+
+This is the same shape as the `0x0006` retraction earlier tonight: a story that fits all the evidence
+is not the same as a tested claim. The tell both times was that I had not run the one cheap experiment
+that could FALSIFY it.
+
+### Corrected standing state
+
+`[V]` 40,082 cases execute; **3,920 fail on the current engine with a freshly regenerated corpus**.
+`[V]` My single-float change contributes ZERO of them (3922 -> 3923 -> 3920, with the +1 being
+`Test_F_NegZero`, now regenerated and passing).
+`[V]` `Test_D_NegZero` passes throughout, confirming the single-only scoping.
+`[OPEN]` What the ~3,920 mismatches ARE. They are not stale goldens. `DOCS/Known-Test-Failures.md`
+does not mention them, and the fixture cannot be run by the documented command, so they have gone
+unseen. **This is a real, unreported ~10% conformance gap in the ND-500 macro CPU and it deserves its
+own investigation.**
+
+
+## 95. THE REAL ANSWER: the ND-500 corpus runner ignores TWO markers the sibling sweep honours
+
+Third and final correction to the "conformance gap" number. Sections 93 and 94 both overstated it.
+
+### The breakdown, measured from the full failure list (which was in the log the whole time)
+
+```
+  3,920 reported failures
+  3,654  are isNegativeTest cases   <- a mismatch is the CORRECT outcome for these
+    266  are not
+      of which the bulk are Div_DivByZero_*_TRAP - expectedTrap cases
+```
+
+The corpus MARKS them. Every negative vector carries:
+
+```
+  isNegativeTest            : true
+  negativeTestType          : wrong_flag
+  expectedValidationFailure : st:Z
+```
+
+`ND500TestModels.cs` even declares those properties - but
+`TestComprehensiveExportAndRun.ExecuteTestsFromJson` never reads them. It compares negative vectors
+like ordinary ones and counts the intended mismatch as a failure.
+
+### The sibling harness already solved BOTH halves, and says so
+
+`Nuget/HackerCorpLabs.Emulation.CPU.ND5000/tests/Nd500xCorpusSweepTests.cs`:
+
+> *"Negative tests (`isNegativeTest: true`, ~3.6k cases): the corpus DELIBERATELY ships a wrong
+> `final` ... For those a DIVERGE is the correct outcome and a MATCH means the engine reproduces the
+> injected wrong behaviour - tallied separately so they can never masquerade as real divergences
+> (**the first run of this sweep counted all 3.6k as diverges**)."*
+
+> *"`expectedTrap` cases: the C runner skips register/memory validation for trap tests ... the
+> corpus's `final.regs` for these are **stale prose nothing validates** (they still show the
+> pre-2026-07-26 dest-unchanged div-by-zero convention, while ALL THREE cores saturate per the
+> manual). First run of this sweep treated them as golden and **manufactured a ~184-case false
+> cluster**."*
+
+**Both of my wrong numbers tonight are named in that file as mistakes already made and fixed** - the
+3.6k negative-test miscount, and the div-by-zero trap cluster. The second even explains the exact
+`I1 mismatch: expected 0x64, got 0x7F` signature: the corpus's stale regs encode the OLD
+dest-unchanged convention while all three cores now saturate.
+
+### The corrected state
+
+`[V]` The ND-500 runner `ExecuteTestsFromJson` lacks BOTH refinements the ND-5000 sweep has.
+`[V]` My single-float change contributes ZERO failures (3922 -> 3923 -> 3920, the +1 being
+`Test_F_NegZero`, regenerated and passing).
+**RETRACTED (twice now):** "~3,920 real failures" and "a ~10% conformance gap". Neither survives.
+
+### The lesson, which is the standing rule I did not follow
+
+**CHECK THE EXISTING MACHINES BEFORE BUILDING AN OPINION.** One `grep isNegativeTest` across the repo
+- the same command that eventually answered it - would have found the sibling sweep and both
+explanations in the first minute, before three sections of escalating wrong headlines. I ran that grep
+only after exhausting my own theories.
+
+### What is actually worth doing
+
+Teach `ExecuteTestsFromJson` the two rules the sibling already implements (reuse its logic, do not
+re-derive it), so the corpus reports a number that means something. Until then its failure count is
+dominated by cases that are behaving exactly as designed.
+
+
+## 96. TASK 2 LOCATED: during start-swapper the ND-100 sits in the IDLE LOOP, waiting for an answer `[V]`
+
+Section 92 established that RUNSW reaches `SAA 7`, the start is posted, `startSeen=1
+startMicfu=23B startTaken=True`, and yet `promptReturned=False`. The same run's PC histogram says
+where the ND-100 actually is:
+
+```
+  ND-100 PC during start-swapper: 597 samples, 29 distinct (PC,PIL)
+     PC=0x000012C4 pil=0  x117           PC=0x000012C3 pil=0  x116       |  573 of 597 samples = 96%
+     PC=0x000012C5 pil=0  x114       |  five CONSECUTIVE addresses
+     PC=0x000012C2 pil=0  x113       |
+     PC=0x000012C6 pil=0  x113      /
+     ...everything else x1 (PIL 1/2/13 - the clock-driven sampler noise, section 73)
+```
+
+`0x12C2` = **`0o11302`**, in the resident common code - the same segment as the `0o11144` exchange
+primitive from section 86. Disassembled:
+
+```
+  011300  150412  PION              ; enable the interrupt system
+  011301  150015  TRA PEA
+  011302  146167  RADD CLD ST DX
+  011303  132400  JNC 0     -> 011303
+  011304  146401  RADD AD1 0 DD     ; D := D+1   <- an idle-time COUNTER
+  011305  147155  RADD ADC CLD SA DA
+  011306  124374  JMP -4    -> 011302
+```
+
+**That is SINTRAN's IDLE LOOP.** `PION` then a tight counting loop at PIL 0. The console slice agrees:
+`1 SYSTEM idle 0.0 s`.
+
+### What it means
+
+The ND-100 is **not** spinning in the monitor and **not** stuck in RUNSW. It has nothing to run: the
+monitor process is BLOCKED and the machine went idle. So:
+
+```
+  start posted  ->  seen (startSeen=1, MICFU 23B)  ->  taken (startTaken=True)
+       ->  ND-100 blocks waiting for completion  ->  IDLE  ->  the answer never arrives
+```
+
+**The hang is on the ANSWER path, not the send path.** That is a different half of the protocol from
+where this task has been looking, and it retires the "which precondition blocks the send" question
+entirely.
+
+### Next
+
+Find what the ND-100 is waiting ON, then why the ND-5000 side never satisfies it. The swapper CPU
+state at the verdict was `PC=0x08008255 stopMode=WAIT`, `ansMON=377B ansSWPFU=1B ansSWPSTAT=0B`,
+`restarts=1/1`, `swpfu[LNEWSWAP:2]` - so the ND-500 side ALSO parked. **Both sides are waiting.**
+Establish which one owes the other a message; a mutual wait means one of them is wrong about whose
+turn it is.
+
+
+## 97. THE CORPUS FIX LANDED, and it surfaced TWO REAL ENGINE BUGS that 3,654 miscounts were hiding
+
+`ExecuteTestsFromJson` now honours `isNegativeTest`. Before and after, same engine, same corpus:
+
+```
+                       BEFORE          AFTER
+  Failed               3,920            268
+  NegativeOK               -           3,654
+  Pass Rate                -          99.26%
+  NEGATIVE TEST MATCHED    -               2   <- REAL FINDINGS, previously invisible
+```
+
+### The two real findings
+
+```
+  [36600] Schpar_BY_ClearParity_NegativeTest_WrongZFlag   BY1 schpar $0x2000, $0
+  [36609] Sskip_BY_Skip3_NegativeTest_WrongZFlag          BY  sskip  0x2000, $65
+```
+
+Both `wrong_flag / st:Z` on BYTE-width string instructions. **A negative test that MATCHES means the
+engine reproduced the DELIBERATELY WRONG final** - so `CpuND500`'s Z flag for `schpar` and `sskip` at
+byte width is genuinely wrong. This is exactly what negative tests are for, and both were buried
+inside 3,654 cases the runner was miscounting.
+
+### What the remaining 268 are
+
+```
+  196  Div_DivByZero*        \  208 = the expectedTrap family whose final.regs are STALE PROSE
+   12  Div_DivZeroByZero     /   (the C runner skips reg/mem validation for these - see section 95)
+   12  Sfilln_{W,H}_Fill4At2
+    4  Div4_0_3E8      4  Chain      4  /_W_documented_minDividedByMinusOne
+    3  pmon/pmof/pctsb_Default       2  mul2_{W,H}_documented_minTimesTwo
+```
+
+Strip the expectedTrap div family and roughly **60 genuine cases** remain, in a handful of named
+families. That is a triage list a person can actually work, which "3,920 failures" was not.
+
+### The arc of this number tonight, as a caution
+
+```
+  "3,922 real failures"          -> wrong (never checked what they were)
+  "stale fixture, not bugs"      -> wrong (regeneration refuted it: 3922 -> 3920)
+  "a ~10% conformance gap"       -> wrong (93% were negative tests behaving correctly)
+  268 failures + 2 real findings -> measured, with the families named
+```
+
+Three wrong headlines, each plausible, each published before running the cheap experiment that could
+falsify it. The thing that finally worked was reading the full failure list - **which had been sitting
+in the log the entire time** (7,931 lines after `=== Failures ===`) - and grepping the repo for the
+marker, which found the sibling sweep that had solved both halves already.
+
+
+## 98. TASK 10 FRAMED: two DELIBERATE assertions in our own repo contradict each other on SSKIP's Z
+
+The two `NEGATIVE TEST MATCHED` findings from section 97 are not a simple engine bug. Both sides are
+things WE wrote, and they disagree on purpose.
+
+### The disagreement, exactly
+
+`Sskip_BY_Skip3`: string at `0x2100` is `A A A B C D E F`, test value `A`, so the skip stops at index
+3 on the `B`. Both sides agree `i1=3`. They differ ONLY on Z:
+
+```
+  corpus generator (ComprehensiveStringGenerator.cs ~line 890):
+      ExpectedFlags = FlagCalculator.ST_ZERO,   // Found non-matching element
+      ...and ST_ZERO = 0x20 = bit 5 = the Z FLAG.  So: differing element -> Z=1.
+
+  Sskip.cs header + code:
+      "Terminating conditions: different element: K=0 Z=0 I1 := differing element"
+      ...and the code sets regs.ST.Z = false on that path.  So: differing element -> Z=0.
+```
+
+`Schpar` is the mirror: the corpus expects `st=0` and the engine gives `32`.
+
+**Neither is external authority.** One is a generator comment, the other an instruction-header comment,
+and tonight has already shown twice that a confident header comment in this tree can be wrong for weeks
+(the `-0.0` mask story; the `..._KnownDivergence` test name that pinned agreement).
+
+`Sskip.cs`'s header is additionally SELF-inconsistent: its Operation section says the result goes to
+**S** ("if S(I1) >> <test> then 0 -> S else 1 -> S", "The S bit is set to 1 if the end of the string is
+reached") while its Terminating-conditions section talks about **Z**. A comment that cannot agree with
+itself about which flag carries the result cannot adjudicate this.
+
+### The authority, located and decodable
+
+`SCHPAR` @ `0o1351`, `SSKIP` @ `0o1325`. SCHPAR's termination region is FOUR near-identical blocks each
+ending in **`ST,SAVA`** - "SAVE STATUS FROM ALU OPERATION", so **the flags are COMPUTED from the ALU
+result, not hand-set**:
+
+```
+  0o10361..0o10364   cond word 0o10363: COND_ALU=1  ALU_T=17  ALU_F=16   then ST,SAVA
+  0o10365..0o10373   cond word 0o10372:             ALU_T=16  ALU_F=17   <- polarity swapped
+  0o10374..0o10402   cond word 0o10401:             ALU_T=16  ALU_F=17
+  0o10403..0o10411   cond word 0o10410:             ALU_T=17  ALU_F=16
+```
+
+`ALU_T`/`ALU_F` are `op<<2|carry`, so 16 and 17 are both op 4 = `ALU,A` differing only in CARRY-IN.
+Four blocks with differing polarity = the four documented terminating conditions, one per outcome.
+
+**This is decidable with no run.** Decode `A_OP=32` and the condition on those four words (applying the
+one-word condition delay), and the flag each termination produces falls out. Then whichever of our two
+assertions disagrees with the silicon is the one to change - along with its comment.
+
+
+## 99. TASK 10 ADJUDICATED: a SPLIT verdict - the engine is wrong for SSKIP, the CORPUS is wrong for SCHPAR
+
+Both instructions save their terminating status the same way, and it is the **forced-zero** trick
+already verified for `TESTFD` in section 91:
+
+```
+  SCHPAR terminations  0o10364 / 0o10373 / 0o10402 / 0o10411
+  SSKIP  terminations  0o10110 / 0o10111
+      all of them:   ALU,FZRO / ALU,FZRO    D=D,NONE    ST,SAVA
+```
+
+`ALU,FZRO` forces the ALU output to ZERO on both the true and false paths, and `ST,SAVA` is
+"SAVE STATUS FROM ALU OPERATION" - so the status is taken FROM a zero result. **Z=1 at every one of
+these terminations, for both instructions.**
+
+### The verdict, which is SPLIT
+
+```
+                corpus      microcode     engine        who is wrong
+  sskip         Z=1         Z=1           Z=0           THE ENGINE
+  schpar        Z=0         Z=1           Z=1           THE CORPUS
+```
+
+**This is why the disagreement had to be adjudicated rather than reconciled.** Changing the engine to
+match the corpus - the obvious "make the tests pass" move - would have FIXED sskip and BROKEN schpar.
+Two failures that looked like one bug are two bugs pointing in opposite directions.
+
+### Grading, honestly
+
+`[V]` the microword fields: both instructions' status-save words are `ALU,FZRO` + `ST,SAVA`, decoded
+from the raw image via the def-json field split.
+`[V]` the mechanism itself - the identical FZRO-then-SAVA pairing was verified end to end for TESTFD
+(section 91), where it predicted both measured float operands correctly.
+`[D]` that this yields exactly `Z=1` and that no later word overwrites it before the instruction
+retires. The pairing only makes sense if `ST,SAVA` takes the CURRENT word's ALU result (otherwise
+forcing zero would be pointless), which is the same reading TESTFD confirmed.
+
+**Surprising enough to flag:** if every termination saves Z=1, Z carries no discrimination between the
+outcomes - the distinguishing information must live in K or in which branch was taken. The two SSKIP
+saves differ in TESTOBJ (`COND,MCRY` at 0o10110 vs `COND,MSEXO` at 0o10111), i.e. in the CONDITION
+tested, not in the ALU result. That is consistent, but it deserves a second look before the fix lands.
+
+### The falsifiable plan
+
+Fix `Sskip.cs` to set Z=1 on the differing-element path. Prediction: the positive `Sskip_BY_Skip3`
+vector PASSES and its negative twin returns to `NegativeOK`, while **`Schpar` stays failing** until the
+CORPUS generator is corrected (`ComprehensiveStringGenerator.cs` sets `ExpectedFlags =
+FlagCalculator.ST_ZERO` with the comment "Found non-matching element"; per the microcode that
+expectation is inverted). If schpar changes state too, this reading is wrong.
+
+
+## 100. WITHDRAWN: section 99's split verdict. My own flagged caveat refuted it within the hour
+
+Section 99 concluded "Z=1 at every termination" from `ALU,FZRO` + `ST,SAVA`, and flagged a caveat:
+*"if every termination saves Z=1, Z carries no discrimination between the outcomes"*. **That caveat is
+the refutation, and there is positive evidence for it.**
+
+`Schpar.cs` sets Z from the DATA:
+
+```
+  line 98:   regs.ST.Z = true;   // Set Z if any byte has incorrect parity
+  header  :  "string checked: K=0  Z := parity check result,  I1 := next element"
+```
+
+**SCHPAR's whole purpose is to report a parity result in Z.** If the microcode's terminations forced
+Z=1 unconditionally, the instruction could not do its job. So "FZRO + SAVA => Z=1" is wrong.
+
+### The likely explanation, and the one question that decides it
+
+The status save probably LAGS BY ONE WORD, exactly as the CONDITION provably does on this machine. Then
+the `ALU,FZRO` word saves the PREVIOUS word's ALU result - for SCHPAR that is the parity
+`ALU,AND A,DATA B,SC12` at `0o10362` - which is data-dependent, as required. The `FZRO` would then be
+there precisely so the current word's ALU does not disturb the status being saved.
+
+**The governing question, still `[OPEN]`:** does `ST,SAVA`/`ST,SAVC` save the CURRENT word's ALU result
+or the PREVIOUS word's? `microcode-5000-def.json` says only "SAVE STATUS FROM ALU OPERATION" and gives
+no timing. The authority is ND-05.022.1 (ND-5000 Microprogram Guide), in-repo under
+`Reference-Manualsŀ\`. **Answer that before anything else here.**
+
+### What this does and does NOT invalidate
+
+**WITHDRAWN:** section 99's verdict ("engine wrong for sskip, corpus wrong for schpar"). Both halves
+rested on Z=1-always. Task 10 returns to `[OPEN]` with the disagreement itself still `[V]` (the corpus
+and the engine really do differ, and the positive+negative vector pairs prove it is a real divergence).
+
+**NOT INVALIDATED - and this distinction is the important one:** the committed `Test.cs` change for
+single-float `-0.0`. Section 91 explained it via the same FZRO mechanism, and that EXPLANATION is now
+uncertain - but the change itself rests on MEASUREMENT, not on the explanation. The microword
+`CpuND5000` executes the real B30 and OUTPUTS S=0 for `-0.0`; that was measured directly
+(`FloatTest_NegZero`, 304 ms) before any mechanism was proposed, and 13/13 tests now confirm both
+engines agree. **A wrong story about why does not unmake a measured what.**
+
+The reverse of tonight's recurring error, and worth keeping: elsewhere I published derivations as
+measurements. Here a derivation is failing while the measurement underneath it stands.
+
+
+## 101. SECTION 100 OVER-CORRECTED. The manual answers the timing question, and section 99's verdict is RESTORED
+
+Section 100 withdrew the split verdict because `Schpar.cs` reports Z from the parity result, which
+seemed incompatible with "Z=1 always". **I treated our own comment as evidence about the hardware -
+the exact error class this document has recorded three times tonight.**
+
+### The manual settles the governing question `[V]`
+
+ND-05.022.1 (ND-5000 Microprogram Guide), the `H ADD2` worked example:
+
+```
+        ALU,A+B ORA B,SC5 TYP,OR D,SC5 ST,SAVA
+```
+
+**ONE microword performs `ALU,A+B` AND `ST,SAVA`.** For an ADD2 the status saved must be that
+addition's, so **`ST,SAVA` saves the CURRENT word's ALU result. There is no one-word lag on the status
+save** - unlike the CONDITION, which does lag. Those are two different pipeline behaviours and I had
+been assuming they matched.
+
+### Therefore section 99 is restored
+
+`ALU,FZRO` + `ST,SAVA` in the same word saves status from a FORCED ZERO, so Z=1 at the SCHPAR and
+SSKIP terminations, and the split verdict stands:
+
+```
+                corpus      microcode     engine        who is wrong
+  sskip         Z=1         Z=1           Z=0           THE ENGINE
+  schpar        Z=0         Z=1           Z=1           THE CORPUS
+```
+
+### Why section 100's refutation failed
+
+It rested on `Schpar.cs`'s header and code claiming `Z := parity check result`. That is OUR
+implementation asserting what the hardware does - not evidence about the hardware. And the schpar
+vector cannot discriminate anyway: our parity-dependent Z happens to produce Z=1 for this data, and
+"Z=1 always" also produces Z=1. **A test case that both hypotheses pass cannot refute either.** I
+should have noticed that before withdrawing.
+
+### Three flips on one question - why this one is better grounded
+
+99 (verdict) -> 100 (withdrawn) -> 101 (restored). The difference is the KIND of evidence:
+
+```
+  99   inferred the timing from the FZRO+SAVA pairing        (derivation)
+  100  refuted it with OUR OWN comment                       (unreliable witness)
+  101  the MANUAL shows one word doing both ALU and SAVA     (external authority)
+```
+
+Only 101 rests on something outside our own code. The lesson is not "stop revising" - it is that a
+revision is only worth making when the new evidence is of a BETTER KIND than the old, and our own
+comments rank below the manual and below the raw microcode every time.
+
+### Still owed before the fix lands
+
+The `[D]` from section 99 remains: that no later word overwrites the status before the instruction
+retires. Decode forward from each termination to the instruction boundary (`G,OOPS`) and confirm no
+second `ST,SAV*` runs. That is the last gap, and it is decodable with no run.
+
+
+## 102. STRUCTURAL CORRECTION: those are not four "terminations" - `0o10364` LOOPS BACK. Stop here and trace properly
+
+Following the sequencer instead of reading linearly:
+
+```
+  0o10364  ST,SAVA   ->  ABS = 0o10361     <== JUMPS BACK INTO ITS OWN BLOCK. It is a LOOP BODY.
+  0o10373  ST,SAVA   ->  ABS = 0o10361     same target
+  0o10110  ST,SAVA   ->  ABS = 0o10112     falls into ST=K,1IFZ  (writes K, not Z)
+  0o10111  ST,SAVA   ->  ABS = 0o3117      leaves the region
+```
+
+**Section 99 called these "four termination blocks". That characterisation is wrong** - at least the
+SCHPAR ones are a loop that re-enters at `0o10361`, so the `FZRO`+`SAVA` executes once PER ELEMENT, not
+once at exit.
+
+That does not immediately overturn "Z=1 at exit" (a forced zero saved every iteration still leaves Z=1
+at the end), but it means the reasoning behind it was about the wrong control-flow shape, and the
+SCHPAR parity result must be produced somewhere I have not yet identified. **The two facts cannot both
+be casually true, and I am not going to resolve that by asserting one of them again.**
+
+Note `0o10112` is `ST=K,1IFZ` - "SET K TO 1 IF ALU OPERATION IS 0" - so K is written separately from Z
+right after the SSKIP save. That is consistent with the instruction contracts, which describe K and Z
+carrying different parts of the outcome.
+
+### Where this leaves task 10
+
+`[V]` and unchanged: the corpus and the engine really disagree, and both the positive and negative
+vectors fail for each instruction. `ST,SAVA` saves the CURRENT word's ALU (manual, section 101). The
+microword addresses are correct.
+
+`[OPEN]` again: what Z actually is at exit, because the control flow is a loop and I characterised it
+as straight-line terminations.
+
+**The honest next step is a TRACE, not more static reading.** The microword `CpuND5000` executes the
+real B30 - run SCHPAR and SSKIP on the two corpus vectors and record the status at retire, the way the
+`-0.0` question was ultimately settled (measure first, explain after). That converts this from a
+derivation I have now revised four times into a measurement.
+
+**Four revisions on one question is the signal to stop deriving.** 99 verdict -> 100 withdrawn -> 101
+restored -> 102 structural premise wrong. Each revision was evidence-driven, but the pattern says the
+static-decode approach is at the edge of what it can settle reliably here.
+
+## 103. ANSWERED - `0x0006` is ACON command `6h` WCS, "write control store" `[V]` 2026-08-31
+
+Item 3 asked what the ACCP command word `0x0006` actually is. It is documented, and has been all
+along: **`0x00220000` is the ACON decoder** - the "ACCP Control Decoder" of ND-05.020.01 page 113,
+Table 9 - and `0x0006` is its command `6h`, **WCS, "Write control store"**, polarity 0.
+
+### How it was settled: enumerate the port's literals, then apply the key
+
+RULE #0b, done properly. I did not grep for what I expected; I enumerated **every immediate written
+to that port anywhere in `octo.bin`**, in ROM order, in both encodings:
+
+ - `33FC <imm> 00220000` - `MOVE.W #imm,(0x00220000).L`
+ - `30BC | reg<<9` - `MOVE.W #imm,(An)` with `A0 = 0x220000` (loaded at `0x76F2`)
+
+The second encoding matters: my first sweep used `30FC` and returned **ZERO hits**, which would have
+read as "there are no register-indirect command writes". `MOVE.W #imm,(An)` is `0x30BC`, not
+`0x30FC`. A wrong opcode returns a confident empty set - the exact shape the octobus skill's trap 8
+warns about.
+
+55 sites, 23 distinct literals. Then apply Table 9's key:
+
+```
+  bit 15 AEDRL   enable MPC(31-0) to DB(31-0)
+  bit 14 EAOB    enable AOB(15-0) to DB(15-0)
+  bit 13 MODE    force MODE of the SSRs (MIR/MISR, APR/ASR) to 1
+  bit 12 ASDI    force serial data input of the SSRs to 1
+  bits 4-0       the command code
+```
+
+### The falsifiable check, and it passed
+
+Bits 11..5 are unused in the ACON encoding. **All 23 literals have bits 11..5 zero**, and 22 of 23
+carry a command code that is in Table 9. The one exception is `0x0008`, already on record as the
+undocumented ACON code `8h` that ENKICK issues. A decode key that fits 23 out of 23 on its unused
+field and 22 of 23 on its used field is not a coincidence.
+
+```
+  0x0001 TRIG        0x0002 CLRALIVE     0x0005 RAIBF       0x0006 WCS  <-- THE ANSWER
+  0x0007 MASKAIBF    0x0008 (undocumented, ENKICK)          0x000F ADCLK
+  0x0010 MDCLK       0x0015 ARMA         0x0017 ARMI        0x0018 AMIRCK   0x001A ARAL
+  0x2010 MODE+MDCLK  0x2011 MODE+CAPR    0x2018 MODE+AMIRCK
+  0x300F MODE+ASDI+ADCLK                 0x3010 MODE+ASDI+MDCLK
+  0x4009 EAOB+CAIB   0x400A EAOB+ALWAD   0x400C EAOB+ADWRQ  0x400D EAOB+ADRRQ
+  0x4016 EAOB+ARIA   0x8013 AEDRL+CAPRAIB
+```
+
+### What this does to the "triple"
+
+Section 79 left it as `0x3010` (latch address) -> `0x0006` (unknown) -> `0x0010` (ClockA). Read with
+the key, it is not a latch-command-clock at all:
+
+```
+  0x3010  MODE+ASDI+MDCLK   force SSR mode and serial-data-in, clock MISR
+  0x0006  WCS               WRITE CONTROL STORE
+  0x0010  MDCLK             clock MISR
+```
+
+The `0x30xx` / `0x00xx` pairing is a **bracket**: the same command code issued first with
+MODE+ASDI asserted and then with them released. The ROM uses that bracket four more times with
+`0x0F` (`0x300F` ... `0x000F`) around `ALWAD`/`ADWRQ`/`ADRRQ`/`ARIA` - the MFbus memory
+transactions. So the shape is generic, and it appears a third time in the address phase at
+`0x76E6`, where the bracketed command is `0x0015` ARMA (reclock MAR) rather than WCS:
+
+```
+  7714  move.w #0x3010,(A0)   MODE+ASDI+MDCLK
+  7728  move.w #0x0015,(A0)   ARMA - reclock MAR
+  7736  move.w D4,(A0)        D4 = 0x0010, MDCLK
+```
+
+**`0x0006` occupies exactly the slot `0x0015` occupies.** Position was never going to answer this;
+the decoder key did.
+
+### The correction this forces on `Nd5000ControlStoreLink`
+
+The constants there are position-derived names, and Table 9 overrules them:
+
+| constant | value | the name we invented | what ACON says it is |
+|---|---|---|---|
+| `CommandPerform` | `0x0018` | "performs the staged operation" | `AMIRCK` - reclock MIR **without** ECMIR |
+| `CommandOperation` | `0x2018` | "the operation at 0x774C" | MODE + `AMIRCK` |
+| `CommandVerify` | `0x2010` | "before a read-back verify" | MODE + `MDCLK` |
+| `CommandShiftInWord` | `0x2011` | "per word during shift-in" | MODE + `CAPR` (PCLK to APR) |
+| `CommandAddressLatch` | `0x3010` | "latches the address" | MODE + ASDI + `MDCLK` |
+| `ClockA` / `ClockB` | `0x0010` / `0x000F` | "the clock pair" | `MDCLK` / `ADCLK` - **two different clocks**, to MISR and to ASR, not two phases of one |
+| `CommandMicroprogramArm` | `0x0017` | "arm the microprogram" | `ARMI` - reclock MIR **with** ECMIR |
+| `CommandStrobe` | `0x0015` | "a generic strobe" | `ARMA` - ACCP reclock MAR |
+
+The most load-bearing of these: **`ClockA`/`ClockB` are not a two-phase clock pair.** `MDCLK`
+clocks the MISR (the microinstruction serial register) and `ADCLK` clocks the ASR (the AOB serial
+register). They are clocks to **different shift registers**. The model's "shift direction is
+distinguished only by the phase order of the pair" is therefore built on a wrong premise, even
+though it reproduces the observed order.
+
+And **the only "write control store" strobe in the whole ROM is `0x0006`, at exactly two sites**
+(`0x73D2` and `0x7408`). `0x0018`/`0x2018`, which the model treats as the commit, are MIR reclocks.
+
+### What is NOT settled
+
+Section 78's measurement stands and is not contradicted: adding a `0x0006` case as a per-microword
+commit made the test go from `writes 8 -> 9` (correct) to `writes 20972 -> 20974` (first one
+misaligned). Knowing `0x0006` is WCS does not by itself say what data WCS commits or from where -
+that depends on what the MISR/MIR hold at that instant, which is the serial-shift mechanism the
+model deliberately does not simulate bit by bit. **Do not re-apply the retracted change on the
+strength of the name.** The next step is to model the two clocks as separate registers (MISR vs
+ASR) and only then ask what WCS writes.
+
+## 104. The control-store model is INVERTED, and section 78 argued from DEAD CODE `[V]` 2026-08-31
+
+Ghidra came back up and octo.bin is loaded there with call graph and xrefs. Twenty minutes of that
+answered item 3 completely - and overturned section 78, section 79's closing paragraph, and my own
+section 103's cautious ending.
+
+### The two routines, from the disassembly and the call graph
+
+```
+  0x73B2  ControlStoreWriteWord (WCS)          24 callers
+            jsr 0x76E6      address phase
+            jsr 0x7776      shift the 8 words at 0x1144F0 OUT to the CPU
+            ACON 0x3010 / 0x0006 / 0x0010      <-- WCS, "write control store"
+            clr.w (0x11314A)
+
+  0x741E  ControlStoreReadWord (AMIRCK)        17 callers
+            jsr 0x76E6      address phase
+            gate on (bit 2 of the 0x1144EE shadow -> 0x330000)
+            ACON 0x0018     AMIRCK - "ACCP reclock MIR without ECMIR": load MIR FROM the word
+            test 0x660000 bit 0
+            gate off
+            jsr 0x775A -> ACON 0x2010, then 0x77B6 shifts the 8 words IN to 0x1144F0
+```
+
+`0x7776` and `0x77B6` are the two shift halves and they are unambiguous in the disassembly. Both
+walk the same 8-word buffer at `0x1144F0`:
+
+```
+  0x7776  OUT:  word -> (0x550000), then 8x [ MDCLK 0x0010 ; ADCLK 0x000F ]
+  0x77B6  IN :  8x [ ADCLK 0x000F ; MDCLK 0x0010 ], then 0x2011 (MODE+CAPR), then (0x550000) -> word
+```
+
+`CAPR` is "PCLK to APR" - the parallel capture that makes the shifted-in value readable. It appears
+only in the IN direction. That is the mechanism the model said was "NOT proven and deliberately not
+invented"; it is proven now.
+
+### The caller that settles it beyond argument
+
+`0x8CE0`:
+
+```
+  0x8CE4  jsr 0x73B2                 write the word
+  0x8CEA  tst.w (0x0011313C) ; beq   retry while the flag says so
+  0x8CF8  jsr 0x741E                 read it back
+  0x8D14  compare the 8 words at 0x1144F0 against the caller's source
+  0x8D1E  on mismatch, print (0x1182C) / (0x117E6)
+```
+
+A routine you call to **read back and compare against what you just wrote** is a read. There is no
+reading of that loop in which `0x741E` writes anything.
+
+A second, independent caller pair says the same: `0x74A6` calls `0x741E` for CS `0x3FF0..0x3FF4`
+and **saves** the result to `0x114500`; `0x756C` **restores** that save through `0x73B2`. Save with
+one, restore with the other.
+
+### So `Nd5000ControlStoreLink` commits on the wrong strobe
+
+The model treats `0x0018` as "perform the staged control-store operation" - the microword commit -
+and treats `0x2010` + `0x77B6` as a verify tail of the write. In the firmware, `0x0018` is the
+**read** strobe and `0x2010`/`0x77B6` are the **read's** shift-in. The actual write commit, WCS
+`0x0006`, is not modelled at all.
+
+**And that is exactly what section 78 measured.** Adding a `0x0006` case gave
+`writes 20972 -> 20974: two writes, first misaligned`. Two writes per word, the first one wrong, is
+precisely what you get when you keep committing on `0x0018` and then ALSO commit on `0x0006`. The
+measurement was right; the diagnosis drawn from it was backwards. **The fix is to MOVE the commit
+from `0x0018` to `0x0006`, not to add it.**
+
+### Section 78's central argument was made from dead code
+
+Section 78 refuted "0x0006 is a commit" with: *"Routine B (0x73F0) issues the SAME 0x3010/0x0006/
+0x0010 triple but shifts NO DATA. A commit opcode would commit garbage there every time."*
+
+`0x73EE` (section 78 called it `0x73F0`, which is two bytes into its LINK) really is that routine.
+But:
+
+ - it has **zero callers** in the call graph, and
+ - the 32-bit constant `0x000073EE` **appears nowhere in the 131072-byte image**, so it is not
+   reached through a pointer table either.
+
+It is dead code. The live twin, `0x73B2`, is the same routine WITH `jsr 0x7776` in front of the
+triple - it shifts a full 128-bit microword out and then strobes WCS. The "same triple with the
+data removed" was never a control; it was an orphan.
+
+**The rule this is an instance of.** A near-twin routine is only a control if it RUNS. Checking
+that costs one xref query. I did not have Ghidra when I wrote 78 and did not say so - I presented a
+call-graph claim ("routine B issues...") that I had no call graph to support, and it read as
+evidence for two days. Section 79 then stacked a second argument on top of it and the pair felt
+conclusive because they came from different directions - but one of the two directions was empty.
+
+### What survives from 103
+
+The ACON identification. `0x00220000` is the ACON decoder, every literal decodes as one, and
+`0x0006` is WCS. Section 103's decode table stands unchanged; only its closing paragraph - "do not
+re-apply the retracted change on the strength of the name" - is now too weak. Re-apply it, but as a
+MOVE rather than an addition, and prove it red-first.
+
+### The `+0x3FF0` note in the model is also wrong
+
+`Nd5000ControlStoreLink` reads the firmware's `parameter + 0x3FF0` as "implying a space of about
+0x4000 units", offered as corroboration that the model targets the right thing. It is not a space
+size. `0x3FF0..0x3FF4` are the **top five words of the 16384-word store** - the scratch microwords
+that `0x74A6` saves and `0x756C` restores around a patch. The conclusion happened to be right; the
+reasoning was not.
+
+## 105. The 3SWMESS cell: 627 writes, 3SWMESS built TWELVE times, and both "never entered" stampers ARE entered `[V]` 2026-08-31
+
+Re-ran `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` with the cell watch corrected to
+match the FIELD (`addr AND NOT 1`) rather than the even address. Pack override confirmed on line 3
+of the log, test PASSED, 30 m 46 s.
+
+```
+  field 0x00428E3C..0x00428E3D, writes = 627   (was reported as 314)
+
+    313  [word/lo] = 0x0000     the zeroing LNEWSWAP keeps finding
+      1  [word/lo] = 0x0005
+    176  [BYTE-hi] = 0x000C     MICFU 0o14  RESIWR
+     91  [BYTE-hi] = 0x0019     MICFU 0o31  PHYSWR
+     11  [BYTE-hi] = 0x0005     MICFU 0o5   3SWMESS
+      9  [BYTE-hi] = 0x000F        0o17
+      7  [BYTE-hi] = 0x000A        0o12  CACHE
+      7  [BYTE-hi] = 0x0001        0o1   3RMICV
+      5  [BYTE-hi] = 0x001E        0o36
+      4  [BYTE-hi] = 0x0000
+      3  [BYTE-hi] = 0x0011        0o21
+```
+
+### Item 1's premise is dead, and so is section 73's
+
+The plan said: *"why only ONE 3SWMESS message was built in the whole run, and so late"*. There are
+**twelve**, spread through the run, and the late word-write is the twelfth, not the only one.
+
+Section 73's headline - "313 zeros and exactly one 0x0005" - described the even half of a 16-bit
+field. The MICFU codes live in the LOW byte, which on this big-endian layout is the ODD address, so
+the old watch saw the zeroing and almost none of the setting. **It was reproducible, and it was
+reproducibly half the data.**
+
+### Both "known stampers" ARE entered - the opposite of what was recorded
+
+The plan states: *"It is NEITHER known stamper: `0o104024` is never entered, and `0o062700` writes
+a RESIDENT record at `0x438A30`, outside the mailbox."* The twelve writes name their sites:
+
+```
+  CELLW @0x428E3D =0x0005  PC=0o62701   PIL=1   thread=15  L=0o62665     x2
+  CELLW @0x428E3D =0x0005  PC=0o104242  PIL=1   thread=15  L=0o104241    x2
+  CELLW @0x428E3D =0x0005  PC=0o104266  PIL=1   thread=15  L=0o104241    x2
+  CELLW @0x428E3D =0x0005  PC=0o133625  PIL=2   thread=15  L=0o133556    x2
+  CELLW @0x428E3D =0x0005  PC=0o133660  PIL=2   thread=15  L=0o133556/45 x2
+  CELLW @0x428E3D =0x0005  PC=0o145236  PIL=12  thread=15  L=0o145225
+  CELLW @0x428E3C =0x0005  PC=0o11303   PIL=0   thread=15  L=0o34320
+```
+
+`0o62701` is one instruction past `0o62700`, and `0o104242`/`0o104266` are inside the routine at
+`0o104024`. Both are stamping this cell. The "never entered / outside the mailbox" finding was an
+artifact of watching the wrong half - a negative recorded from an instrument that could not have
+seen the positive, which is the failure mode this document already has a name for.
+
+The writes arrive in **two identical bursts** (#5383093-#5383115 and #5383315-#5383339, same five
+PCs in the same order), then one at PIL 12, then the last one at PIL 0 from `0o11303` - which is the
+IDLE LOOP address section 84 identified. The last 3SWMESS is written from the idle loop.
+
+### And the cell is dominated by traffic nobody was looking at
+
+176 RESIWR and 91 PHYSWR. `MEMORY.md` records that the user-domain page-in counter is MICFU
+30B/31B (`0x18`/`0x19`) - so `0x19` ninety-one times is ninety-one page writes. Whatever else is
+wrong, paging traffic IS moving through this cell.
+
+**Do not restate "3SWMESS is produced once, late" anywhere.** It is produced twelve times, from six
+distinct sites, at three different PILs.
+
+## 106. Four fixtures each carried their own copy of the invented sequence `[V]` 2026-08-31
+
+Fixing the model (section 104) broke **17 of 148** ACCP tests, all the same way: `Expected: 1, But
+was: 0`. Every one of them drove the READ strobe and asserted a write.
+
+That is not 17 unrelated tests. **Four fixtures each held a private copy of "how a microword is
+written", and all four copies were the same invention** - gate on, shift eight words, issue
+`0x0018`, gate off, with the address as a "ninth gated word":
+
+```
+  Nd5000ControlStoreLinkTests.WriteOneMicroword
+  Nd5000LinkWindowTests            (inline, x4)
+  Nd5000RealControlStoreTests      (inline, x3)
+  Nd5000AttachedMachineTests       (inline, x3)
+```
+
+So the model was fitted to the invention four separate times, and the fixtures agreed with each
+other while all four disagreed with the ROM. A single shared helper would have made the sequence a
+thing you correct once; instead it was a thing you had to notice four times.
+
+Now in one place, `tests/AccpControlStoreSequences.cs`, expressed against delegates so the link
+tests and the bus-window tests use the SAME sequence through different transports.
+
+### Three findings that fell out of the rework
+
+**The "ninth gated word is the address" model was already retracted in the source and still live in
+a test name.** `Nd5000ControlStoreLink`'s own comments say it "was an artifact of the two latch
+bytes being folded" - dated 2026-08-04 - while
+`NinthGatedWord_IsTheAddress_NotMicrowordContent` went on asserting it for four weeks. The guard it
+provides is real (the address must not become word 0) and is kept; the name is now
+`AddressPhaseWord_DoesNotBecomeMicrowordWordZero`.
+
+**A clock pair really is lost at the phase boundary, and it is the ROM's doing.** `ClockPairs`
+dropped 80 to 79. ROM `0x7736` ends the address phase with a LONE MDCLK (`move.w D4,(A0)`,
+D4 = `0x0010`) with no ADCLK after it; the first MDCLK of the shift-out arrives as a same-phase
+repeat and is not a pair. The invented sequence had no trailing MDCLK to strand, which is the only
+reason it came to a round 80. **The expectation is now `16 + 8*8 - 1` with that written down - do
+not "restore" 80.**
+
+**One of my own new tests was green for the wrong reason.**
+`AmirckRead_DoesNotWriteTheControlStore` passed BEFORE the fix as well, because its isolated
+sequence never staged eight words, so the old commit path bailed out on a short buffer rather than
+on the strobe being a read. It is a valid guard now. It was not evidence then, and I nearly
+reported it as one half of a red-first pair.
+
+## 107. SSKIP: the real B30 sets Z=1 in EVERY termination, and the functional core follows the manual instead `[V]` 2026-08-31
+
+The schpar/sskip Z question was stuck after four failed attempts to settle it by static decoding.
+Executing it answered the SSKIP half in one run.
+
+Four probes through `MacroInstructionOracle.RunBoth` (microword B30 and functional `CpuND500` on
+the same vector), covering the manual's three non-trap terminating conditions:
+
+```
+  vector                        expected           MICROWORD B30        FUNCTIONAL CpuND500
+  corpus 36356, skip 3          I1=3  Z=1  [corpus]  I1=3 K=0  Z=1        I1=3 K=0  Z=0
+  all elements match            I1=4  Z=1  [manual]  I1=4 K=0  Z=1        I1=4 K=0  Z=1
+  first element differs         I1=0  Z=0  [manual]  I1=0 K=0  Z=1        I1=0 K=0  Z=0
+```
+
+**The real B30 answers Z=1 in all three.** The functional core answers 0 / 1 / 0 - which is exactly
+the manual's terminating-condition table, implemented faithfully. So `CpuND500` is the one to fix,
+and this is the same shape as the `TEST_BI` carry and the single-float `-0.0` sign: the microcode
+overrules ND-500 Reference Manual chapter 14.14 for this generation.
+
+The corpus agrees with the microword, which matters because it is an independent source - if the
+corpus had been generated from `CpuND500` it would have said Z=0.
+
+### I nearly published this off ONE vector, and it would have been the wrong fix
+
+The first run had only the corpus vector: microword Z=1, functional Z=0. The obvious patch is
+"invert the different-element arm". With the other two probes the answer is not one arm at all -
+Z does not encode the outcome here, so **the whole three-way branch is wrong, not one third of it.**
+
+### And the constant answer had to be checked before it could be believed
+
+Z coming back 1 for all three inputs has two readings, and they look identical in a log: the flag
+genuinely does not depend on the outcome, or **the microword never ran the scan and 1 is a
+leftover**. That is the "structurally blind instrument" case, and no amount of re-running settles
+it - the same wrong number just arrives again.
+
+What settles it is a value that MUST differ between the vectors. `I1` came back **3, 4 and 0**,
+correct on both engines, so the scan really executed and stopped in the right place each time. The
+diagnostic now prints `I1` and `K` beside the flags for exactly that reason, with the reason
+written next to it.
+
+### Scope, stated narrowly
+
+Three of the manual's four terminating conditions. The fourth - "outside source", which raises a
+DR trap - is NOT tested here, so this says nothing about it. `K` was 0 in all three.
+
+### SCHPAR is still open, and its blocker is named
+
+The SCHPAR vector still does not retire: parked at CS `0o10357` after 4096 microwords.
+`MICRO-5800-B30.LABE` gives the shape - `SCHPAR_MODE` @`010352` dispatches four arms (`M00` @`010356`,
+`M10` @`010365`, `M20` @`010374`, `M30` @`010403`) which all converge on `SCHPAR_END` @`010361`.
+`SCHPAR_M01` @`010357` is referenced from `010363` and `SCHPAR_M02` @`010362` from `010360`, so
+`M01`/`M02` is the per-element scan loop and the machine is going round it without ever reaching
+the exit. **My earlier "premise broken: 0o10364 jumps to 0o10361, so it is a LOOP body" was reading
+the shared EXIT as a loop.** The harness is not supplying whatever the mode dispatch needs. Fix the
+setup before reading anything into SCHPAR's flags.
+
+## 108. hw-accp round: `@nd-500` stalls before any command, and I have NO baseline to attribute it to `[V]` 2026-08-31
+
+First run of the oracle round after the control-store fix:
+`RETROCORE_ND5000_ROUND=hw-accp` (real 68000 ACCP firmware, functional `CpuND500`), same pack,
+same test. **Passed in 5 m 36 s** - against 30 m 46 s for the macro round.
+
+That speed is the first thing to distrust, and the log says why: the test is tagged
+`octobus-shortbringup-no-monitor` and the ladder reads
+
+```
+  @set-avail   (OK)
+  @nd-500      (STALL)
+```
+
+`@nd-500` never reaches the monitor. Nothing after it ran, which is why the run was quick and why
+the test still "passed" - it took the no-monitor path. **A green result that measured nothing.**
+
+### What I will NOT claim
+
+**I have no pre-change `hw-accp` baseline**, so I cannot say whether this stall is old, new, or
+changed by the control-store fix. Saying "the fix did not help the hw round" would be an
+attribution I have not earned. What I can say:
+
+ - the fix is proven at unit level: 148/148 ACCP tests, and the live `LOAD-CONTROL-STORE` trace now
+   matches ROM `0x73B2` / `0x741E` instruction for instruction;
+ - the MACRO round cannot be affected by it, because it uses the emulated ACCP handlers in
+   `OctobusND5000Station`, not `Nd5000ControlStoreLink`;
+ - `@nd-500` stalling is upstream of any control-store activity - no command was issued at all.
+
+### What the run does say, and it is not nothing
+
+```
+  5MSINIT@0o111100=0x0008  5CHALIVE=True 5ALBUF=False
+      -> OK: 4 SAMSON CPU(s), 1 alive -> ND-500 subsystem initialised.
+  servicer MICFU trace [MicroVersion=0x2E9A CpuParameter=0x03E1]      (EMPTY - no MICFU processed)
+  MON answer delivery  answers=0 inserted=0                           (upstream of this instrument)
+  MON restart path     posted=0 seen=0 taken=0
+  ext-block@0x007FFFF6: X5BEX=0000,0000 X5ACT=0001 X5PRO=0000
+```
+
+SINTRAN believes the subsystem initialised - one alive SAMSON CPU - and then not one MICFU is ever
+processed. So the stall sits between "subsystem initialised" and "first message".
+
+**The sharpest single line in the log is a mailbox address mismatch:**
+
+```
+  discovered mailbox   header=0x007FFEF6  extBlock=0x007FFFF6
+  CARVED mailbox       5FPMAILBOX=0x0851(page 2129) 5NPMAILBOX=8 X500DF=0xFFFF
+                       -> X5ACT_carved=0x0042890A   vs CS-derived X5ACT=0x00800000
+                       MISMATCH (delta 0x3D76F6)
+  5MBBANK PROBE        5MBBANK@0o4654=0x0000 (0) | 5FPMAILBOX=2129
+                       -> XMSINIT recompute=0x0021 (33)  MISMATCH
+```
+
+`0x00800000` is exactly 8 MB and the "discovered" mailbox sits just under it, while the CARVED
+address from SINTRAN's own `5FPMAILBOX` is `0x0042890A`. A discovery that lands on the top of the
+address space is the shape of a scan that found the end of memory rather than a mailbox.
+
+`MEMORY.md` already warns that ADRZERO moves with ND-100 memory size and says to check it before
+believing any bring-up result. `ADRZERO@0o52047` reads `0x0000` on the first probe and `0x0840`
+(2112, the expected value) on the later one - so the early probe ran before it was set, and the two
+readings are a sequencing artifact rather than a contradiction. Worth not misreading as one.
+
+### Next on this round, stated so it is not re-derived
+
+Settle which mailbox address is right BEFORE instrumenting anything further. The carved value comes
+from SINTRAN's own resident cells; the discovered one comes from our scan. They cannot both be the
+mailbox, and every measurement downstream of the wrong one is measuring the wrong object -
+failure-taxonomy #19, "correct about the wrong object", which survives every check that verifies
+the value.
+
+## 109. The mailbox mismatch is settled by arithmetic: the OFFSET is right and the BASE is wrong `[V]` 2026-08-31
+
+Section 108 left two candidate mailbox addresses and said to settle which before instrumenting
+anything else on the hw-accp round. No run needed - the numbers already in that log do it.
+
+### The carved address is consistent, to the byte
+
+```
+  5FPMAILBOX = 0x0851 = 2129            ND-100 page number, read from SINTRAN's own resident cell
+  ADRZERO    = 0x0840 = 2112            the ND-100 page that IS ND-500 physical 0
+                                        -> the mailbox sits 17 pages above ND-500 physical 0
+
+  an ND-100 page is 1024 words x 2 bytes = 2048 bytes
+  2129 x 2048                     = 0x00428800     the mailbox page base
+  X5ACT_carved                    = 0x0042890A
+  offset into the page            = 0x10A = 266 bytes
+```
+
+2048 bytes per page is the only one of the three plausible page sizes that lands anywhere near:
+1024 leaves a remainder of `0x21450A` and 4096 overshoots into negative. So the carved value is
+`5FPMAILBOX x 2048 + 0x10A`, exactly.
+
+### And it lands where the macro round measures real traffic
+
+The harness's own mailbox-neighbourhood window is `[0x00428000, 0x0042D000)`:
+
+```
+  X5ACT_carved            0x0042890A   INSIDE
+  macro-round cell watch  0x00428E3C   INSIDE     (627 real MICFU writes measured, section 105)
+  discovered header       0x007FFEF6   outside
+  discovered extBlock     0x007FFFF6   outside
+  CS-derived X5ACT        0x00800000   outside
+```
+
+`0x00800000` is **8 MB exactly** - the top of ND-100 memory, not a mailbox.
+
+### The tell, and it is not subtle once seen
+
+```
+  0x00800000 - 0x007FFEF6 = 0x10A = 266
+  carved offset into its page       = 0x10A = 266
+```
+
+**The same 266.** The discovery computes the right offset and applies it to the wrong base, hanging
+the mailbox off the top of memory instead of off `5FPMAILBOX`. That is why the result looks
+structured rather than random, and why it survived: the internal spacing is right
+(`extBlock - header = 0x100`), every field decodes, and nothing about the VALUES looks wrong.
+
+Failure-taxonomy **#19, correct about the wrong object** - the value and the read are both right and
+only the identity of the thing is wrong, so it passes every check that verifies the number.
+
+### What this means for the hw-accp round
+
+`ext-block@0x007FFFF6: X5ACT=0001` in section 108 was read off the wrong object, so it says nothing
+about whether an activation is pending. Every measurement taken through the discovered address on
+that round has to be re-read against `0x0042890A` before it means anything.
+
+Note this does NOT explain the `@nd-500` stall by itself - SINTRAN writes its own mailbox from its
+own cells and does not consult our discovery. It explains why our INSTRUMENTS on that round report
+what they report.
+
+**The fix is already named in `MEMORY.md`** (`nd5000-timeout-convergence`): use the deterministic
+`5FPMAILBOX`-derived address, not the `0xFFFF -> 0` sniff. That note was written on a different
+occasion and is being re-learned here, which is its own small lesson.
+
+## 110. The corpus's divide-by-zero rows are WRONG, and only 24 of the 208 were our bug `[V]` 2026-08-31
+
+The full corpus finally ran. Denominator first, because a failure count is not quotable without one:
+
+```
+  Loaded 40082   Executed 36427   Passed 36161   Failed 266   NegativeOK 3655
+  36161 + 266 + 3655 = 40082   <- reconciles exactly, nothing silently dropped
+  Pass rate 99.27%
+```
+
+The gate is `[Explicit]` on the whole `TestComprehensiveExportAndRun` fixture and it is DELIBERATE -
+the comment says `RunConformanceCorpus` news a 16 MB machine per case with no failure limit and
+exceeds the CI blame-hang timeout. A default `dotnet test` skips it, which is why a green ND-500
+suite says nothing about these rows.
+
+### 266 failures, one family
+
+```
+  Div      208    every one a divide-by-zero        78% of the whole gap
+  Sfilln    12
+  Div4 / div3 / div2 / mul2 / add2   ~17
+  long tail  1-4 each
+```
+
+### The trap I nearly walked into
+
+All 208 fail the same way: the corpus expects the destination UNCHANGED (`i1` keeps the dividend)
+with `st=0x1000`; we write a saturated quotient with `st=0x1080`, the extra bit being S. The obvious
+move is to stop writing the destination.
+
+**`Divide.cs` saturates deliberately, and its comment cites the microcode** - the divide-by-zero
+path branches on dividend sign at `@024133`, positive to `@024134` (max positive, S=0), negative to
+`INTDN @024136` (most negative, S=1), traced `-12/0 -> X1=0x80000000 S=1` and `+5/0 -> X1=0x7FFFFFFF
+S=0`, adjudicated 2026-07-26. So this was a prior microcode adjudication against a corpus
+expectation, and patching either to satisfy the other is guessing.
+
+As the peer put it precisely: the corpus constrains what the destination should CONTAIN; the
+architectural claim is that the instruction never writes it at all. **Those are different
+propositions, and a clamp that satisfies the first can still be wrong about the second.**
+
+### Asked the B30, with vectors chosen so the two answers cannot be confused
+
+`DivideByZeroOracleDiagTests`, byte width, divisor 0:
+
+```
+  dividend    microword B30      CpuND500 (before)   corpus expects
+  0x00        0x00   S=0         0x7F  S=0           0x00  <- corpus and B30 AGREE, we were wrong
+  0x64        0x7F   S=0         0x7F  S=0           0x64  <- corpus alone, and it is wrong
+  0xAA        0x80   S=1         0x80  S=1           0xAA  <- corpus alone, and it is wrong
+  0xFF        0x80   S=1         0x80  S=1           0xFF  <- corpus alone, and it is wrong
+  0x7F        0x7F   S=0         0x7F  S=0           0x7F  <- CANNOT DISCRIMINATE, labelled as such
+```
+
+**The real B30 saturates.** The 2026-07-26 adjudication holds and the corpus is wrong for those
+rows. `0x64` is the load-bearing vector precisely because it is not a saturation value at any width,
+so "unchanged" and "saturated" are different numbers there; `0x7F` is kept in the probe and labelled
+inert, because it predicts the same answer under both hypotheses and must never be counted as
+confirmation.
+
+### But one subset discriminates the OTHER way, and that one was ours
+
+A **zero dividend** is not saturated - it stays 0, and S stays clear. The recurrence says why: the
+non-restoring algorithm builds the quotient by shifting the dividend left, so with a zero dividend
+nothing ever becomes non-zero. We were saturating unconditionally and turning `0/0` into `0x7F`.
+
+Here the corpus and the microcode AGREE against us - two independent sources - which is what makes
+it the safe fix. Split of the 208:
+
+```
+   24  corpus expects 0, we gave 0x7F     OUR BUG      fixed
+  176  corpus expects the unchanged dividend, B30 says saturate    THE CORPUS IS WRONG
+```
+
+Fixed in `Divide.cs`; both engines now agree on all five vectors.
+
+### What is NOT settled, and must not be quietly assumed
+
+Whether real HARDWARE suppresses the destination write when the trap fires. The microword CPU
+executes the real microcode and the microcode writes the register, so "the microcode writes it" is
+solid - but write-suppression on a precise trap would live in hardware, outside the microcode, and
+nothing here can see that. If it does suppress, the corpus is right and both our engines are wrong
+together, which is exactly the case two agreeing engines cannot detect.
+
+**So do NOT mass-regenerate those 176 corpus rows.** The corpus is a shared fixture with nd500x, and
+regenerating it from `CpuND500` would bake our answer in and destroy the only independent source
+that currently disagrees.
+
+## 111. SFILLN: the H and W corpus rows are COPIES of the BY row `[V]` 2026-08-31
+
+Second cluster in the corpus tail, 12 rows. It needed no oracle to spot and the oracle confirmed it.
+
+`Sfilln_BY_Fill4At2`, `Sfilln_H_Fill4At2` and `Sfilln_W_Fill4At2` assemble three DIFFERENT
+instructions - a byte, halfword and word fill of 4 elements from index 2 - and carry
+**byte-identical expected final memory**:
+
+```
+  all three widths:   DE DE 42 42 42 42 DE DE      at 0x2100..0x2107
+```
+
+Four elements of width 1, 2 and 4 cannot all touch the same four bytes. The generator varied the
+INSTRUCTION and not the EXPECTATION.
+
+Which row is right settles itself: **BY passes, H and W fail** - 4 H rows and 8 W rows, exactly the
+12. The BY expectation is correct and the other two inherited it.
+
+### The oracle confirms it
+
+`StringFillOracleDiagTests` runs all three vectors through the microword B30 and the functional
+`CpuND500`, comparing registers, flags and all EIGHT buffer bytes:
+
+```
+  Sfilln BY   I2=6 both   ENGINES AGREE
+  Sfilln H    I2=6 both   ENGINES AGREE
+  Sfilln W    I2=6 both   ENGINES AGREE
+```
+
+The whole buffer is checked, not just the bytes expected to move - a fill at the wrong offset shows
+up only in the bytes nobody thought to look at.
+
+### What the corpus CANNOT answer here, and why
+
+Two questions remain genuinely open, and the reason is worth stating: **the only row that passes is
+the one width where they are indistinguishable.**
+
+ - is the start index in ELEMENTS or in BYTES? At BY width those are the same number.
+ - is the fill value written element-wide, so an H fill of `0x0042` lays down `0x00 0x42`?
+
+Our core answers "elements" and "element-wide", and the B30 agrees with it, which is the standard
+this project uses. But no VECTOR in the corpus discriminates them, so the corpus can neither confirm
+nor refute those two choices - it can only be wrong about H and W, which it is.
+
+### Running total of the corpus tail
+
+```
+  184  divide-by-zero   corpus wrong (section 110)
+   12  SFILLN H and W   corpus wrong (this section)
+  ---
+  196  of 242 = 81% of the remaining failures are DEFECTS IN THE FIXTURE, not the engine
+```
+
+**Still do not regenerate.** The corpus is shared with nd500x and regenerating from `CpuND500` would
+bake our answers in - including the two undiscriminated choices above, which would then look
+confirmed while nothing had ever tested them.
+
+## 112. The 16 "documented overflow" rows expect an IGNORABLE trap that nothing enables `[D]` 2026-08-31
+
+Third cluster in the corpus tail. Sixteen rows, all failing on exactly one line -
+`Expected trap 'IntegerOverflow' but no trap occurred` - and nothing else:
+
+```
+  4  /_W_documented_minDividedByMinusOne          MIN / -1
+  3  add2_{BY,H,W}_documented_maxplus1            MAX + 1
+  3  div2_{BY,H,W}_documented_minDividedByMinusOne
+  3  div3_{BY,H,W}_documented_minDividedByMinusOne
+  3  mul2_{BY,H,W}_documented_minTimesTwo         MIN x 2
+```
+
+These are genuine overflow conditions and the engine does compute them: `Add2.cs` calls
+`cpu.TrapIntegerOverflow` on overflow, and every sibling does the same. So the question is not
+whether we notice the overflow - it is whether the trap is DELIVERED.
+
+### Integer overflow is an IGNORABLE trap, by our own trap table
+
+`CpuND500.Trap.cs` classifies it verbatim: *"Integer Overflow (Bit 9) - Ignorable"*, and the header
+defines the class as *"May be disabled, no effect on program execution"*. Delivery runs through the
+local-trap-enable gate carved from the control store at `011034-011037`:
+
+```
+  011034  AL#21 := TE                  the LOCAL TRAP ENABLE REG
+  011035  AL#21 |= 0xC0000000          bits 31,30 forced always-enabled
+  011036  AL#21 &= 0xFFFFFE00          bits 8..0 forced NEVER local
+  011037  AL#21 &= S1                  AND with the PENDING trap bits
+  011064  zero -> report to the ND-100 ; non-zero -> dispatch to the handler
+```
+
+Bit 9 survives the `0xFFFFFE00` mask, so integer overflow CAN be locally enabled - and is delivered
+only if `TE` bit 9 is set. **Every one of these sixteen vectors starts with `st: 0` and establishes
+no trap-enable at all.** So they ask for delivery of an ignorable trap that nothing enabled.
+
+### What I have NOT shown, and the experiment that would settle it
+
+Graded `[D]`, not `[V]`, on purpose. I have shown the corpus expectation is inconsistent with the
+vectors' own initial state. I have NOT shown that our engine SUPPRESSES at the enable gate rather
+than failing to deliver for some unrelated reason - and those two look identical from a corpus row.
+If ignorable traps are never deliverable at all, that is a real defect and this cluster is hiding it.
+
+**The decisive experiment is one line:** set `TE` bit 9 and re-run a single `add2_BY_maxplus1`
+vector. Trap fires -> the gate works, the engine is right, the corpus is wrong. Trap still absent ->
+the engine cannot deliver ignorable traps and 16 rows are the symptom, not the noise.
+
+This is memory #11b applied: **ask the trap's CLASS before instrumenting it.** For an Ignorable
+trap, absence proves nothing on its own - which is exactly why this cluster cannot be closed by
+looking harder at the corpus.
+
+### Running total of the corpus tail
+
+```
+  184  divide-by-zero    corpus wrong                    [V]  section 110
+   12  SFILLN H and W    corpus wrong                    [V]  section 111
+   16  overflow traps    corpus inconsistent with itself [D]  this section, experiment named
+  ----
+  212  of 242 = 88% accounted for; 30 rows still uncharacterised
+```
+
+### 112a. The overflow experiment ran, and the guard I built into it caught my own mistake `[V]` 2026-08-31
+
+Section 112 named a one-line experiment. It took three attempts and each failure was instructive.
+
+**Attempt 1 - the instruction was not the instruction.** I hand-assembled `BY ADD2 I1,I2` as
+`FD 10 C1 C2`. Both runs came back silent, which is precisely the "ignorable traps are
+undeliverable" answer I was testing for. It was wrong: the paired detection assertion showed
+**O clear in both runs** - nothing had overflowed, because nothing had executed as intended. The real
+bytes are `FC 17 D0 D1`, read out of the corpus row.
+
+**That guard was the whole value of the test.** Silence for the right reason and silence because
+nothing ran are the same observation in the delivery result. Asserting detection SEPARATELY and
+FIRST is what separated them - and without it I would have published a fabricated defect.
+
+**Attempt 2 - the enable is not sufficient.** With the real bytes, O is set and the trap IS raised
+(`LastTrapReason` = "ADD2 integer overflow"), but setting `OTE1` bit 9 changed nothing. Reading the
+gate explains why - delivery needs FOUR conditions, not one:
+
+```
+  TrapDispatchEnabled  AND  locallyEnabled  AND  regs.THA != 0  AND  NOT pcb.InsideTrapHandler
+```
+
+`THA` was 0, so there was no vector table to dispatch through. "The enable changed nothing" was true
+and meant nothing.
+
+**Attempt 3 - a raw THA is still not enough, and here I stopped.** Installing `THA` plus a non-zero
+handler slot for trap 9 still did not dispatch. `GetTrapHandlerAddress` resolves through the
+domain/DIT and a TRANSLATED vector read, which a bare instruction harness does not set up.
+
+### What is established, and what is not
+
+**Established `[V]`:** the overflow is detected, the trap is raised, and it is correctly withheld
+when nothing enables it. So "no trap occurred" is RIGHT for all sixteen corpus rows.
+
+And they cannot be otherwise: the corpus register model contains no `OTE1/OTE2/MTE1/MTE2` - its own
+generator says so - and no `THA` either. **A corpus row is structurally incapable of setting up
+delivery, so it can never legitimately assert that an ignorable trap was delivered.** That is a
+stronger statement than "these 16 rows are wrong": no row of this shape can ever be right.
+
+**NOT established `[OPEN]`:** whether this engine would deliver given a fully configured domain.
+Attempt 3 failed for an unidentified reason. The test says so in its own remarks rather than
+implying coverage it does not have - it is named
+`OverflowTrap_IsRaised_ButNotDeliveredWithoutEnableAndHandler`, which is exactly what it checks.
+Closing it needs a DIT-backed domain with a real Start Address Vector.
+
+### Corpus tail after this
+
+```
+  184  divide-by-zero    corpus wrong                     [V]  section 110
+   12  SFILLN H and W    corpus wrong                     [V]  section 111
+   16  overflow traps    corpus CANNOT express delivery   [V]  section 112 + this
+  ----
+  212  of 242 = 88%; 30 rows still uncharacterised
+```
+
+## 113. The rest of the corpus tail: privilege, a deliberate divergence, and what is actually left `[V]` 2026-08-31
+
+### 9 rows: privileged instructions run without privilege
+
+`cpgu cwip dcc dctsb dmof dmon pctsb pmof pmon` all fail with **`PC` still at `0x1000`** - the
+instruction never advanced. They are not missing: every one has an implementation under
+`Instructions/SYSTEM/`, and every one opens with
+
+```csharp
+    if (!regs.ST.PIA) { cpu.TrapIllegalInstruction(regs.PC, "PMON requires privileged mode"); }
+```
+
+Every vector starts `st: 0`, so PIA is clear and the refusal is correct. `dcc` makes it explicit -
+its row reports *"Unexpected trap occurred: 'IllegalInstruction'"*, which is our correct refusal
+being read as a surprise.
+
+**This one differs from the trap-enable cluster in a way worth keeping straight.** PIA is ST1 bit 1,
+so the corpus CAN express it through the `st` field - unlike `OTE`/`THA`, which have no slot at all.
+So these rows are not structurally impossible, merely wrong: they ask an unprivileged program to
+execute privileged instructions. Fixable by seeding `st` with PIA; not fixable for the trap rows.
+
+### 2 rows: TSET with a register operand
+
+`BY TSET I1` - our core raises `TrapIllegalOperand` ("TSET with register/constant operand (memory
+operand required)"). Test-and-set is a memory lock primitive, so a register operand looks like a
+generator artefact rather than a real encoding. `[OPEN]`: whether the real machine advances PC on an
+illegal-operand trap is a separate question this does not answer.
+
+### 1 row: Test_F_NegZero fails BY DESIGN - do not "fix" it
+
+```
+  Test_F_NegZero: F TEST A1
+     ST mismatch: expected 0x00000000000000A0, got 0x0000000000000020
+```
+
+`0xA0` is Z (bit 5) + S (bit 7); we give Z only. **That is exactly the change Ronny adjudicated on
+2026-08-30** (plan item 5): for SINGLE float, the real B30 computes S as "sign AND the SRF4-masked
+value is non-zero", so `-0.0` tests as non-negative and S stays clear. Manual 10.11 says the raw
+sign bit, and the microcode overrules it.
+
+**So this corpus row is a KNOWN, DELIBERATE divergence and must stay red until the corpus is
+regenerated.** Anyone triaging the tail later will find a one-row float failure that looks trivially
+fixable; reverting it would undo a decision made from the microcode with the user's adjudication.
+
+### Where the corpus tail stands
+
+```
+  184  divide-by-zero        corpus wrong, B30 verified                [V]  s110
+   12  SFILLN H and W        corpus wrong, copies of the BY row        [V]  s111
+   16  overflow traps        corpus CANNOT express delivery            [V]  s112/112a
+    9  privileged SYSTEM     corpus does not grant PIA (but could)     [V]  this section
+    2  TSET register operand generator artefact, PC question [OPEN]    [D]  this section
+    1  Test_F_NegZero        DELIBERATE divergence, keep it red        [V]  this section
+  ----
+  224  of 242 = 93% accounted for
+   18  genuinely uncharacterised: Chain 4, Div4 4, Riom 2, Scopt 2, Sspan 2, Sscan 1,
+                                  Schpar 1, and 2 others
+```
+
+**The headline for item 9 has not moved and is worth repeating: almost none of this is engine bugs.**
+Of 266 failures at the start of the day, exactly 24 were ours - the zero-dividend divide - and they
+are fixed. The rest is a fixture that disagrees with the microcode, cannot express the machine state
+its own expectations require, or contains rows copied between widths.
+
+## 114. Item 1's framing was wrong AGAIN - 3SWMESS is not supposed to reach the CPU at all `[V]` 2026-08-31
+
+Section 105 corrected item 1 from "one 3SWMESS, late" to "twelve, from six sites". The plan then
+asked why twelve postings produce no progress. **That question is also misdirected**, and the
+servicer trace from the same run says so in one line.
+
+### What the CPU actually serviced in the whole place-domain run
+
+```
+  262  MICFU=0x01  3RMICV   read-micro-version
+   13  MICFU=0x19  PHYSWR   physical-write, 4 bytes each
+    1  MICFU=0x0A  CACHE    cache-clear
+  ---
+    0  MICFU=0x05  3SWMESS
+```
+
+**Three distinct micro-functions, and 3SWMESS is not one of them - which is CORRECT.**
+`Nd5800MicfuDispatchTableTests` proves `0o5` routes to `MSG_ILLEG` on this generation: the B30 does
+not implement 3SWMESS. So the twelve stamps in SWPINFO are the ND-100 driver's OWN routing marker
+and were never going to become a CPU message. Looking for their effect on the ND-500 was looking in
+a place the architecture forbids them to reach.
+
+`MEMORY.md` records exactly this under the dispatch-table entry - *"the MICFU=5 that LNEWSWAP reads
+out of SWPINFO is a marker for the ND-100 driver's own routing, not a command to the CPU"* - written
+when I carved the table earlier the same day, and not applied to item 1 until now.
+
+And the 262 3RMICV are not activity: the octobus skill states plainly that 3RMICV is the WATCHDOG
+heartbeat and *"a burst of 3RMICV means TIME PASSED, nothing more"*.
+
+### So what place-domain really does, and where it really stops
+
+One cache-clear, then twelve words scattered into ND-500 LOW PHYSICAL memory, then nothing but
+watchdogs. The twelve, in issue order, all sourced from the same ND-100 staging cell `0x0000CC00`:
+
+```
+    1-3   0xBC 0xC0 0xC4        three words, bytes 0xBC..0xC7
+    4     0xB6                  one word,    bytes 0xB6..0xB9      (0xBA..0xBB never written)
+    5-12  0x96 0x9A 0x9E 0xA2 0xA6 0xAA 0xAE 0xB2
+                                EIGHT CONTIGUOUS words, bytes 0x96..0xB5
+    13    0xA6 again            the 5th word of the run, REWRITTEN
+```
+
+Twelve distinct addresses, thirteen writes. The eight-word contiguous run is the shape to chase -
+low ND-500 physical memory is where the register block and PST live, per the MEMORY-CONFIGURATION
+command's own description.
+
+### One thing the plan says that this run does NOT show
+
+The plan states that this block is a *"write-then-read-back VERIFY"*. **There is not a single
+PHYSRD in this run** - the census above is the whole trace. Either the verify belongs to
+`start-swapper` and not `place-domain` (they are different commands and that is the likely answer),
+or the plan's claim needs re-sourcing. Do not repeat "the verify completes and passes" about
+place-domain on the strength of this run.
+
+### The real question for item 1, third and hopefully final formulation
+
+Not "who writes 3SWMESS" (section 73, wrong). Not "why do twelve postings make no progress"
+(section 105, wrong - they were never meant to reach the CPU). It is:
+
+**what are the twelve words SINTRAN scatters into ND-500 physical `0x96..0xC7`, and what does it
+wait for after writing them?** Everything after that point is watchdog.
+
+### Method note
+
+Three formulations, three corrections, and each correction came from an instrument that was already
+in the run - the cell watch for the first, the servicer census for this one. The census was printed
+in every capture for weeks. **Read the whole report before forming the question, not just the
+section the current theory points at.**
+
+## 115. ANSWERED - ND-500 physical `0x96..0xC7` is the DOMAIN INFORMATION TABLE's trap-enable block `[V]` 2026-08-31
+
+The deep-dive reference lists this as open item 7 and calls it *"the live blocker, not a protocol
+gap"*; the 2026-07-28 MICFU reference ends on it under a heading that says **do NOT guess it**. It
+has been open since July. It is answerable from data already in the repo.
+
+### The twelve words are PCB fields, and every one lands on a field START
+
+`struct pcb` in the real ND-500 Unix kernel (`E:\Dev\Ronny\NDIX-C\kernel\MASTER\machine\pcb.h`,
+`MAXSEG 32`) laid out packed:
+
+```
+  written   field        written   field
+  0x96      pcb_ote1     0xB2      pcb_temm2
+  0x9A      pcb_ote2     0xB6      pcb_tha
+  0x9E      pcb_cte1     ----      (0xBA pcb_md, 0xBB pcb_ith - see below)
+  0xA2      pcb_cte2     0xBC      pcb_tos
+  0xA6      pcb_mte1     0xC0      pcb_ll
+  0xAA      pcb_mte2     0xC4      pcb_hl
+  0xAE      pcb_temm1    0xC8      pcb_pia   <- FIRST byte after the block ends at 0xC7
+```
+
+**Twelve writes, twelve field starts.** So the block is:
+
+> **Own / Child / Mother Trap Enable, the Trap Enable Modification Mask, the Trap Handler Address,
+> and the Top-of-Stack and Low/High Limit registers - i.e. the trap-enable and domain-limit section
+> of the Domain Information Table for domain 0.**
+
+The DIT is 256 bytes per domain and KDOM is domain 0, so domain 0's table sits at physical
+`0x00..0xFF` and these offsets are absolute addresses.
+
+### The GAP is the sharpest evidence, and it was free
+
+`0xBA..0xBB` is never written. Those two bytes are `pcb_md` and `pcb_ith` - **the only two
+single-BYTE fields anywhere in the written span.** A 4-byte `PHYSWR` cannot express them, so
+SINTRAN skips them. A layout guess would have to explain that hole; this one predicts it.
+
+### Three sources, and one of them is genuinely independent
+
+ 1. the `pcb.h` struct, laid out by hand;
+ 2. our own `CpuND500.Domain.cs` constants - `DIT_OTE1_OFFSET = 150 (0x96)`,
+    `DIT_MTE1_OFFSET = 166 (0xA6)`, `DIT_THA_OFFSET = 182 (0xB6)`, `DIT_TOS = 188 (0xBC)`,
+    `DIT_LL = 192 (0xC0)`, `DIT_HL = 196 (0xC4)`, `DIT_PIA = 200 (0xC8)` - every one matching;
+ 3. **the live capture itself**, which is the independent one. (1) and (2) share ancestry -
+    our constants were surely derived from that header - so they corroborate each other only
+    weakly. The July write pattern was recorded before any of this was asked and matches both.
+
+### What it means, and the convergence nobody was looking for
+
+`place-domain` is **installing the trap configuration for the domain it is about to run** - trap
+enables, the trap-handler vector, the stack pointer and the memory limits.
+
+And those are the SAME three registers this session spent the afternoon on from the other end.
+Section 112a could not make an ignorable trap deliver because `OTE`/`MTE`/`THA` were unset and
+`GetTrapHandlerAddress` resolves through the domain/DIT; the corpus cannot express them at all.
+**Here is SINTRAN writing exactly those fields into exactly that table.** The corpus question and
+the place-domain blocker are the same question approached from opposite directions.
+
+### The next question, which is now a specific one
+
+Not "what is this block". It is: **after SINTRAN writes the DIT trap configuration, what does it
+wait for - and does our engine LOAD `OTE`/`MTE`/`THA` from the DIT when the domain is entered?**
+If it does not, the configuration SINTRAN just installed is inert, which would explain both the
+place-domain silence and the undeliverable ignorable trap.
+
+### Caveat carried forward from the 2026-07-28 file, still unretired
+
+Whether `addrA` on the copy family should resolve to ND-500 LOCAL memory rather than through
+`Nd500AddressBase` into the MPM window. **A self-consistent round-trip hides the difference, so the
+passing verify does NOT prove the target is right.** Knowing what the block IS does not settle
+where it landed.
+
+## 116. The microcode DOES load TE from the DIT on context load - and our engine does not `[V]` 2026-08-31
+
+Section 115 ended on a specific question: does the engine load `OTE`/`MTE`/`THA` from the DIT when a
+domain is entered? Both halves now have answers, and they differ.
+
+### Our engine: THA yes, OTE/MTE no
+
+`CpuND500.Domain.cs`, `LoadDomainStateFromDIT`:
+
+```csharp
+    regs.TOS = ReadDIT_TOS(domain);
+    regs.LL  = ReadDIT_LL(domain);
+    regs.HL  = ReadDIT_HL(domain);
+    regs.THA = ReadDIT_THA(domain);
+    // and nothing else
+```
+
+Four of the five hardware-relevant fields. **`regs.OTE1/OTE2/MTE1/MTE2` are never loaded from the
+DIT anywhere in the codebase** - the only assignments are the `.DOM` file header
+(`CpuND500.Loader.cs:2059-2062`), the debug register API, and the process register block.
+`ReadDIT_OTE` and `ReadDIT_MTE` exist and are used by the propagation logic, but never to populate
+the registers.
+
+That matters because the local-trap-enable gate reads the REGISTERS, deliberately and correctly -
+its own comment cites microcode `011034` taking TE from `'A,XD,TE`, a register, and records that a
+DIT read placed in that gate faulted and swallowed a trap. So the gate is right; nothing fills what
+it reads.
+
+### The microcode: TE IS loaded, in CNTXTLOAD, from DIT reads
+
+The context-load tail, right after the PIA re-derivation that `MEMORY.md` already describes:
+
+```
+  015075   ALU,OR  A,DATA B,SC4 D,SC4   TE,ALU,LOAD   RD,PHYS ADACT   (DPA-relative byte read)
+  015076   ALU,XOR TYP,BY A,DATA B,SC14 D,SC7          RD,PHYS
+  015077-015102   derive MIC,STS - the PIA bit-1 overwrite
+  015103   ALU,XOR A,SC4 B,SC14 D,IDU,TE
+  015104   ALU,XOR A,SC4 B,SC14 D,MIC,TE
+```
+
+`XOR` against `SC14` is this microcode's MOVE idiom, so `015103/015104` are **TE := SC4**, and SC4
+was accumulated at `015075` by OR-ing in bytes read from the domain table. **Context load populates
+the TE register from the DIT.**
+
+### Two method notes, both about searches that lie
+
+**`D,TE` found ZERO writes.** The mnemonic is `D,MIC,TE` and `D,IDU,TE` - TE is written through two
+destination namespaces. A wrong pattern returned a confident empty set that read as "the microcode
+never writes TE", which is the exact shape that cost this session an hour on `MOVE.W #imm,(An)`
+earlier. What caught it was enumerating the FORMS (`grep -oE ... | sort | uniq -c`) instead of
+testing one guess.
+
+**The other four TE writes are CLEARS, not loads** - `014607`, `014610`, `017744`, `017745` all use
+`ALU,FZRO` (force zero). Only the CNTXTLOAD pair carries a value. Counting "6 writes to TE" and
+stopping would have found the right number and the wrong meaning.
+
+### Scope, stated narrowly
+
+Read from the RENDERED `MICRO-5800-B30.md`, which is reliable for MNEMONICS and **is not** for
+`ORCON`/`MARG` - the file's own inline annotation on `015075` says so, flagging its `IX*2 ORCON=0x08`
+as a mis-split of raw `MARG=0x48`. So: *that* TE is loaded from DIT reads is `[V]`; exactly WHICH
+DIT offsets feed SC4 is `[OPEN]` and needs a raw decode.
+
+### The candidate defect, not yet applied
+
+`LoadDomainStateFromDIT` should probably also load `OTE1/OTE2/MTE1/MTE2`. **Not changed yet, on
+purpose:** the exact source offsets need the raw decode above, and trap-enable affects delivery
+everywhere, so this is not a one-line patch to make on a rendered listing. But it is now a specific
+hypothesis with a named experiment rather than an open question - and it would explain BOTH
+section 112a's undeliverable ignorable trap and place-domain going quiet after installing a trap
+configuration the engine then ignores.
+
+## 117. RAW decode confirms the DIT layout a third time - and corrects my own section 116 `[V]` 2026-08-31
+
+Section 116 was read off the RENDERED `MICRO-5800-B30.md`, which the project rules say never to
+trust for `ORCON`/`MARG`. Ran the raw decode instead - and the test for it already existed,
+`MicrowordDecodeTests.Dit_AddressingPath_RawDecodeDump`, named in the `.md`'s own inline annotation.
+**"Check the existing machines before building anything" applied to a decoder I was about to
+write.**
+
+### The raw MARG values, and what they address
+
+`DPA = pcb_base + CED*256 + 0x80`, so a DPA-relative `MARG` is `base + 0x80 + MARG`:
+
+```
+   word     MARG   absolute   field       note
+  0o15072   0x16     0x96     pcb_ote1    address setup, MemOp=0 (no read)
+  0o15073   0x3B     0xBB     pcb_ith     read
+  0o15074   0x26     0xA6     pcb_mte1    read
+  0o15075   0x48     0xC8     pcb_pia     read
+```
+
+**All four land on PCB fields.** This is a THIRD confirmation of section 115's layout, and the first
+from raw microcode rather than a C struct - genuinely independent of both `pcb.h` and our own
+`DIT_*_OFFSET` constants.
+
+It also demonstrates the render bug in place: `0o15075` prints as `IX*2 ORCON=0x08` in the `.md`,
+and raw it is `MARG=0x48` - `DPA+0x48`, the PIA byte, exactly as the file's annotation warns.
+
+### The correction to section 116
+
+Section 116 said the CNTXTLOAD tail loads TE "from a value accumulated out of DIT reads", which
+reads as *the trap-enable mask is loaded from the DIT*. **The raw decode does not support that
+reading.** The bytes actually read into SC4 in this block are `pcb_ith` and `pcb_pia` - single
+BYTES, not the 64-bit `OTE`/`MTE` pair. `pcb_ote1` at `0o15072` is an ADDRESS SETUP with `MemOp=0`;
+no read happens on that word.
+
+So, precisely:
+
+ - `[V]` this block reads DIT bytes at DPA `+0x16`, `+0x3B`, `+0x26`, `+0x48`;
+ - `[V]` `0o15103`/`0o15104` write the TE register (IDU and MIC namespaces);
+ - `[OPEN]` **what value TE receives.** The visible reads feeding SC4 are ITH and PIA bytes, which
+   is not what a trap-enable mask should be made of. `TE,ALU,LOAD` at `0o15075` is a CONTROL-field
+   strobe and is NOT the same thing as the `D,MIC,TE` destination - conflating them is what made
+   116 sound settled.
+
+### What survives, and what the next step actually is
+
+The **asymmetry in our engine still stands and is still a real candidate defect**: THA is loaded
+from the DIT, `OTE`/`MTE` are never loaded from anywhere but a `.DOM` header, and the local gate
+reads registers nothing fills. That is independent of how the microcode composes TE.
+
+But **do not "fix" it by copying `ReadDIT_OTE` into `LoadDomainStateFromDIT` on the strength of
+this.** The microcode may compose TE from something other than a straight copy of `pcb_ote1/2`, and
+guessing would install a plausible wrong answer in the one place that gates every trap in the
+machine. Trace SC4 backwards from `0o15103` first.
+
+### Method note - the same trap, twice in one session, from opposite directions
+
+Earlier today a wrong opcode (`30FC` for `30BC`) returned a confident EMPTY set. Here a rendered
+listing returned a confident WRONG value. Both are "the instrument answered fluently and the answer
+was about something else". The defence that worked both times was the same: go to the raw bytes, and
+prefer an existing verified decoder over one written in the moment.
+
+## 118. A mislabelled PCB constant, found by the layout - correct address, wrong name `[V]` 2026-08-31
+
+Looking for somewhere to run the TE experiment turned up a latent error that section 115's layout
+catches on sight. `MmsUnit.cs` had:
+
+```csharp
+    /// <summary>pcb_cte1 - child trap enable (microcode DPA+0x26).</summary>
+    public const uint PcbChildTrapEnableOffset = 0xA6;
+```
+
+`0xA6` is `pcb_mte1` - the **MOTHER** trap enable. Child (`pcb_cte1`) is at `0x9E`. The struct order
+is `ote1 ote2 cte1 cte2 mte1 mte2 temm1 temm2`, four bytes each from `0x96`.
+
+**The ADDRESS is right** - `DPA+0x26` really is what the microcode reads there, and the raw decode in
+section 117 confirms it. **Only the NAME is wrong.** So it would have survived every check that
+verified the number: failure-taxonomy #19 exactly.
+
+Nothing consumed the constant yet, so nothing was ever miscomputed - but it is declared for the
+benefit of whoever wires trap-enable loading, which is the open candidate fix from section 116/117.
+That person would have read "child" and got "mother".
+
+Fixed, and the map completed from the verified layout while the evidence was in hand: `ote2`,
+`cte1`, `cte2`, `mte1`, `mte2`, `temm1`, `temm2`, `tha`, `md` all added with their DPA-relative
+offsets and a comment naming the three sources.
+
+**Worth noting how it was found.** Not by auditing that file - by needing a place to run an
+experiment and reading what was already there. A verified layout is a lens: once section 115 existed,
+the error was visible in the first constant block anyone opened.
+
+### Where the TE thread stands
+
+The executable experiment is set up but NOT yet run. The pieces exist:
+`SwapperStartDiagnosticTests` already drives IDLE -> MSG_START -> NEWCNTXT -> EXECUTE on the
+microword CPU with a seeded DIT, `MmsUnit.SetDomainPia` shows how to seed a DIT field, and the CPU
+models the TE register in both namespaces (`regs.MicTe`, `regs.IduTe`, `OperandRouter` cases 160 and
+the MIC equivalent).
+
+**The experiment:** seed the DIT with distinctive `OTE1/OTE2/MTE1/MTE2` values, run the context
+load, read `MicTe`/`IduTe` after. If TE picks up the seeded trap-enable fields, our
+`LoadDomainStateFromDIT` should load them too. If it picks up something else, section 116's reading
+is dead and the composition is whatever the register shows.
+
+**This is the right instrument for it.** Static decoding has now produced one over-claim (116) and
+one correction (117) on this question; the SSKIP precedent says the next step after that pattern is
+to execute, not to decode harder.
+
+## 119. The manual reframes the whole TE question - and names a defect in the enable mask `[M]` 2026-08-31
+
+Before propagating the section-118 rename into a second file, I checked the manual that file's
+comment cites. It answers a bigger question than the naming one. ND-05.022.1 §3.1, Table 1
+"Context Registers for a Process in the ND-5000":
+
+```
+  TOS, LL, HL                      per-domain registers
+  THA        Trap handler address        (Domain info. table)
+  OTE1+OTE2  Own trap enable             (Different gate array)
+  MTE1+MTE2  Mother trap enable          (Different gate array)
+  CTE1+CTE2  Child trap enable           (Domain info. table)
+  TEMM1+TEMM2 Trap modification mask     (Domain info. table)
+```
+
+and the prose beneath it:
+
+> *"Hardware trap enable register is either **MTE when inside trap handler** or **MTE OR'ed with OTE
+> when outside trap handler**. ... The trap handler (THA), the child trap enable (CTE1 and CTE2) and
+> the trap enable modification mask (TEMM1 and TEMM2) registers will reside **only in the Domain
+> Information Table**."*
+
+### What this settles about our engine's asymmetry
+
+**It is not obviously a bug.** `THA` resides ONLY in the DIT, so loading it from there - which
+`LoadDomainStateFromDIT` does - is exactly right. `OTE`/`MTE` have REGISTER homes in gate arrays, so
+they are not DIT-resident in the same sense; the PCB copy is per-domain backing store. That makes
+"we never load OTE/MTE from the DIT" a defensible position rather than the clear defect section 116
+implied, and is a second reason not to have patched it.
+
+It does NOT settle whether context load copies the DIT copy into the registers - if it never did,
+the registers could not hold per-domain values at all. That still wants the execution experiment.
+
+### The defect the manual DOES name, and it is in code I read three times
+
+Our local-trap-enable gate composes:
+
+```csharp
+    ulong localTrapEnable = ((ulong)regs.OTE2 << 32) | regs.OTE1;
+    localTrapEnable |= ((ulong)regs.MTE2 << 32) | regs.MTE1;     // <- unconditional
+```
+
+**It always ORs OTE with MTE.** The manual says the hardware register is `MTE` ALONE when inside a
+trap handler, and `MTE | OTE` only outside it. `pcb.InsideTrapHandler` is available - the dispatch
+condition a few lines below already tests it - and the mask composition ignores it.
+
+Effect: while inside a trap handler, a trap that only OTE enables would be delivered, where the
+hardware would withhold it. Graded `[M]` - manual, not yet confirmed against the microcode, and this
+project's rule is that the microcode wins. **Confirm at `011034` before changing it**; the words are
+already dumped in section 112's citation.
+
+### And a caution on my own section 118 rename
+
+The rename (`0xA6` is `pcb_mte1`, not `pcb_cte1`) rests on `pcb.h` DECLARATION ORDER from `0x96`,
+which is solid for offsets. But note the manual says CTE resides ONLY in the DIT while MTE has a
+register home - so a microcode READ of `DPA+0x26` is, on its face, more what you would expect of a
+DIT-only value like CTE. The offsets say `mte1`; the residency hint leans `cte`. **The offsets win**
+- declaration order in a real OS header is hard evidence and residency is an inference - but this is
+recorded because it is the one place the sources pull in different directions, and a later reader
+deserves to know that rather than find the rename unexplained.
+
+## 120. SETTLED by the microcode's own routine names: eight LOADCT_* routines, we implement four `[V]` 2026-08-31
+
+Going to confirm the manual's `MTE`-alone rule at the address our own source cites, I found that
+`0o011034` is not the trap gate at all. It is a **guarded context-load dispatcher**, and it named
+everything this thread has been circling. From `MICRO-5800-B30.LABE`:
+
+```
+  LOADCT_TOS  011162     LOADCT_OTE  011175
+  LOADCT_LL   011164     LOADCT_CTE  011200
+  LOADCT_HL   011165     LOADCT_MTE  011203
+  LOADCT_THA  011166     LOADCT_TEMM 011206
+```
+
+**Eight routines. `CpuND500.LoadDomainStateFromDIT` implements the first FOUR.**
+
+### Raw decode: all twelve reads land on a field, zero misses
+
+`ContextLoad_TrapConfigRoutines_RawDecodeDump` (new), `DPA = PcbBase + domain*256 + 0x80`:
+
+```
+  LOADCT_TOS  011163  MARG 0x3C -> 0xBC pcb_tos     LOADCT_OTE  011175  0x16 -> 0x96 pcb_ote1
+  LOADCT_LL   011164       0x40 -> 0xC0 pcb_ll                  011177  0x1A -> 0x9A pcb_ote2
+  LOADCT_HL   011165       0x44 -> 0xC4 pcb_hl      LOADCT_CTE  011200  0x1E -> 0x9E pcb_cte1
+  LOADCT_THA  011166       0x36 -> 0xB6 pcb_tha                 011202  0x22 -> 0xA2 pcb_cte2
+                                                    LOADCT_MTE  011203  0x26 -> 0xA6 pcb_mte1
+                                                                011205  0x2A -> 0xAA pcb_mte2
+                                                    LOADCT_TEMM 011206  0x2E -> 0xAE pcb_temm1
+                                                                011210  0x32 -> 0xB2 pcb_temm2
+```
+
+**Twelve for twelve.** Each routine reads its low half then its high half, four bytes apart.
+
+### This settles two things I had wrong
+
+**1. Section 118's rename is confirmed by the microcode's own naming.** `LOADCT_CTE` reads
+`0x1E/0x22` and `LOADCT_MTE` reads `0x26/0x2A`. So `0xA6` **is** `pcb_mte1`, and the old
+"child trap enable = 0xA6" label was wrong. Section 119 flagged a tension between the offsets and
+the manual's residency hint and said "the offsets win" - they do, and this is the proof. That
+tension is now closed, not merely adjudicated.
+
+**2. Section 119's "the asymmetry is probably not a bug" is REFUTED.** The microcode explicitly
+loads OTE, CTE, MTE and TEMM on context load, from exactly these DIT offsets. Our engine loads
+TOS/LL/HL/THA and stops. **It is a gap.**
+
+I over-read the manual. It said where those registers RESIDE - "different gate array" - and I took
+that to mean they are not loaded per-domain from the table. Residency is about where the live copy
+lives; it says nothing about who fills it. **Third time this thread that a source answered a
+slightly different question than the one I asked** (the rendered listing in 116, the residency note
+in 119, and before them the `D,TE` mnemonic). The pattern is consistent enough to name: when a
+source seems to settle a question it was not written to answer, it is probably answering the
+neighbouring one.
+
+### And the C# comment's microcode citation does not match this image
+
+`CpuND500.Trap.cs` describes the enable gate as:
+
+```
+  011034  AL#21 := TE          011036  AL#21 &= 0xFFFFFE00
+  011035  AL#21 |= 0xC0000000  011037  AL#21 &= S1
+```
+
+The actual words at `011034-011037` in `MICRO-5800-B30.DATA` are the LOADCT dispatch chain -
+`011034` is `ALU,AND A,LARG(0o3600000000) B,SC3`, a bit test. **The cited addresses are wrong for
+this control store.** The gate LOGIC may still be right - it is not contradicted here, only its
+citation is - but the addresses should not be quoted again until the real ones are found. Recorded
+rather than corrected, because finding the true gate is its own carve.
+
+### The fix is now fully evidenced
+
+`LoadDomainStateFromDIT` should also load `OTE1/OTE2`, `CTE1/CTE2`, `MTE1/MTE2`, `TEMM1/TEMM2` from
+the offsets above. Two things to check before writing it: whether `Registers` even has `CTE`/`TEMM`
+fields (it has OTE/MTE), and what the interleaved `MARG=0x04` words at `011176`/`011201`/`011204`/
+`011207` do - they read a different place and are part of each routine.
+
+## 121. The trap-config fix changed NOTHING in place-domain - a clean negative `[V]` 2026-08-31
+
+Re-ran `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` with `LoadDomainStateFromDIT` now
+loading OTE/CTE/MTE/TEMM. Pack override confirmed, passed, 30 m 39 s.
+
+```
+                       BEFORE (cell5)      AFTER (cell6)
+  3RMICV watchdog          262                 319      <- elapsed time only
+  PHYSWR                    13                  13
+  CACHE                      1                   1
+  MON restart      posted=2 seen=1 taken=1   IDENTICAL
+  cell writes      313/176/91/11            IDENTICAL, every bucket
+```
+
+**Nothing moved.** The only differences are watchdog-driven counts, which track wall time and are
+explicitly "time passed, nothing more". Sections 115/116 raised the possibility that place-domain
+goes quiet because the trap configuration it installs is ignored. **It does not.**
+
+Why: `LoadDomainStateFromDIT` is called only from cross-domain call/return
+(`CpuND500.Domain.cs:692` and `:774`). Place-domain never reaches a domain call - the ND-500 is
+never started - so the new code never executes. The fix is correct and currently INERT.
+
+### And a provenance correction to section 120, made in the code as well as here
+
+`LOADCT_1` is referenced from `0o001041`, which is the MACRO-INSTRUCTION dispatch band. So the
+LOADCT_* family implements a **load-context INSTRUCTION**, not automatic domain entry. It proves the
+DIT holds those fields and gives their exact offsets - that part stands, and the layout is
+confirmed - but it does **not** prove a cross-domain CALL loads them, which is the event the method
+I changed actually serves.
+
+What supports that trigger is the CNTXTLOAD tail (section 116: reads DPA+0x16/+0x26/+0x3B/+0x48,
+writes TE at `0o15103`/`0o15104`) plus the architecture - the registers are per-domain, so entering
+a domain must establish them from somewhere and the DIT is the only per-domain store. **That is
+reasoning, not a carve.** The change is kept and regraded `[D]`, with the experiment named in the
+comment: seed distinct values in two domains' DIT entries, execute a cross-domain CALL on the
+microword CPU, read the registers back.
+
+The change is retained rather than reverted because the alternative - carrying the previous
+domain's trap enables across a domain switch - is definitely wrong, and the ND-500 suite is green
+either way (2262 passed, 0 failed).
+
+### The pattern, now four for four on this thread
+
+A source answers the question NEXT to the one asked, and reads as settling it:
+
+```
+  116  rendered listing        gave a value for a field it mis-renders
+  119  manual residency note   said where registers LIVE, read as who FILLS them
+  120  LOADCT_* routines       an INSTRUCTION's loader, read as domain entry
+  ---  D,TE mnemonic           wrong form, returned a confident empty set
+```
+
+**Three of the four were caught by going one level more raw.** The fourth - this one - was caught by
+asking who CALLS the routine, which is the same move: stop reading what a thing is named and look at
+what reaches it. On this thread that check is worth doing BEFORE writing the comment, not after.
+
+### Where item 1 actually stands
+
+Unchanged and now better bounded: place-domain issues one CACHE and twelve DIT writes, then only
+watchdogs. The DIT block is identified (section 115) and the write is not being ignored by anything
+we control. **The open question is what SINTRAN waits for after installing it** - and since our side
+never receives another message, the answer is on the ND-100 side, not in the CPU.
+
+## 122. CORRECTION to section 114, and a five-point chain that names the real gap `[V]` 2026-08-31
+
+### First, my own error
+
+Section 114 said place-domain services "three distinct MICFUs" and built a conclusion on it. That
+came from grepping the `servicer MICFU trace` SECTION, which does not list every message. The
+authoritative count is the `micfu[]` histogram on the status line:
+
+```
+  [after PLACE-DOMAIN]  micfu[1B:162  12B:1  23B:1  24B:1  31B:13]
+```
+
+**Five, not three.** `23B` is 3START and `24B` is 3MONCO - the two that matter most, and exactly the
+two I reported absent. Same failure as everything else on this thread: a partial view read as the
+whole. The census section is a sample; the histogram is the census.
+
+### What place-domain actually achieves
+
+```
+  startSeen=1  startMicfu=23B  startTaken=True     the 3START WAS posted and taken
+  restarts=1/1                                     a MON round-trip completed
+  ansMON=377B  ansSWPFU=1B  swpfu[LNEWSWAP:2]      the swapper ran and called MON 377B
+  PC=0x08008255  stopMode=WAIT                     parked after that call (section 9)
+  PSTP=0x0003A000  CTXBASE=0x0002A000              context established
+  THA=0x00000000                                   <- and this is the finding
+```
+
+So the swapper **starts, runs, makes a monitor call, is answered, and parks** - section 11's
+"designed idle", not a failure. Place-domain gets far further than section 114 claimed.
+
+### `THA=0` is the gap, and five measured facts converge on it
+
+```
+  1  SINTRAN WRITES the trap config    twelve PHYSWR into DIT 0x96..0xC7, pcb_tha at 0xB6   s115
+  2  the process IS started            startSeen=1 startMicfu=23B startTaken=True           this run
+  3  the microcode LOADS it at start   CNTXTLOAD tail reads DPA+0x16/0x26/0x3B/0x48,
+                                       writes TE at 0o15103/0o15104                         s116
+  4  our start path does NOT           StartProcessFromContextBlock reads ctx 0x00-0x60 and
+                                       "there is no trap-enable slot in it" - our own source
+  5  the CPU shows THA=0               after a completed 3START                             this run
+```
+
+**SINTRAN installs a trap configuration and our CPU starts the process without it.** With `THA=0`
+the delivery gate can never fire - it requires `regs.THA != 0` - so no trap this process raises can
+ever reach a handler.
+
+### Which makes section 121's negative make sense, and points at the fix
+
+Section 121 fixed `LoadDomainStateFromDIT` and measured no change. Now it is clear why: that method
+is called on cross-domain CALL/RETURN, and the event that matters here is **PROCESS START**. The
+microcode's own equivalent is CNTXTLOAD, which section 116 already showed reading DIT fields.
+
+**So the load is hooked to the wrong event.** The next change is to load the DIT trap configuration
+in the process-start path as well - and this time the hypothesis is falsifiable in one line:
+**`THA` should be non-zero after a completed 3START.** That is a value this run already prints, so
+the before/after is a single grep rather than a 30-minute interpretation.
+
+Note it is still worth checking WHICH fields the start path should take: CNTXTLOAD reads four bytes
+(`+0x16 +0x26 +0x3B +0x48`), not the full twelve the LOADCT_* instruction reads. Do not assume the
+two paths load the same set.
+
+## 123. ROOT CAUSE: `DITBASE == 0` is the "not configured" sentinel, and 0 is the CORRECT base `[V]` 2026-08-31
+
+The section-122 prediction was **falsified**. After hooking the DIT trap-config load into the
+process-start path, place-domain still reports `THA=0x00000000`. Passed, 30 m 39 s, pack confirmed.
+
+That is a good failure - the prediction was one value, and it said no.
+
+### Why neither fix fired
+
+The load is guarded `if (regs.THA == 0 && regs.DITBASE != 0)`, and every DIT reader opens with
+
+```csharp
+    if (regs.DITBASE == 0)
+        return 0;
+```
+
+**22 of those guards in `CpuND500.Domain.cs`.** So the whole DIT subsystem is a no-op unless
+`DITBASE` is non-zero. Two facts finish it:
+
+ 1. **Nothing on the octobus lane ever sets `DITBASE`.** Grepping `Emulated.HW/ND/CPU/NDBUS` and
+    `Emulated.Machines/ND` finds it only as a register accessor on the CLASSIC 3022 path
+    (`NDBusND500IF.cs:1775/1851`). The octobus attach never assigns it. The status line prints
+    `PSTP` and `CTXBASE` and not `DITBASE`, which is its own small tell.
+
+ 2. **The correct value for this system IS ZERO.** SINTRAN writes the DIT at ND-500 physical
+    `0x96..0xC7` (section 115) - that is PCB base `0x00`, domain 0. The harness agrees:
+    `SwapperStartDiagnosticTests` uses `PcbTableBase = 0x00` with the note "harness: physical 0;
+    NDIX: pcbtab @ KVA 0xe0000000".
+
+**So the sentinel collides with the only valid value this system uses.** A correctly configured DIT
+at physical 0 is indistinguishable from no DIT at all, and every read is refused.
+
+### Why this is the root, not another layer
+
+It explains the whole thread at once, with no extra assumptions:
+
+```
+  THA = 0 after a completed 3START            DIT read refused
+  OTE/MTE/CTE/TEMM never loaded               DIT reads refused
+  section 121's fix measured no change        DIT reads refused
+  section 122's fix measured no change        guarded on DITBASE != 0, refused
+  no trap can ever be delivered               gate needs THA != 0
+```
+
+Five symptoms, one cause. And it is the reason both fixes were *correct and inert* - they were
+downstream of a subsystem that was switched off.
+
+### The fix, and why it is NOT a one-liner
+
+Do **not** just set `DITBASE = 0x00` somewhere - that changes nothing, because 0 is what the guards
+reject. The sentinel itself has to go: add an explicit `DitConfigured` flag (or make the base
+nullable) and change all 22 guards to test THAT, then have the octobus attach declare the base the
+same way the harness does.
+
+Touching 22 guards on the trap path deserves its own red-first test: assert that a DIT written at
+physical 0 is readable, which is false today and would have caught this the moment the sentinel was
+introduced.
+
+### The method note, and it is the cheapest lesson here
+
+A prediction stated as ONE VALUE - "THA must be non-zero after a completed 3START" - failed in a way
+that pointed straight at the cause. Had I predicted "place-domain will get further", the same run
+would have been unreadable: nothing got further, and I would have had no idea which of five layers
+was responsible. **Predict a value, not an outcome.**
+
+### 123a. A second silent-discard mechanism, on the path I am using `[V]` 2026-08-31
+
+`nd500uc-d4` flagged `SintranLayer.TraceMonitorCall` (:604): it drops everything that is not
+`DataCommunication` before logging. MON 60B already needed its OWN separate recorder purely because
+this filter hid it - the comment at :500 says so.
+
+**That lands on this lane.** The swapper's call is **MON 377B**, and `ansMON=377B` is one of the few
+signals that the swapper actually ran and was answered. It is not DataCommunication. So reaching for
+`TraceMonitorCall` to see it would have produced an EMPTY trace, and "no MON call happened" is the
+natural - and wrong - reading.
+
+Same shape as section 123's own root cause, which makes two in one session:
+
+```
+  DITBASE == 0 sentinel        a configured DIT at physical 0 reads as "no DIT"
+  TraceMonitorCall filter      a real MON 377B reads as "no MON call"
+```
+
+Both silently discard the real case and return a confident nothing. Neither errors, neither logs a
+skip. **When an instrument returns emptiness, ask what it FILTERS before believing the emptiness** -
+the absence may be manufactured upstream of anything the machine did.
+
+### 123b. The obvious fix would have ERASED the data it was meant to read `[V]` 2026-08-31
+
+Section 123 ended with "have the octobus attach declare the base". The natural way to do that is
+`SetupDIT(0)`. **Do not.** Its second half:
+
+```csharp
+    public void SetupDIT(uint ditBaseAddress)
+    {
+        regs.DITBASE = ditBaseAddress;
+        for (int domain = 0; domain < MAX_DOMAINS; domain++)
+            for (int off = 0; off < DIT_ENTRY_SIZE; off += 4)
+                WriteMemory32(entryAddr + (uint)off, 0);      // zeroes every 256-byte PCB
+    }
+```
+
+On the octobus lane **SINTRAN owns that table** - it writes the twelve trap-config words during
+place-domain (section 115). Calling `SetupDIT` after that wipes exactly the configuration this whole
+thread is trying to deliver, and the symptom would be identical to today's: `THA=0`. The fix would
+have looked like it changed nothing, for a completely different reason.
+
+`SetupDIT` is right for a lane where WE own the table and wrong for one where the guest does.
+
+### The corrected fix, in three parts
+
+```
+  1  replace the sentinel      21 functional guards test a DitConfigured flag (or a nullable
+                               base) instead of `regs.DITBASE == 0`. The 22nd, at :1008 in
+                               InitializeDomainSystem, is only choosing a log message - leave it.
+  2  declare the base WITHOUT clearing   a separate entry point, or a SetupDIT overload that skips
+                               the zeroing. Never zero a table the guest wrote.
+  3  octobus attach calls it   with base 0, matching what SINTRAN actually uses and what
+                               SwapperStartDiagnosticTests already assumes (PcbTableBase = 0x00).
+```
+
+**Red-first test:** write a recognisable value into a DIT field at physical 0, declare the base, and
+read it back. False today for two independent reasons - the sentinel refuses the read, and the only
+available declaration path would have erased the value first. A test that pins BOTH is worth more
+than one that pins either.
+
+### Why this was found before it was written, and not after
+
+Only because the guard enumeration listed `InitializeDomainSystem` among the 22 and I read the
+setter next to it rather than assuming what it did. **The count was the reason to look**: 22 guards
+is a mechanical conversion, and mechanical conversions are exactly where you stop reading and start
+substituting.
+
+## 124. The `DITBASE` sentinel is REMOVED - red-first, 2264 green `[V]` 2026-08-31
+
+Section 123 found it, 123b found the trap in the obvious fix. Both are now closed in code.
+
+### Red first, and the second test earned its place immediately
+
+`TestND500_DitBaseZeroIsAValidBase`, driving the REAL path (`StartProcessFromContextBlock`, the
+public entry the octobus lane uses and the one whose measured `THA=0` started this):
+
+```
+  BEFORE  DitAtPhysicalZero_IsReadable...          Expected 134223400  But was 0
+  BEFORE  DeclaringTheBase_DoesNotErase...         Expected 134223400  But was 0
+  AFTER   both PASS
+  FULL SUITE  2264 passed, 0 failed  (was 2262 - the two new tests, no regressions)
+```
+
+**The second test failing is the important one.** It proves `SetupDIT(0)` really does erase a
+guest-written table - section 123b called that hazard from reading the code, and this made it a
+measurement rather than a worry. Had I not written it, the "fix" would have zeroed SINTRAN's trap
+config and produced an unchanged `THA=0`, reading as "the fix did nothing" for the THIRD time.
+
+### What changed
+
+```
+  Registers.DitConfigured          new flag; expresses "base 0, configured", which no value of
+                                   DITBASE could. Reset with DITBASE, copied with it.
+  22 guards                        `regs.DITBASE == 0` -> `!regs.DitConfigured`
+  DeclareDitBase(uint)             NEW - declares the base and touches nothing else.
+                                   For lanes where the GUEST owns the table.
+  SetupDIT(uint)                   unchanged behaviour, still clears. For lanes where WE own it.
+                                   Two entry points rather than one with a boolean argument that
+                                   nobody reads at the call site.
+  MMUConfiguration.ApplyToCpu      now sets DitConfigured - an explicit configuration must count
+                                   as configured whatever address it names. That was the same bug
+                                   in miniature: configuring a DIT at 0 configured nothing.
+```
+
+### Still outstanding on this chain, stated so it is not assumed done
+
+**Nothing on the octobus lane calls `DeclareDitBase` yet.** The sentinel is gone and the mechanism
+works, but the lane must still declare base 0. I have NOT added a blanket default, because base 0 is
+SINTRAN's layout and not universal - NDIX puts `pcbtab` at KVA `0xe0000000`. Defaulting would bake
+one OS's memory map into a shared path, which is the same class of error as the sentinel.
+
+So the honest status: **the blocker is removed, the wiring is not done, and place-domain will not
+change until it is.** Do not re-measure expecting movement.
