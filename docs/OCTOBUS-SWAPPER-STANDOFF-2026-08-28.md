@@ -12576,3 +12576,93 @@ Readings, decided before the run:
 
 `0o163637` = `0xE79F` must be checked against its per-hit `PIL`/`B` detail before it is believed;
 `DiagPcWatch` matches the 16-bit PC only, and that is how 177's 30 spurious hits were caught.
+
+## 181. MEASURED: the stall is inside `0o163637` - entered three times, returned from zero times, with identical parameters
+
+The standoff-180 ladder ran (`RETROCORE_ND5000_WATCH=chswsladder`, same pack and scale, build
+0 errors asserted first, test **Passed: 1**).
+
+    1 prologue@0o74407           hits=1
+    2 push returned@0o74412      hits=1
+    2b STACK OVERFLOW@0o43660    hits=2     <- ALIASED, see 181.1
+    3 past bit tests@0o74420     hits=1
+    4 at CALL2@0o74425           hits=1
+    5 CALL2 entered@0o163637     hits=3
+    CONTROL 5ACTSWAPPER@0o145162 hits=2
+
+      2b STACK OVERFLOW  hit#1 PIL=0 A=0o  D=15o    T=164100o X=63336o B=170400o L=713o
+      2b STACK OVERFLOW  hit#2 PIL=0 A=0o  D=6o     T=164110o X=63442o B=170400o L=713o
+      1 prologue         hit#1 PIL=1 A=0o  D=17o    T=217o    X=52222o B=176200o L=75247o
+      2 push returned    hit#1 PIL=1 A=0o  D=17o    T=217o    X=52222o B=176200o L=74412o
+      3 past bit tests   hit#1 PIL=1 A=77o D=17o    T=217o    X=51767o B=176200o L=74412o
+      4 at CALL2         hit#1 PIL=1 A=41o D=62000o T=217o    X=51767o B=176200o L=74412o
+      5 CALL2 entered    hit#1 PIL=1 A=41o D=62000o T=217o    X=51767o B=176200o L=74426o
+      5 CALL2 entered    hit#2 PIL=1 A=41o D=62000o T=217o    X=51767o B=176200o L=74426o
+      5 CALL2 entered    hit#3 PIL=1 A=41o D=62000o T=217o    X=51767o B=176200o L=74426o
+
+### 181.1 The stack-overflow candidate is DEAD, and its two hits were aliased
+
+`0o74412` measured **1**: the frame push at `0o74411` returned. So standoff 180's leading candidate
+is eliminated by the very arm that 179 had dropped and 180 restored - the arm was worth having, and
+its answer was "no".
+
+The `0o43660` count of **2** is NOT the window's overflow exit. The per-hit detail says so on three
+counts: `PIL=0` where the window runs at `PIL=1`; `B=170400o` and `L=713o` against the window's
+`B=176200o`; and both hits are ordered BEFORE the prologue was ever reached. Foreign code at an
+aliased 16-bit PC, the same failure mode as 177's 30 spurious hits, caught the same way.
+
+**Had this table been read as counts alone, "STACK OVERFLOW hits=2" would have been the headline and
+it would have been false.** That is the entire argument for printing registers beside every count.
+
+### 181.2 The stall, located
+
+The call site `0o74425` executed **once**. The callee `0o163637` was entered **three times**. Neither
+of the caller's landing sites was ever reached (`0o74426` measured zero in 179; the paths below the
+success landing measured zero in 177).
+
+**So the routine at `0o163637` is entered and does not return, and it is re-entered while the single
+call is still outstanding.**
+
+All three entries carry identical state: `L=0o74426`, `B=176200o`, and `T=217o A=41o D=62000o`.
+`STF ,B -54` saves the float accumulator, so that triple IS the parameter block the routine was
+handed. **Identical parameters on every entry is the signature of a retry, not of progress** - the
+same DECLINE-STORM shape recorded in the taxonomy, where a repeated identical request reads as a
+quiet gap rather than as a loop.
+
+`L` is loaded only by `JPL`, and it is unchanged across all three entries, so **the re-entry did not
+come through a `JPL`.** There IS a retry loop around this routine - `0o163624` calls it and
+`0o163632 JMP -6` loops back to that call - but a call from there would leave `L=0o163625`. It does
+not. That loop is therefore EXCLUDED by measurement rather than assumed away.
+
+### 181.3 A second open item closes as a non-finding: `N500DF@0o51767`
+
+`X=0o51767` on every hit from `0o74420` onward. `0o51767` is the address previously probed as
+"`N500DF` = `0x0000` at both probes", carried as `[OPEN]` since section 176 on the grounds that if
+`B` were `N500DF` then every `,B -nn` in the segment would be relative to zero.
+
+The measurement says `0o51767` is loaded into **`X`**, not `B` (`B=176200o`), and is used as a BASE
+ADDRESS: the window reads `,X -22`, `,X -17` and `,X -7`, i.e. `0o51745`, `0o51750`, `0o51760`. **It
+never reads `,X 0`.** So the word AT `0o51767` is not an operand of this code at all, and its being
+zero was never evidence of anything.
+
+That is instrument-failure **#19** for the sixth time: the value was right, the read was right, and
+the OBJECT was wrong. Closed as a non-finding.
+
+### 181.4 Next: inside the callee
+
+`RETROCORE_ND5000_WATCH=chswscallee` (`ArmChswsCalleeWatch`) arms the callee's first arm and BOTH
+its epilogues:
+
+    0o74425  call site        control, expect 1
+    0o163637 callee entry     expect 3
+    0o163645 arm1 call#2
+    0o163646 arm1 ERROR exit
+    0o163647 arm1 continued
+    0o164112 EPILOGUE ok      MIN ,B -74, the skip return
+    0o164114 EPILOGUE err     STA ,B -77, the direct return
+    0o145162 5ACTSWAPPER      liveness
+
+Both epilogues cold with the entry hot measures "never returns" from the CALLEE's side, independently
+of the caller's cold landing sites - one claim, two instruments that can disagree. `0o163646` hot
+three times means every pass takes the same early error exit. `0o163647` hot means it gets deeper and
+the re-entry is not in arm 1.
