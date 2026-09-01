@@ -13949,3 +13949,53 @@ here. Everything above is bytes; this paragraph is the part that is not.
 
 **Method note.** The whole entry came from decoding the instruction at the address rather than
 searching for a pattern - the byte length of the `CALLG` is what made the two addresses meet.
+
+
+## 201 - TWO monitor calls, ONE answer. The swapper is parked on its SECOND `[V]`
+
+`run199.log:2432`, already on disk since 01:15 - no new run, no new instrument:
+
+```
+[MON PATH] forwarded=2  3MONCO=1  3WMONCO=0  realRoundTrips=1  answeredByCsharpEmulation=0
+MON restart path: posted=2  seen=1  taken=1
+   <- 1 stop(s) posted with no restart yet
+```
+
+Co-measured in the same dump: `swpfu[LNEWSWAP:2]`, `ansSWPFU=1B`, `ansSWPSTAT=0B`,
+`ansP=0x08008255`, `PC=0x08008255`, `stopMode=WAIT`, `restarts=1/1`.
+
+**Read in order:** the swapper made **two** monitor calls, both `LNEWSWAP`. SINTRAN answered the
+first (`taken=1`, and `MonitorCallRestartsTaken` increments only AFTER
+`stopMode &= ~StopMode.WAIT`, `Nd500CpuProcessBridge.cs:1070-1074` - so the un-park definitely ran).
+The swapper resumed, went round its message loop, and called `LNEWSWAP` again. **That second call
+is the one it is parked on**, and it is the `posted=2 / seen=1` gap.
+
+`ansP == PC` is not a contradiction: `ansP` is the last **answered** call's saved `P`, and both
+calls were issued from the SAME site - `0o1000101077`, per standoff 200. A loop, not two places.
+
+**This retires the previous `Next`.** "Answered and not yet resumed" is refuted: it WAS resumed.
+It ran, and parked again by design.
+
+**And it closes the circle into a stated contradiction, which is the point.** The report line names
+the swapper's designed idle itself: *LNEWSWAP with nothing to do answers the served node, marks
+`SWMSG PSWWAIT` (free) and returns to the message loop without restarting the swapper, which is
+woken later by `5ACTSWAPPER` when work arrives.* But `5ACTSWAPPER` requires `PSWWAIT(7)` and the
+node measures `SWPPING(6)` (standoffs 193, 199). So:
+
+> the swapper parks expecting to be woken from `PSWWAIT`, and the node it must be woken through is
+> sitting at `SWPPING`.
+
+Either the second park did not mark `PSWWAIT`, or something put `SWPPING` back after it did. **That
+is the defect's location, reached positively rather than by elimination** - the thing 183 and 193
+each got wrong.
+
+**Method note, and it is the uncomfortable one.** Two ticks were spent designing a measurement for
+"answered, or resumed and re-parked". `forwarded=2 ... seen=1` answered it and was already in the
+log. **Read the report the run already prints before building an instrument** - `[MON PATH]` exists
+precisely to answer this and was never grepped. The count that mattered was not the one I went
+looking for.
+
+Related trap, same tick: `grep -c "via mailbox; CPU parks awaiting restart"` returned **0** on that
+same log, which reads as "no MON was ever forwarded" and is false - that line is `Logger.Dbg` at
+`Machine` level and the sibling is behind `#if DEBUG_DETAIL`, so neither is in this capture. A zero
+from a pattern the build never emitted is evidence about the build, not the machine.

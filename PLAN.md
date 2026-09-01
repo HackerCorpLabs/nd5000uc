@@ -8,8 +8,28 @@
 
 ## Next
 
-**NEXT: decide, by measurement, whether the swapper is *answered and still waiting to be resumed* or
-*resumed, ran, and re-parked*.** Standoff **200**. Everything else on both sides is accounted for.
+**NEXT: find out why the swapper's SECOND `LNEWSWAP` park left the node at `SWPPING(6)` instead of
+`PSWWAIT(7)`.** Standoff **201**. That is now a stated contradiction, not an elimination.
+
+**ANSWERED (201) `[V]`, from `run199.log:2432` - already on disk, no new run:**
+
+```
+[MON PATH] forwarded=2  3MONCO=1  realRoundTrips=1
+MON restart path: posted=2  seen=1  taken=1   <- 1 stop posted with no restart yet
+swpfu[LNEWSWAP:2]  ansSWPFU=1B  ansSWPSTAT=0B  ansP=PC=0x08008255  restarts=1/1
+```
+
+**The swapper made TWO `LNEWSWAP` calls and was answered ONCE. It resumed after the first, looped,
+called again, and is parked on the SECOND** - both from the same site `0o1000101077` (200), which is
+why `ansP == PC`. So "answered but never resumed" is REFUTED; the park is the designed idle.
+
+**The contradiction that remains:** that idle is defined as *"answers the served node, marks `SWMSG`
+`PSWWAIT` (free), returns to the message loop, woken later by `5ACTSWAPPER`"*. But `5ACTSWAPPER`
+requires `PSWWAIT(7)` and the node measures `SWPPING(6)` (193, 199). Either the second park never
+marked `PSWWAIT`, or something restored `SWPPING` after it did.
+
+**Method cost worth not repeating:** two ticks went into designing a measurement that the run's own
+`[MON PATH]` report had already made. Grep the report before building an instrument.
 
 **ANSWERED (200) `[V]`, no run needed: the parked process IS the swapper and its `P` is a MON 377B
 return address.** `PC = 0x08008255 = 0o1000101125`, which is `0o1000101077 + 22 bytes` - the
