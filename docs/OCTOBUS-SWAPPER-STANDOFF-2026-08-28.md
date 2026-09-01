@@ -13589,3 +13589,71 @@ The next measurement is on the ND-500 side: what the swapper's `P` is while it s
 whether it ever re-enters its message loop. `posted=2 seen=1 taken=1` says one process is parked on a
 monitor call; whether that parked process IS the swapper has not been checked, and it is the first
 thing to establish before reading any swapper code.
+
+## 194. The per-round line was already carrying the answer to "which process is parked" - and it CHALLENGES 193.2
+
+Standoff 193.3 said the next question was ND-500-side: which process is parked, and what its `P` is.
+That was in `run185.log` line 115, in a status line I had been reading only for `PC` and `stopMode`.
+
+    PC=0x08008255 stopMode=WAIT
+    swpInfo=0x00008E30      <- the SWPPING node, window-relative (0x428E30 - 0x420000)
+    swMsg=0x00428D30
+    ansMON=377B  ansSWPFU=1B  ansSWPSTAT=0B
+    restarts=1/1  swpfu[LNEWSWAP:2]
+    micfu[1B:128 12B:1 23B:1 24B:1 31B:13]
+    ext-block extblk[0] (CPU 1): X5BEX=0000,BE30 X5ACT=0001 X5PRO=FFFF
+
+### 194.1 What it says
+
+- **The parked process is the SWAPPER**, parked on **MON 377B** at `P=0x08008255`, `stopMode=WAIT`.
+- **`swpfu[LNEWSWAP:2]` - `LNEWSWAP` ran TWICE.** That is the swapper's own "is there work?" path.
+- **`swpInfo=0x00008E30` is OUR SWPPING node** (`0x428E30` minus the `0x420000` window base). The
+  swapper's swap-info pointer is aimed straight at it.
+- **`ansSWPFU=1B` / `ansSWPSTAT=0B` are OBSERVED, not composed.**
+  `Nd500MicrocodeServicer.cs:3815` does `LastAnswerSwpfu = host.ReadNd100Word(...)` - it READS what
+  was written. So this is REAL SINTRAN's answer, and the MON path is genuine. **That is the
+  "who answered the MON call?" question asked and answered before drawing anything from it.**
+- `X5PRO=FFFF` on CPU 1: no process loaded at the end of the run.
+
+### 194.2 This challenges 193.2, and 193.2 was mine
+
+Standoff 193.2 concluded: *"The missing actor is the SWAPPER ITSELF, which must consume its ping and
+return the slot to `PSWWAIT`."*
+
+**Too simple.** The swapper is not failing to look. It ran `LNEWSWAP` **twice**, with `swpInfo`
+pointing at the very node in question, and each time concluded there was nothing to do. A process
+that never runs and a process that runs and decides "nothing here" are different failures with
+different fixes - and 193.2 asserted the first while the evidence for the second was already in the
+log.
+
+**In fairness to 193.2 it was graded `[D]`, and this is exactly why that grade existed.** The `[V]`
+chain in 193.1 - `CHSWS` parks at `SWPPING(6)`, `5ACTSWAPPER` reads `N5STA` and requires
+`PSWWAIT(7)`, six is not seven - is untouched. What is withdrawn is the story bolted onto it about
+whose fault that is.
+
+### 194.3 The shape of the mistake, because it has now happened twice
+
+193.2 and 183 are the same move: a verified mechanism, then a **narrative** about the actor
+responsible, asserted with more confidence than the narrative had earned. In 183 it was "identical
+parameters mean a retry"; here it was "the swapper never consumes its ping". Both times the
+mechanism survived and the story did not.
+
+**A chain of verified steps does not confer its grade on the conclusion drawn from it.** The
+temptation is strongest right after a long chain finally closes, which is precisely when the guard
+should be tightest.
+
+### 194.4 What is actually open now
+
+**`LNEWSWAP` ran twice and found nothing to do, while a `3SWMESS` sat at `SWPPING(6)` and `swpInfo`
+pointed at it.** Those cannot both be right unless "nothing to do" is decided by something other than
+that node's presence.
+
+Three candidates, unranked and untested:
+ - `LNEWSWAP` tests a field the ping does not set, so a correctly-posted ping is invisible to it;
+ - real SINTRAN's `ansSWPFU=1B` answer means something we deliver wrongly, so the swapper is told
+   there is no work;
+ - the two `LNEWSWAP` calls both happened BEFORE `CHSWS` posted the ping, and nothing has run since.
+
+**The third is the cheapest and would make the other two moot** - it is an ORDERING question, and
+ordering is what standoffs 173, 183 and 189 each got wrong by reading counts. It is answered by
+timestamping the `LNEWSWAP` calls against the `CHSWS` block, not by reading either count again.
