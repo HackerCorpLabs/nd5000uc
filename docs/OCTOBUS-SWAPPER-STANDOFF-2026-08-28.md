@@ -11276,3 +11276,87 @@ That reframes section 159's question one level more precisely:
 
 The swapper's empty FIFO is then a CONSEQUENCE, not the cause - the same shape as the THA hunt in
 162, where the value everyone was chasing turned out to be correctly delivered.
+
+## 164. MEASURED: `place-domain` owns every non-watchdog message. And the `0B:6B` watch fired without discriminating anything `[V]` 2026-09-01
+
+Run with `RETROCORE_ND5000_WATCH=fs6b`, filtered to the single test (see the wrong-turn note at the
+end - the earlier run was filtered on the whole CLASS and spent 33 minutes in a different test).
+
+### The `[D]` in section 163 is now `[V]`
+
+Every observed mailbox message, stamped with the monitor command outstanding when it arrived:
+
+```
+22 [place-domain cpu-stat ] MICFU=0x01 3RMICV(1)     watchdog
+16 [run                   ] MICFU=0x01 3RMICV(1)     watchdog
+13 [place-domain cpu-stat ] MICFU=0x19 PHYSWR(31B)
+ 1 [place-domain cpu-stat ] MICFU=0x14 3MONCO(24B)
+ 1 [place-domain cpu-stat ] MICFU=0x13 3START(23B)
+ 1 [place-domain cpu-stat ] MICFU=0x0A CACHE(12B)
+```
+
+**Every non-watchdog message in the run belongs to `place-domain cpu-stat`** - the cache clear, the
+thirteen trap-config writes, the process start and the monitor call. `run` contributes sixteen
+watchdogs and nothing else. No message is attributed to any earlier command, including `@nd-500`
+itself: entering the monitor performs the control-store download over the ACCP (LOCSD/LOCSM), which
+carries no MICFU, so zero there is correct rather than missing.
+
+This closes the question section 163 opened and confirms its correction: `place-domain` does not
+send nothing - it sends everything.
+
+Reproduced unchanged in this run: `THA=0x00000000 ditCfg=True DITBASE=0x00000000`,
+`OUTCOME: nd-500=OK place-domain=STALL run=STALL`, and the same file-system line at the same
+address, one second later in the boot:
+
+```
+INFO    * 0B:6B * 1998-09-01 11:37:46 * BAK01.37603B
+```
+
+### The `0B:6B` watch: a working instrument that answers the wrong question
+
+```
+S3FS ctx@0o37570               @0o37560  hits=849
+S3FS compare@0o37577           @0o37577  hits=155
+S3FS REPORTED@0o37603 JPL I 34 @0o37603  hits=155
+S3FS sibling@0o37613 JPL I 24  @0o37613  hits=1
+S3FS exit-A@0o37624            @0o37624  hits=506
+S3FS exit-B@0o37630            @0o37630  hits=2
+S3FS target@0o50124            @0o50124  hits=4577
+CONTROL 5ACTSWAPPER@0o145162   @0o145162 hits=2
+```
+
+The liveness control fired (`5ACTSWAPPER hits=2`), so the watch itself works and the other numbers
+are real. **And that is exactly what makes the result useless for the question asked of it.**
+
+`0o37603` - the address SINTRAN names in the error - executes **155 times**, while the message
+prints **ONCE**. So the reported address is a HOT LOOP CALL SITE, not a rare error path, and "did
+0o37603 execute" cannot separate the one failure from 154 healthy calls. That is taxonomy **#8**: a
+number that cannot be RELEVANT to the question, as distinct from #7 (a number that cannot be
+checked). The instrument is correct, believed, reproducible - and blind.
+
+**What that DOES establish, and it is worth having:** the error is not "this site was reached". It is
+"this call RETURNED a failure on one of 155 calls". Any next instrument must watch the RETURN, not
+the entry - the A register at `0o37604`, which the disassembly shows being stored at `0o37630`
+(`STA ,B 2`) on the error path that ran twice.
+
+Two arms also refuse to be read as S3FS at all: `0o50124` at 4577 hits and `0o37624` at 506 hits
+both exceed their own callers, which is only possible if other code executes at the same 16-bit
+virtual address. The watch matches the PC and nothing else, exactly as its own doc comment warned.
+
+### WRONG TURNS - do not repeat
+
+**1. I typed one arm's address in octal and armed it in hex, wrongly.** `0o37570` is `0x3F78`; I
+armed `0x3F70`, which is `0o37560`. The table shows `S3FS ctx@0o37570 @0o37560` - the LABEL I typed
+beside the OCTAL OF WHAT WAS ACTUALLY ARMED, and they disagree.
+
+**The only reason this was caught is that the dump prints the armed value decoded, not the name.**
+Had it printed my label, the run would have reported hits for an address it never watched, and
+849 hits is a number nobody would have questioned. **Every instrument that takes an address should
+print that address back, decoded in the radix the source uses.**
+
+**2. I filtered the test run on the CLASS, not the test.** The first attempt ran every test in
+`Nd100SintranNd5000OctobusBootHarnessTests`, sat for 33 minutes in the full-ladder test with each of
+its commands stalling its whole timeout, and never reached the one I wanted. The breadcrumb file
+(`%TEMP%\retrocore-nd5000-octobus\octobus-breadcrumb.txt`) named the running command outright and is
+the right thing to read when a run is slower than expected - CPU time only says it is progressing,
+never at WHAT. Filter on the test name.

@@ -15,6 +15,17 @@ it is UPSTREAM of everything 159 was asking about. `Not used` is SINTRAN's text 
 with no assigned message, so the file system returned error `6B` and there was nothing to print.
 Standing rule: known bugs before features, and no error is noise.
 
+**MEASURED (standoff 164):** every non-watchdog message in the run belongs to `place-domain` - the
+cache clear, the thirteen PHYSWR, the 3START and the 3MONCO. `run` adds only watchdogs. The section
+163 `[D]` is now `[V]`.
+
+**AND THE FIRST INSTRUMENT ON THE ERROR MISSED:** a PC watch on the reported address `0o37603` fires
+**155 times** while the message prints **once**, so it cannot separate the failure from 154 healthy
+calls (taxonomy #8 - a number that cannot be RELEVANT). The liveness control fired, so the watch
+works; it is simply pointed at the wrong thing. **Next instrument must watch the RETURN, not the
+entry** - the A register at `0o37604`, stored at `0o37630` (`STA ,B 2`) on the error path, which ran
+twice in a run where the message printed once.
+
 **THE FRAMING CORRECTION THAT MADE THIS VISIBLE:** the test is
 `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` - it issues NO `load-control-store` and NO
 `start-swapper`. `place-domain` triggers both itself, through the ECSLOAD auto-retry gate. So the
