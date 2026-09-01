@@ -8,18 +8,19 @@
 
 ## Next
 
-**NEXT: arm FOUR addresses and run once - `0o74407` (prologue, control), `0o74415`, `0o74417`,
-`0o74426`. Exactly one of the last three must read 1.** Standoff **179**.
+**NEXT: read the LADDER result (`RETROCORE_ND5000_WATCH=chswsladder`) - the last hot arm names
+where the routine stops.** Standoff **180**.
 
-The 21-word window is decoded and the exits are enumerated. The calling convention is carved `[V]`
-from the frame helpers themselves (`,B -74` holds the saved return link, so `MIN ,B -74` is the skip
-return and `STA ,B -77` is the direct/error return) - so every `JPL` landing site in the window is
-identified, and the two calls both return. Section 178's eight-arm set is superseded: `0o74411` is
-the compiler's frame push, not a semantic call, and `0o74426` is CALL#2's error landing rather than
-an exit of its own.
+**MEASURED (179/180): the path does not LEAVE the CHSWS window, it STOPS inside it.** All five ways
+out are now zero - `0o74415`, `0o74417`, `0o74426` (179) and `0o74476`, `0o74434` (177) - while the
+entry `0o74407` is 1 in both runs, with `5ACTSWAPPER`=2 proving the machine was alive. The stall is
+inside ONE routine, entered exactly once.
 
-**Blocked only on the shared build tree** (held by `nd500uc-fc`). The next window is one build and
-one run, not an analysis.
+Leading candidates, in the order the ladder tests them: the frame push at `0o74411` never returned
+(its overflow exit `0o43660` is `IOF`/`TRA PGC`, a trap handler that does not come back), or the
+call at `0o74425` entered `0o163637` and never came back - which may be the designed park on a
+monitor call, since the same capture reports one stop posted with no restart. Check the parked
+process before calling that second one a fault.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure

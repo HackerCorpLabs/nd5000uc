@@ -12482,3 +12482,97 @@ object): **`JPL I <pointer>` renders identically whether the callee is a routine
 plumbing the compiler emitted.** The disassembly cannot tell them apart, and the instrument built on
 top of it would have measured the plumbing with a straight face. Read the target before arming the
 landing site.
+
+## 180. MEASURED: the path does not LEAVE the window, it STOPS inside it - and that makes 179's one retraction wrong
+
+Section 179's arm set ran. `RETROCORE_ND5000_WATCH=chswsexit`, pack `D:\DOMS-CSFIX.IMG`,
+`RETROCORE_HARNESS_TIMEOUT_SCALE=0.5`, single test
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`. Build asserted 0 errors before the run;
+test exit 0.
+
+    ----- PC watch table (after PLACE-DOMAIN) -----
+      CHSWS prologue@0o74407       hits=1
+      EXIT err-1 bittest@0o74415   hits=0
+      EXIT success@0o74417         hits=0
+      EXIT err-2 CALL2@0o74426     hits=0
+      CONTROL 5ACTSWAPPER@0o145162 hits=2
+
+      CHSWS prologue@0o74407 hit#1 PIL=1 A=0o D=17o T=217o X=52222o B=176200o L=75247o
+
+### 180.1 This is the outcome 179 named in advance as a finding
+
+Section 179.5 committed to the reading before the run: *"Any other shape is itself a finding... All
+three cold with the prologue hot means the path leaves somewhere the decode says it cannot - which
+would put the decode, not the machine, under suspicion."* That is exactly what came back, so it is
+reported as written rather than by promoting whichever exit looked most interesting.
+
+**Every way out of the window is now measured at zero:**
+
+| way out | measured | where |
+|---|---|---|
+| `0o74415` error return | 0 | 179 |
+| `0o74417` success return | 0 | 179 |
+| `0o74426` CALL#2 error landing | 0 | 179 |
+| `0o74431` -> `0o74476` | 0 | 177 |
+| fall-through to `0o74434` | 0 | 177 |
+
+with the entry at `0o74407` measured at **1** in both runs. An entry that is reached and no exit that
+is: **the path stops inside the 21 words.** The stall is no longer "somewhere in the auto-load
+ladder" - it is inside one routine, and that routine is entered exactly once.
+
+`5ACTSWAPPER` at 2 says the machine was alive and the ND-100 was not stuck at this PC, so this is not
+a dead box being described as a stopped routine.
+
+### 180.2 The retraction in 179.2 was wrong, and this measurement is what says so
+
+Section 179.2 dropped the `0o74412` arm, writing that arming it *"was going to spend a build window
+confirming that the compiler emits a working prologue."*
+
+That is a fair objection to the question **179 thought the arm asked** - "does the frame-push helper
+have a bug?" It is not an objection to the question the arm actually answers: **"did the stack
+overflow?"** The push at `0o44030` bounds-checks at `0o44034` and on failure calls
+`0o44101` -> `0o43660`:
+
+    043660  IOF               interrupts off
+    043661  STF I 50
+    043664  TRA PGC           read the paging control register
+    043667  TRR PCR
+
+That is a trap handler. It does not return. **A prologue with no bug still does not come back if the
+stack is full** - and with all five exits cold, "the prologue never returned" is now a leading
+candidate rather than a pedantic one.
+
+The error has a clean shape and it is not the same as 179's own lesson. 179 correctly established
+*what the callee is* (compiler plumbing) and then let that fact answer a *different* question -
+*whether control returns from it*. Identifying the callee bounds what a routine MEANS; it says
+nothing about whether the machine survived the call. **Knowing what code is for is not knowing that
+it completed.**
+
+### 180.3 The next instrument is a LADDER, not a set of exits
+
+Exits cannot narrow this: they are all zero. What discriminates is a chain in which **each arm
+requires the one above it**, so the last arm with a hit names the stop point. Armed as
+`RETROCORE_ND5000_WATCH=chswsladder` (`ArmChswsLadderWatch`, standoff 180):
+
+    0o74407  = 0x7907   1  prologue              control, expect 1
+    0o74412  = 0x790A   2  push returned         0 => the push at 0o74411 never came back
+    0o43660  = 0x47B0   2b STACK OVERFLOW        the push's non-returning failure exit
+    0o74420  = 0x7910   3  past both bit tests
+    0o74425  = 0x7915   4  at CALL2
+    0o163637 = 0xE79F   5  CALL2 entered
+    0o145162 = 0xCA72   CONTROL 5ACTSWAPPER      liveness
+
+Readings, decided before the run:
+
+- `0o74412` cold **and** `0o43660` hot -> the stack overflowed in the prologue.
+- `0o74412` cold **and** `0o43660` cold -> the push neither returned nor took its documented failure
+  exit. Then the decode of `0o44030` is wrong, not the machine.
+- `0o74425` hot **and** `0o163637` hot -> the callee was entered and never came back. **Check the
+  parked process before calling that a fault**: the same capture reports
+  `MON restart path posted=2 seen=1 taken=1`, i.e. one stop posted with no restart, and the harness
+  prints in its own words that for the swapper this is the designed idle rather than a verdict.
+- `0o163637` cold **and** `0o74425` hot -> the call was issued and the callee never started, which
+  would mean the pointer word does not hold what the listing says.
+
+`0o163637` = `0xE79F` must be checked against its per-hit `PIL`/`B` detail before it is believed;
+`DiagPcWatch` matches the 16-bit PC only, and that is how 177's 30 spurious hits were caught.
