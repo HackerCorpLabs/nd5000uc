@@ -12266,3 +12266,75 @@ initialised. So section 176c's caution is discharged in the direction that makes
 `N500DF` really is zero after the ND-500 subsystem reports itself initialised, rather than merely
 being read too early. Whether it is SUPPOSED to be non-zero is `[OPEN]` - but it can no longer be
 dismissed as a probe-timing artifact, which is exactly what the single early sample invited.
+
+## 178. Inside the 21-word window: FOUR exits before the guard, and two calls that may not return `[V]` code
+
+The window bounded by section 177 - `CHSWS` entry `0o74407` (hit once) to the guard `0o74434` (hit
+zero) - decodes cleanly. Every line here is an instruction; no pointer words in this stretch.
+
+```
+074407  STF ,B -54            CHSWS entry            hits=1
+074410  RADD CLD SL DA        A := L
+074411  JPL I 75              CALL [074506]          <- may not return
+074412  LDX ,B -57                                   <- reached only if it does
+074413  LDA ,X -22
+074414  BSKP ONE 30 DA
+074415  JMP 67   -> 074504    EXIT A
+074416  BSKP ZRO 70 DA
+074417  JMP 63   -> 074502    EXIT B
+074420  LDD ,B -65
+074421  STD ,B -63
+074422  LDX ,B -57
+074423  LDD ,X -7
+074424  STD ,B -65
+074425  JPL I 62              CALL [074507]          <- may not return
+074426  JMP 56   -> 074504    EXIT C
+074427  LDX ,B -57
+074430  LDA ,X -17
+074431  JAF 45   -> 074476    EXIT D
+074432  LDX ,B -11
+074433  LDA ,X 20
+074434  SAT 52                guard start            hits=0
+```
+
+### What is already excluded
+
+**EXIT D is ruled out by data in hand.** `0o74431` jumps to `0o74476`, and section 177 measured
+`0o74476` at **zero** hits. So the path did not leave that way.
+
+That leaves three exits (A, B, C - two of them to the same target `0o74504`) plus the two calls,
+either of which could simply not return.
+
+### The discriminating arm set, and why `0o74412` is the important one
+
+`0o74412` is the instruction after the first call. **If `0o74411`'s call never returns, `0o74412`
+reads zero** - the same "did it come back" subtraction that settled the MON 60 question in shape, and
+the cheapest possible test of the most likely explanation for a path that vanishes.
+
+Proposed arms, fully discriminating and self-checking in the sense of 177 (each exit has a required
+predecessor also armed):
+
+```
+0o74407  CHSWS entry        expect 1  - control, already known
+0o74412  after CALL#1       0 => the call at 0o74411 never returned
+0o74415  EXIT A
+0o74417  EXIT B
+0o74426  EXIT C             0 with 0o74412 non-zero => CALL#2 at 0o74425 never returned
+0o74431  EXIT D             expect 0  - keeps 177's measurement visible in the same table
+0o74434  guard start        expect 0  - the bound itself
+5ACTSWAPPER                 liveness
+```
+
+Exactly one of {A, B, C} should hit, or none of them if a call swallowed the path. Those outcomes
+are mutually exclusive, so no reading of the table can be ambiguous.
+
+**Not yet armed** - the shared build tree is with `nd500uc-fc`. This is written down rather than
+implemented so the next window is a build and a run, not a fresh analysis.
+
+### A note on `,B -57`, since three of these lines use it
+
+`0o74412`, `0o74422` and `0o74427` all reload `X` from `,B -57`, then read fields `-22`, `-7` and
+`-17` of it. Per the correction in 176b, that recurrence is NOT evidence of anything by itself -
+`,B -57` appears 124 times in this segment. It is noted only because within THIS routine the same
+slot is reloaded three times, which is consistent with one object being re-examined after each call.
+Consistent with, not evidence of.
