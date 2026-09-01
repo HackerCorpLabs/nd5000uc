@@ -12205,3 +12205,64 @@ measurement with an address and a value.
 
 The fix is the one `ADRZERO` already has by accident: read it twice, early and late, and print both.
 Anything read once in that probe block deserves the same treatment before it is quoted.
+
+## 177. The allocation step is NEVER REACHED - neither the guard nor its skip. And the arm's self-check proved its own 30 hits false `[V]`
+
+`RETROCORE_ND5000_WATCH=msgprint`, single test, unchanged pack and windows.
+`OUTCOME: nd-500=OK place-domain=STALL run=STALL startMessagesSeen=1`.
+
+```
+CHSWL entry@0o74330        hits=1
+PRINT LoadSwapper@0o74337  hits=1
+CHSWS entry@0o74407        hits=1
+guard start@0o74434        hits=0     <-
+PRINT AllocMem@0o74445     hits=30    <- and yet
+guard SKIPPED to@0o74476   hits=0     <-
+MON60 gateway@0o146256     hits=5
+CONTROL 5ACTSWAPPER        hits=2     liveness OK
+```
+
+### The 30 hits at the print are FALSE, and the table proves it without any outside argument
+
+`0o74445` is reachable only by falling through the guard chain that STARTS at `0o74434`. **`0o74434`
+has zero hits.** You cannot arrive at `0o74445` through the guard without executing `0o74434`, so
+those 30 hits did not come that way - they are foreign code at an aliased address.
+
+The register log agrees and adds the detail: all 30 are `PIL=0`, `B=42463o`, `L=42605o`/`42630o` -
+the same signature as the 30 spurious `KGPIB` hits in section 174, at the adjacent word. So one
+2-word sequence of foreign code executes at `0o74444`-`0o74445` thirty times. Notably it does NOT
+touch `0o74434` or `0o74476`, which is why those read zero and why the contradiction is visible at
+all.
+
+**This is the first arm set in this document that caught its own false reading from inside the same
+table.** Section 174 needed the PIL and link registers to argue it; here the arithmetic of the arms
+does it: an address with a required predecessor, armed alongside that predecessor, cannot lie about
+being reached.
+
+### What is therefore MEASURED
+
+**The `> Allocating memory` code was never executed at all - not the print, not the guard, not the
+skip.** So the missing message is neither a fault at the print nor a decision to suppress it:
+**control never got there.**
+
+Combined with `CHSWS entry@0o74407 hits=1`, the auto-load path stopped somewhere in the **21 words
+between `0o74407` and `0o74434`**. That is the tightest bound this investigation has had, and it
+retires the framing of 176a/176b: there is no point identifying what the guard tests, because the
+guard never runs.
+
+`PRINT LoadSwapper@0o74337 hits=1` also confirms section 176's attribution directly - one hit, one
+printed message - so the inline-string idiom reading was right.
+
+### `N500DF` is genuinely `0x0000`, not an early-probe artifact
+
+The second probe added this run reads it after `ADRZERO` has become `0x0840`:
+
+```
+N500DF@0o51767=0x0000 (early read was 0x0000)
+```
+
+**Both reads are zero**, at points where a neighbouring cell of the same class demonstrably has
+initialised. So section 176c's caution is discharged in the direction that makes it interesting:
+`N500DF` really is zero after the ND-500 subsystem reports itself initialised, rather than merely
+being read too early. Whether it is SUPPOSED to be non-zero is `[OPEN]` - but it can no longer be
+dismissed as a probe-timing artifact, which is exactly what the single early sample invited.
