@@ -8,30 +8,29 @@
 
 ## Next
 
-**NEXT: arm `0o74445` (the `> Allocating memory` CALL SITE) and `0o74476` (its skip target), and find
-out whether the missing message is a FAULT or a DECISION.** Standoff **176**. The print is guarded by
-three inequality tests - it is reached only when A is none of `52`, `53`, `76` octal - so its absence
-may be the auto-load deliberately classifying and suppressing it, which would remove the missing
-message as evidence of the stall entirely. `0o74445` self-checks: a genuine hit must show A not in
-{52,53,76}.
+**NEXT: read the 21 words between `0o74407` (`CHSWS`, hit once) and `0o74434` (guard start, hit
+ZERO) and find where the auto-load path leaves.** Standoff **177**. That is the tightest bound this
+investigation has had.
 
-The two earlier attempts were one word off on either side: `KGPIB 0o74444` is the third guard jump
-(reachable only when `A == 76`, and its 30 hits show `A=0`/`A=1`, so they are aliased), and
-`0o74447` is the string itself.
+**MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
+the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
+at the print nor a decision to suppress it: control never gets there. This RETIRES 176a/176b - there
+is no point identifying what the guard tests, because the guard never runs.
 
-**Also settled (176):** `> Loading Swapper` is printed at `0o74337`, inside `CHSWL` - found by the
-ND/PLANC INLINE-STRING idiom (`JPL` then the string immediately after; the print routine finds it via
-the link register). No instruction resolves to a string address anywhere in the segment, so a
-reference search finds nothing and that is not a gap.
+**The 30 hits reported at `0o74445` are FALSE and the table proved it itself:** that address is
+reachable only through the guard chain starting at `0o74434`, which has zero hits, so they are
+foreign code at an aliased address (same `PIL=0`/`B=42463o` signature as the spurious `KGPIB` hits).
+**Arm an address together with its required predecessor and the pair cannot lie about being reached** -
+the one instrument design this session that caught its own bad reading with no outside argument.
 
-**STILL OPEN (173): the MON 60 counts balance but the arrival order forbids reading them that way.**
-gateway=5, error returns=3, success returns=2. One gateway hit has NO return; another is followed by
-BOTH return arms with A unchanged, which one MON cannot produce. `3+2=5` is two anomalies cancelling.
-Counts `[V]`, meaning `[OPEN]`.
+**ALSO MEASURED (177): `N500DF@0o51767` is `0x0000` at BOTH probes**, the second taken after
+`ADRZERO` has become `0x0840`. So it is genuinely zero after the subsystem reports itself
+initialised, not read-too-early. Whether it SHOULD be non-zero is `[OPEN]`, but it can no longer be
+waved away as probe timing - worth chasing, since if `B` is `N500DF` in `S3SM5` then every `,B -nn`
+access in that segment is relative to zero.
 
-**MEASURED AND SOLID:** MON 60 polarity from live registers - A at the gateway is a parameter-block
-pointer, A at `0o146257` is a status, A at `0o146260` is `0`. P+1 = ERROR, P+2 = success. Confirmed
-independently by the peer session's carve; `mon60-callers/INDEX.md` was the outlier and is annotated.
+**STILL OPEN (173):** the MON 60 counts balance (5 = 3 + 2) but the arrival order forbids that
+reading - one gateway hit has no return, another has both. Counts `[V]`, meaning `[OPEN]`.
 
 > **CLOSED (standoff 162): the `THA` line of investigation is over, and it was never a defect.**
 > The copy-diagnostic ring shows SINTRAN writing `0x00000000` into all thirteen trap-config cells,
