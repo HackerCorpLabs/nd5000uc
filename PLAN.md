@@ -8,19 +8,26 @@
 
 ## Next
 
-**NEXT: read the LADDER result (`RETROCORE_ND5000_WATCH=chswsladder`) - the last hot arm names
-where the routine stops.** Standoff **180**.
+**NEXT: arm `0o163641` and `0o163643` (the two calls in the callee's own prologue) plus
+`0o163642`/`0o163644` - four addresses - to find which one swallows two of the three entries.**
+Standoff **182**.
 
-**MEASURED (179/180): the path does not LEAVE the CHSWS window, it STOPS inside it.** All five ways
-out are now zero - `0o74415`, `0o74417`, `0o74426` (179) and `0o74476`, `0o74434` (177) - while the
-entry `0o74407` is 1 in both runs, with `5ACTSWAPPER`=2 proving the machine was alive. The stall is
-inside ONE routine, entered exactly once.
+**MEASURED (179-182): the stall is inside ONE routine, `0o163637`.** Reached from `0o74425`, which
+executes once. Entered THREE times with identical parameters (`T=217o A=41o D=62000o`) and an
+unchanged `L=0o74426`; since only `JPL` loads `L`, the re-entry is not a call, which excludes the
+known retry loop at `0o163624`/`0o163632` by measurement. It reaches NEITHER epilogue - confirmed
+from the caller (`0o74426` cold) and the callee (`0o164112`/`0o164114` cold) independently.
 
-Leading candidates, in the order the ladder tests them: the frame push at `0o74411` never returned
-(its overflow exit `0o43660` is `IOF`/`TRA PGC`, a trap handler that does not come back), or the
-call at `0o74425` entered `0o163637` and never came back - which may be the designed park on a
-monitor call, since the same capture reports one stop posted with no restart. Check the parked
-process before calling that second one a fault.
+Arm 1 does not fail (`0o163646` cold); it is simply reached once. So **two of the three entries stop
+inside the four-word prologue `0o163637`..`0o163644`**.
+
+Dead candidates, both killed by measurement rather than argument: the stack overflow (`0o74412`
+measured 1, so the frame push returned; the `0o43660` hits were aliased foreign code at `PIL=0`) and
+`N500DF@0o51767` (loaded into `X` and used as a base address - the code never reads `,X 0`, so the
+word at it being zero was never an operand of this path).
+
+**Three entries is a WINDOW TOTAL, not a bound.** Nothing measured licenses calling the loop
+infinite, and the count must not be quoted as one.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
