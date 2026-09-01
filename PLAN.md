@@ -8,6 +8,14 @@
 
 ## Next
 
+**MILESTONE LOCALISATION (standoff 169, no instrument needed):** the auto-load prints three
+messages in sequence - `> Loading Control Store`, `> Loading Swapper`, `> Allocating memory` - and
+**our console never reaches the third**, on every run. They live in `(SYSTEM)SEGFIL0:DATA` page 287,
+i.e. a SINTRAN SEGMENT, **not** in the ND-500 monitor program (checked in the carved J04 banks AND
+in the pack's own `ND-500-MON-J:PROG`). The `nd-500-bus-interface` skill's claim that "nd-500-mon
+prints Loading Control Store" is WRONG and matters: a watch in the monitor's address space cannot
+see this code.
+
 **NEXT, AND IT IS ONE SUBTRACTION (standoff 168): did the last `MON 60` ever RETURN?**
 Gateway executions = 5, error returns (`0o146263`, P+1) = 3, success returns (`0o146260`, P+2) = not
 yet measured. **If errors + successes is less than 5, a `MON 60` was issued and never came back** -

@@ -11661,3 +11661,67 @@ that was queued for a question now answered will answer this one instead - at no
 This is the sharpest the stall question has been: not "what work was never queued" (159), not "why
 does the retry not fire" (165, refuted), but **"did the last MON 60 ever return?"** - answerable by
 subtraction, from three counters, in one run.
+
+## 169. The `> Loading ...` messages are SINTRAN's, not the monitor's - and the console stops one milestone short `[V]` 2026-09-01
+
+Read-only carve while the build tree was lent out. Method: decode the actual bytes in order and read
+what is there, rather than searching for what I expected.
+
+### The three messages are a SEQUENCE, and we only ever see two of it
+
+Around the strings in the image, in layout order:
+
+```
+$> Loading Control Store'   (SYSTEM)CONTROL-STORE:DATA'   (SYSTEM)CONTROL-1-STORE:DATA'
+$> Loading Swapper'         (SYSTEM)SWAPPER'
+$> Allocating memory'       ... ' pages'
+```
+
+Our console prints the first two and **never `> Allocating memory`**, on every run. So the stall
+sits between "the swapper is being loaded" and "memory is being allocated for it" - a milestone
+boundary, established without any instrument.
+
+Note this is NOT contradicted by the swapper having started: the run does reach `3START` and the
+swapper answers MON 377B (`startMessagesSeen=1`). Whatever `Allocating memory` covers, it is not a
+precondition for that - which makes the missing message more interesting, not less.
+
+### They are in `(SYSTEM)SEGFIL0:DATA` - a SINTRAN SEGMENT
+
+Checked by extracting **all 95 files** from `D:\DOMS-CSFIX.IMG` and searching every one, rather than
+guessing:
+
+```
+FILES CONTAINING THE MESSAGES: [('SYSTEM\SEGFIL0.DATA', 16748544)]
+  Loading Control Store  588719 (0x8FBAF, page 287) and 2542511 (page 1241)
+  Loading Swapper        588227 (0x8F9C3, page 287) and 2542019, 4953893
+  Allocating memory      588367 (0x8FA4F, page 287) and 2542159
+```
+
+All three sit within ~500 bytes of each other on **page 287**, i.e. in one routine, and there is a
+second complete copy on page 1241 (a second segment or a backup generation).
+
+### CORRECTION to the `nd-500-bus-interface` skill
+
+The skill states:
+
+> the driver returns **ECSLOAD 2032B** -> **nd-500-mon prints "Loading Control Store"**, auto-loads
+> `(SYSTEM)CONTROL-STORE:DATA` [...] and retries.
+
+**The nd-500-mon program does not contain that string.** Checked three ways:
+
+ - carved `nd-500-mon-j04-bank1.bin` - no `Loading`, no `CONTROL-STORE`, no `SWAPPER`.
+ - carved `nd-500-mon-j04-bank2.bin` - has `CONTROL-STORE` and `SWAPPER` as FILENAMES, but no
+   `Loading` and no `Allocating`. (Its `Swapper` hit is the STATUS report label
+   `$Swapper.......: `, a different thing entirely - the sort of match that looks like a find.)
+ - the pack's own `(SYSTEM)ND-500-MON-J:PROG`, extracted and searched - none of the three.
+
+So the monitor knows the FILENAMES it will ask for, and SINTRAN prints the progress messages and
+does the loading. The attribution matters because it decides which side to instrument: a PC watch in
+the monitor's address space can never see this code.
+
+### What this does NOT change
+
+Section 168's subtraction is still the next measurement, unaffected: gateway executions = 5, error
+returns = 3, success returns unmeasured. If they do not balance, a `MON 60` never returned - and
+"never returned" is now given a place to be, since the printing code is SINTRAN-side and is exactly
+the sort of code a `MON 60` handler would be executing while its caller waits.
