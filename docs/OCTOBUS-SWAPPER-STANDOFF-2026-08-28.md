@@ -12748,3 +12748,100 @@ different point in the instruction than assumed, or `L` is not what is being pri
 none of 182.1-182.3, which rest on counts and on the `L=0o74426` triple that IS consistent across
 every table. Flagged here so the next reader does not quietly adopt it as evidence - an off-by-one in
 a register display is exactly the kind of thing that reads fluently and is wrong.
+
+## 183. RETRACTION: the "entered three times" count is WRONG. The routine runs ONCE, and 181's retry reading goes with it
+
+`RETROCORE_ND5000_WATCH=chswsprologue`, same pack and scale, build 0 errors, test **Passed: 1**.
+
+    0 entry@0o163637             hits=3     <- the outlier
+    1 at push@0o163641           hits=1
+    2 push returned@0o163642     hits=1
+    3 at call-A@0o163643         hits=1
+    4 call-A ERR land@0o163644   hits=0
+    5 arm1 call#2@0o163645       hits=1
+    1b push entry@0o43740        hits=1088  <- shared plumbing, see 183.3
+    CONTROL 5ACTSWAPPER          hits=2
+
+### 183.1 The contradiction, and which side of it is wrong
+
+The first three words of the routine are straight line:
+
+    163637  STF ,B -54
+    163640  RADD CLD SL DA
+    163641  JPL I 57
+
+There is no branch between them, and nothing in the segment jumps into `0o163641`. **So the entry
+count and the `0o163641` count MUST be equal.** They are 3 and 1. No machine behaviour produces that;
+one of the two numbers is wrong.
+
+Five arms say the routine ran once - `0o163641`, `0o163642`, `0o163643`, `0o163645`, and (from
+standoff 182) `0o163647`. One arm says three. **The entry count over-reports, and the count of 3 is
+withdrawn.**
+
+Standoff 183's arm set named this outcome before the run: *"Both full and the sum still short: the
+loss is not in the prologue at all and the entry count is being inflated by something this table
+cannot see - which would put the `0o163637` count itself, not the routine, under suspicion."*
+
+WHY it over-reports is **`[OPEN]`**. `0o74407` is also an `STF ,B -54` and measured 1, so "a
+multi-word store is sampled once per memory cycle" does not survive contact with the other table.
+Not knowing the cause does not weaken the retraction: the straight-line argument is enough to know
+the number is wrong, and that is a separate question from knowing why.
+
+### 183.2 What this retracts
+
+**Standoff 181's headline is WRONG:** *"entered three times, returned from zero times, with identical
+parameters"* and *"identical parameters on every entry is the signature of a retry, not of
+progress."* There was no retry. The routine was entered ONCE. The parameters were identical across
+three readings of a single entry, which is not evidence of anything - of course one entry has one
+set of parameters.
+
+Standoff 182's arithmetic inherits the error: *"two of the three entries stop within the four-word
+prologue"* is void, because there were never three entries. What 182 measured that SURVIVES is the
+part that did not depend on the count - both epilogues cold, and arm 1's error exit cold.
+
+**And the reasoning in 181.2 that felt strongest is exactly what collapsed.** It ran: `L` is loaded
+only by `JPL`; `L` is unchanged across all three entries; therefore the re-entry did not come through
+a call; therefore the known retry loop is excluded by measurement. Every step is sound. The premise -
+that there were three entries - was an unchecked instrument reading, and a chain of correct
+deductions from it produced a confident, specific, wrong conclusion about the machine. **Good
+reasoning on a bad number is not safer than bad reasoning; it is more persuasive.**
+
+### 183.3 The `0o43740` count of 1088 is shared plumbing, not our path
+
+`0o43740` is the frame-push helper. Its 1088 hits span `PIL=0` and `PIL=1`, dozens of distinct `L`
+values (`147535o`, `57047o`, `51372o`, `50364o`, ...) and different `X`/`B`. It is called by the
+whole segment. **A count on a shared helper measures the segment, not the routine under test** -
+taxonomy item #8, a number that cannot be RELEVANT. It is recorded here only so nobody reads 1088 as
+activity on this path. The arm that carries the information is `0o163642`, which says the push
+returned, once.
+
+### 183.4 What actually stands now
+
+**`[V]`, and independent of the withdrawn count:**
+ - `0o74425` calls `0o163637` exactly once.
+ - The routine runs straight through its prologue: push called and returned, call-A executed and
+   returned by its SUCCESS door (`0o163644` cold, `0o163645` hot).
+ - Arm 1's second call succeeded too - `0o163646` cold, `0o163647` hot (182).
+ - It reaches **`0o163647`** and never reaches either epilogue (`0o164112`, `0o164114` both cold),
+   and the caller's landing sites are cold from the other side.
+
+**So: no retry, no loop. One call, one entry, linear progress through arm 1, and then it stops at or
+beyond `0o163647` and never returns.** That is a simpler and better-supported picture than the one in
+181-182, and it is smaller: the search space is now the second arm onward.
+
+### 183.5 The method note - this is why predecessors get armed
+
+The false count survived TWO runs and three sections. It was self-consistent, reproducible across
+runs, and carried plausible register detail that made it look genuine; re-reading it only confirmed
+it. Nothing about the number itself could expose it - **taxonomy item #7, the unfalsifiable single
+number.**
+
+What exposed it was arming the instruction that MUST have executed if the entry did. That is the same
+self-checking-arm technique that caught 30 false hits in section 177, applied to the entry of a
+routine rather than to a guarded print. **An arm and its required predecessor cannot both lie**, and
+the cost is one watch slot.
+
+The rule this earns: **when a count is the load-bearing fact in a conclusion, arm its predecessor in
+the same table.** Not the next run - the same table, so the two numbers are produced by one
+instrument under one set of conditions and can be compared without an argument about whether the runs
+were alike.
