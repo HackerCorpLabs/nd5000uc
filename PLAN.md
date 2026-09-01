@@ -8,6 +8,19 @@
 
 ## Next
 
+**NEXT, AND IT IS ONE SUBTRACTION (standoff 168): did the last `MON 60` ever RETURN?**
+Gateway executions = 5, error returns (`0o146263`, P+1) = 3, success returns (`0o146260`, P+2) = not
+yet measured. **If errors + successes is less than 5, a `MON 60` was issued and never came back** -
+the monitor is blocked inside SINTRAN's handler, which is what "process not scheduled, machine idle"
+looks like from outside. If they balance, the block is after the last return, in the monitor's own
+code. Opposite implications, one subtraction. The corrected polarity watch already arms both return
+arms, so the queued run answers this at no extra cost.
+
+Ruled out on the way: the ECSLOAD retry loop is an unconditional BUSY-SPIN (`132170` is a six-word
+stub that ignores the status and always retries - `prog.md` 5.6). A spin would show thousands of
+gateway executions and the ND-100 pinned in the gateway; we measured 5 and an idle machine. So
+ECSLOAD is not the blocker.
+
 **QUEUED, NOT YET RUN:** `RETROCORE_ND5000_WATCH=polarity` is written and committed but NOT built -
 the RetroCore tree is lent to `nd500uc-fc` for C1/D3 real-SINTRAN fixtures (1.5-2.5 h from 2026-09-01
 12:10). Do not `dotnet build`/`dotnet test` there until they report done.

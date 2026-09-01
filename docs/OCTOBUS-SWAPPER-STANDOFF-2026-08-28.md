@@ -11596,3 +11596,68 @@ So the honest position is narrower than 165's: the gateway has a working retry l
 errors we actually SAW did not use it. Whether any retry fired needs the corrected arms
 (`0o146271` retry vs `0o146277` no-retry) and the full status list. That is a measurement, and it is
 queued behind the shared build tree.
+
+## 168. The polarity was ALREADY CARVED - and the same document hands over the sharpest question yet `[V]` 2026-09-01
+
+### I re-derived a documented answer
+
+`nd-500-mon-j04.prog.md` section **5.4, "Skip/direct polarity - the task premise was inverted"**,
+already contains section 167's conclusion, reached by a different route:
+
+> `146257` (`P+1`) = the **DIRECT / ERROR** path [...] `146260` (`P+2`) = the **SKIP / SUCCESS** path
+>
+> confirmed from the other end by the SINTRAN handler source - `5P-P2-MON60.NPL:2247` (`5OKRET` does
+> `MIN ZPREG`, incrementing the caller's saved P = skip return, and sets `ZAREG := 0`), while `ERET`
+> at `:1307` stores the error code into `ZAREG` and falls through **without** `MIN ZPREG`.
+
+Two independent derivations agreeing - mine from P-relative operand decoding on the ND-100 side,
+theirs from the NPL handler on the SINTRAN side - is stronger evidence than either alone, so 167
+stands. But the honest note is that **it did not need deriving.** `CLAUDE.md` says it outright:
+*"READ THE DEEP DIVE FIRST, IT PROBABLY ALREADY ANSWERS IT."* The relevant section was two lines
+below `5.3 The gateway, verified byte-for-byte` in the same file I was already reading, and its
+heading names the exact question.
+
+It also records that the inversion is in **three** places, not one: the task brief, `INDEX.md`, and
+`ND500-BUS-INTERFACE-REFERENCE.md` section 11. The `nd-500-bus-interface` SKILL already carries the
+correction (*"byte-PROVEN, bus-ref section 11 had it inverted"*), which is why the skill and
+INDEX.md disagreed in section 166. Neither was a fresh error; one had been fixed and the other had
+not.
+
+### The finding that matters: THE RETRY LOOP IS AN UNCONDITIONAL BUSY-SPIN
+
+Section 5.6 carves the retry hook at `132170` - the routine called from `146273`, inside the retry
+arm - and finds it is a six-word stub that allocates a one-word frame, ignores the error code, and
+unconditionally takes the skip return. Consequences it states:
+
+ - `132170` always returns to `146275` = `JMP -21` = **retry**.
+ - `146274` and `146276` are **unreachable** - the compiler's dead "else" arms.
+ - **the retry loop is a tight busy-spin** on `002032B` / `004017B` until the status changes.
+
+### Which turns the stall into a sharp, falsifiable question
+
+A busy-spin would show as thousands of gateway executions and an ND-100 pinned in the gateway.
+**We measured neither.** `MON60 gateway hits=5`, and 90% of the PC samples during the stall are the
+ND-100 IDLE loop at `pil=0` (section 163). So the gateway is NOT spinning, and ECSLOAD is not the
+blocker.
+
+Combine that with the polarity now known:
+
+```
+gateway executions (0o146256)   = 5
+error returns      (0o146263)   = 3      P+1, status in A
+success returns    (0o146260)   = ?      P+2      NOT YET MEASURED
+```
+
+**If error returns plus success returns is LESS than gateway executions, then a MON 60 was issued
+and never came back** - the monitor is blocked INSIDE SINTRAN's handler, which is exactly what "the
+process is not scheduled and the machine is idle" looks like from the outside. If they balance, the
+command returned every time and the block is after the last return, somewhere in the monitor's own
+code.
+
+Those two have opposite implications and one subtraction separates them. **The corrected polarity
+watch already arms both return arms** (`0o146257` and `0o146260`) alongside the gateway, so the run
+that was queued for a question now answered will answer this one instead - at no extra cost.
+
+This is the sharpest the stall question has been: not "what work was never queued" (159), not "why
+does the retry not fire" (165, refuted), but **"did the last MON 60 ever return?"** - answerable by
+subtraction, from three counters, in one run.
