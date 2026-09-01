@@ -8,42 +8,23 @@
 
 ## Next
 
-**NEXT: root-cause the file-system error `INFO * 0B:6B * ... SINTRAN III File System / Not used`
-(reporting site `BAK01.37603B`).** Standoff **163**. It fires between `> Loading Control Store` and
-`> Loading Swapper` - i.e. INSIDE the auto-load ladder that the stalled `place-domain` triggers - so
-it is UPSTREAM of everything 159 was asking about. `Not used` is SINTRAN's text for an error code
-with no assigned message, so the file system returned error `6B` and there was nothing to print.
-Standing rule: known bugs before features, and no error is noise.
+**NEXT: find why `place-domain` blocks even though the monitor DOES retry it.** Standoff **165**
+refuted the obvious candidate: `MON 60` is entered 5 times and the ECSLOAD arm 3 times, alternating,
+so the auto-load ladder re-issues the command repeatedly. The command is re-issued and then blocks.
+`A=2064o` at the fourth gateway entry sits inside the documented monitor error range `2000B..2100B`
+and is the one unexplained value on the path - identifying it is the concrete next step.
 
-**MEASURED (standoff 164):** every non-watchdog message in the run belongs to `place-domain` - the
-cache clear, the thirteen PHYSWR, the 3START and the 3MONCO. `run` adds only watchdogs. The section
-163 `[D]` is now `[V]`.
+**MEASURED AND LOAD-BEARING (standoff 164):** every non-watchdog message in the run belongs to
+`place-domain` - the cache clear, the thirteen PHYSWR, the 3START and the 3MONCO. `run` adds only
+watchdogs. The command owns the whole ladder because it triggers it through the ECSLOAD gate.
 
-**AND THE FIRST INSTRUMENT ON THE ERROR MISSED:** a PC watch on the reported address `0o37603` fires
-**155 times** while the message prints **once**, so it cannot separate the failure from 154 healthy
-calls (taxonomy #8 - a number that cannot be RELEVANT). The liveness control fired, so the watch
-works; it is simply pointed at the wrong thing. **Next instrument must watch the RETURN, not the
-entry** - the A register at `0o37604`, stored at `0o37630` (`STA ,B 2`) on the error path, which ran
-twice in a run where the message printed once.
-
-**THE FRAMING CORRECTION THAT MADE THIS VISIBLE:** the test is
-`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` - it issues NO `load-control-store` and NO
-`start-swapper`. `place-domain` triggers both itself, through the ECSLOAD auto-retry gate. So the
-thirteen PHYSWR, the 3START and the 3MONCO are inside the `place-domain` window, and the harness's
-per-command labels say what was TYPED, never what that command delegated to.
-
-**THEN: what event is the `place-domain` process blocked on, and who was supposed to post it?**
-Standoff **163** sharpens 159. Nine of ten PC samples during the stall are the ND-100 IDLE loop at
-`pil=0`, so the command is not spinning - its process is not scheduled at all, i.e. BLOCKED on an
-event. The swapper's empty swap-wait FIFO (`queued-on-swapwait-fifo hits=0`, `5ACTSWAPPER` fired
-once, nothing page-faulted, PGF is FATAL class so the zero is real) is a CONSEQUENCE of that, not
-the cause.
-
-Measured and settled on the way: **`run` issues the ND-5000 nothing but watchdogs** - the census
-brackets it exactly, `1B` 21 -> 38 and every other count unchanged - so `run` blocks before the
-transport is involved. The same claim for `place-domain` is **[OPEN]**: there is no census point
-before it. The harness now stamps every observed mailbox message with the outstanding command
-(`_currentCmdLabel`), which answers it by measurement instead of by reading watchdog interleaving.
+**STOP INSTRUMENTING THE `0B:6B` FILE-SYSTEM ERROR** (standoff 165). Three watches, none
+discriminated. It prints once, BOTH loads succeed after it, and it appears in all five short
+bring-up runs - every one of which stalls - so there is no negative case and the correlation says
+nothing. It was promoted only for being the sole visible error in the transcript. **The `0o37603`
+= S3FS attribution is WITHDRAWN:** the address falls inside that segment's range, but the code
+executing there runs at PIL=12 with a constant register signature, i.e. driver-level code at an
+aliased address. A PC-only watch cannot decide segment identity.
 
 > **CLOSED (standoff 162): the `THA` line of investigation is over, and it was never a defect.**
 > The copy-diagnostic ring shows SINTRAN writing `0x00000000` into all thirteen trap-config cells,

@@ -11360,3 +11360,106 @@ its commands stalling its whole timeout, and never reached the one I wanted. The
 (`%TEMP%\retrocore-nd5000-octobus\octobus-breadcrumb.txt`) named the running command outright and is
 the right thing to read when a run is slower than expected - CPU time only says it is progressing,
 never at WHAT. Filter on the test name.
+
+## 165. The MON 60 retry DOES happen - and the S3FS localisation in 163/164 does not survive its own instrument `[V]` / `[OPEN]` 2026-09-01
+
+`RETROCORE_ND5000_WATCH=mon60`, single test, same pack and windows. Liveness control fired
+(`5ACTSWAPPER hits=2`), so the table is real.
+
+```
+MON60 gateway@0o146256   hits=5
+ECSLOAD catch@0o146263   hits=3
+CS loader@0o177152       hits=0
+RUNSW MSWSTART@0o163725  hits=1
+S3FS call@0o37603        hits=155
+S3FS RETURN A=@0o37604   hits=155
+S3FS error-store@0o37630 hits=2
+CONTROL 5ACTSWAPPER      hits=2
+```
+
+### What is settled: the retry is not the problem
+
+**MON 60 was entered five times and the ECSLOAD arm three times.** Gateway hits exceed catch hits,
+and the time-ordered log shows the alternation directly:
+
+```
+MON60 gateway hit#1  A=272o
+ECSLOAD catch hit#1  A=2166o
+MON60 gateway hit#2  A=365o
+MON60 gateway hit#3  A=1312o
+ECSLOAD catch hit#2  A=2113o
+MON60 gateway hit#4  A=2064o
+```
+
+So the command IS re-issued after the auto-load - repeatedly. The hypothesis this watch was built to
+test ("the retry never fires") is **REFUTED**. Whatever blocks `place-domain`, it is not a monitor
+that forgot to retry.
+
+`A=2064o` at gateway hit#4 sits inside the documented ND-500 monitor error range `2000B..2100B`,
+which is worth following; `2166o` and `2113o` at the catch do not, and neither is `2032B` (ECSLOAD).
+Naming any of them is `[OPEN]` - the A register at a routine's entry is not necessarily its status.
+
+`CS loader@0o177152 hits=0` is consistent with the octobus lane downloading the control store over
+the ACCP (LOCSD/LOCSM) rather than through the classic 3022 loader, so a zero is expected rather
+than missing. `[D]` - the arm was never independently shown to be the right address.
+
+### WHAT DOES NOT SURVIVE: the S3FS attribution in sections 163 and 164
+
+The register log makes two things plain that the hit COUNTS hid.
+
+**1. The two `error-store@0o37630` hits happen BEFORE the monitor is ever entered.** They are the
+first two entries in the time-ordered log, ahead of `MON60 gateway hit#1`:
+
+```
+S3FS error-store hit#1 PIL=3 A=0o      L=37627o
+S3FS error-store hit#2 PIL=3 A=177777o L=37627o
+MON60 gateway    hit#1 PIL=1 A=272o
+```
+
+The `0B:6B` message prints AFTER `place-domain` is typed, which is long after the first monitor
+entry. **So these two hits are not the reported error.** Section 164 proposed watching `0o37630`
+because it "ran twice in a run where the message printed once" - a coincidence of counts, and
+nothing more. `A=177777o` (-1) is a real return value of something, but not of the thing being
+hunted.
+
+**2. `0o37603` executes at PIL=12 and PIL=1 with an identical register signature every time.**
+
+```
+S3FS call@0o37603 hit#1  PIL=12 A=20000o D=124226o T=124612o X=124612o B=123537o L=0o
+S3FS call@0o37603 hit#10 PIL=1  A=20000o D=124250o T=124612o X=124612o B=123537o L=0o
+```
+
+`A=20000o` on all 26 logged hits, `L=0` throughout, and PIL 12 - the ND-500/octobus DRIVER level.
+That is not a background file-system call. It is a tight loop in driver-level code that happens to
+occupy the same 16-bit virtual address, which is precisely the aliasing every arm-set comment in
+this file warns about and which I nonetheless read past twice.
+
+**Therefore the claim "`0o37603` is inside `006-S3FS`, so the error is in the file system" is
+WITHDRAWN.** What is true is narrower: `0o37603` FALLS INSIDE the address range that segment
+006-S3FS occupies. Whether the code executing there when SINTRAN printed the message was S3FS is
+**[OPEN]**, and a PC-only watch cannot decide it - the instrument would need the page table or the
+running segment at the hit.
+
+### The rule this cost three instruments to learn
+
+Three watches have now been aimed at `0B:6B` and none discriminated:
+
+ - entry hits (164) - 155 executions for one message.
+ - return value (165) - the arm fires before the message exists.
+ - the error-store arm - matched on a count coincidence, at the wrong level entirely.
+
+**An address that lies within a segment's range is not evidence that the segment's code ran there.**
+Segment membership is a claim about the address map; execution is a claim about a moment. Those are
+different objects, and conflating them is taxonomy #19 in its purest form - every number was right,
+and the thing they were attributed to was not.
+
+### And the error is still not shown to matter
+
+Independently of localisation: `0B:6B` prints once, between `> Loading Control Store` and
+`> Loading Swapper`, and **both loads then succeed** - the swapper starts and answers MON 377B
+(`startMessagesSeen=1`, `RUNSW MSWSTART hits=1`). It appears in all five short-bring-up runs, every
+one of which stalls, so the correlation is perfect and worthless: there is no run in this lane where
+`place-domain` completes, hence no negative case to compare against.
+
+**Stop instrumenting this error until a working instance exists.** It is not demonstrably upstream of
+anything; it was promoted on the strength of being the only error visible in the transcript.
