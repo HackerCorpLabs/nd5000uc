@@ -13837,3 +13837,37 @@ if `X` is reloaded between the `WN5ST` write (`0o145176`) and the `RN5ST` read (
 `5ACTSWAPPER` writes one node and gates on another, and the two-node split is deliberate. **That
 single addressing mode now decides the reading, so it is the next thing to settle - against the
 ND-100 manual, not by another plausible decode.**
+
+## 198. §173 CLOSED: the anomaly is real, reproducible, and the two halves are in different contexts
+
+`RETROCORE_ND5000_WATCH=polarity`, same pack and scale, build 0 errors, test **Passed: 1**.
+
+    MON60 instr@0o146256      hits=5      return P+1 (ERROR)  hits=3
+    status compare@0o146263   hits=3      return P+2 (OK)     hits=2      3+2 = 5
+    RETRY@0o146271            hits=1      NO-RETRY@0o146277   hits=3      1+3 = 4  <- != 3
+
+**Arrival order (the measurement §173 called for, not the counts):**
+
+    #1  retry-entry, gateway, P+1(A=2166o), cmp, NO-RETRY      B=465o   L=10626o
+    #2  retry-entry, gateway, P+2(A=0)                         B=560o   L=10626o
+    #3  retry-entry, gateway, P+1(A=2113o), cmp, NO-RETRY      B=1505o  L=10626o
+    #4  retry-entry, gateway  ...                              B=2257o  L=10626o   *** NO RETURN
+    #5  retry-entry, gateway, P+1 AND P+2, cmp, RETRY AND NO-RETRY   B=176200o L=146253o
+
+**Both halves of §173 reproduce**: one gateway with no return (#4) and one with both (#5). The
+balance is two anomalies cancelling, which is why the counts looked healthy - and it also explains
+the `1+3=4` against `cmp=3`, since #5 contributes both retry arms.
+
+**The register detail splits them.** Hits #1-#4 share `L=10626o` with small `B` (465o..2257o); the #5
+group has `B=176200o`, `L=146253o` - the S3SM5/`CHSWS` frame base seen throughout standoffs 177-196.
+**Two different contexts at the same 16-bit PCs**, which is the aliasing signature that already
+produced false hits at `0o43660` (181) and `0o164110` (185).
+
+**So the "gateway with both returns" is almost certainly aliased foreign code, and the real finding is
+#4: a MON 60 with `A=2064o` that never returns through either arm.** `2064B` is one octal digit from
+the `PFECSLOAD 2063B` value the bus-interface reference flags as an unverified octal-vs-decimal
+discrepancy - noted as a lead, not claimed.
+
+§173 is closed as a question about counts-versus-order: the order is now measured and explained.
+**What it leaves open is narrower and real: one MON 60 call that never returns.** Whether that
+matters to the swapper standoff is untested - it is at a different `B` from the `CHSWS` path.
