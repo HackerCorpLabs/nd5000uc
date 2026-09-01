@@ -11988,3 +11988,71 @@ already prints the armed value in octal, which is the only reason this was visib
 
 `KGPIB` itself remains unmeasured, so "did the path reach the routine that prints
 `> Allocating memory`" is still open - the one thing this run was best placed to answer.
+
+## 174. `KGPIB` runs 30 times and the message still never prints - so the string does not belong to it `[V]`
+
+Re-run with the arm corrected to the symbol (`0x7924` = `0o74444`) rather than the string:
+
+```
+S3SM5 CHSWF@0o74161   hits=0
+S3SM5 CHSWL@0o74330   hits=1
+S3SM5 LIICO@0o74371   hits=1
+S3SM5 CHSWS@0o74407   hits=1
+S3SM5 KGPIB@0o74444   hits=30      <- the corrected arm
+```
+
+`KGPIB` at its real entry gets **30 hits**, the same count the mistaken string address gave. And the
+register context separates it cleanly from the load path:
+
+```
+KGPIB hit#1 PIL=0 A=1o D=4000o B=42463o L=42605o
+KGPIB hit#3 PIL=0 A=0o D=4366o B=42463o L=42630o
+KGPIB hit#6 PIL=0 A=0o D=0o    B=31550o L=44765o
+```
+
+`PIL=0` and three different link registers, against `PIL=1` and one hit each for `CHSWL`/`LIICO`/
+`CHSWS`. **`KGPIB` is a general utility called from several places at background level, not a step in
+the auto-load path.**
+
+### Which retracts the containment claim in section 170
+
+Section 170 placed `> Allocating memory` "inside `KGPIB`" because `KGPIB` is the nearest PRECEDING
+symbol. That is nearest-symbol reasoning - the same shape as "adjacency is dispatch", which this file
+has already recorded twice - and the measurement contradicts it: **`KGPIB` ran 30 times and the
+message never printed.** A routine that runs thirty times without emitting its own message is
+probably not the routine that emits it.
+
+The routine map itself says the layout is PLANC `data-before/after-code`, so an inline string sits
+NEXT TO the code that uses it, and "next to" can mean either side. The owner of a string is the code
+that REFERENCES it, and nothing here has established that.
+
+**So "did the auto-load reach the `> Allocating memory` print" is still unanswered**, and the way to
+answer it is to find the instruction whose effective address resolves to `0o74447` - a search over
+the disassembly, not another arm.
+
+What survives: `CHSWL`, `LIICO` and `CHSWS` each ran exactly once and `CHSWF` never - one pass
+through the load path that then stops.
+
+## 175. Attribution audit, prompted by a peer finding an invented user quote in its own plan `[V]`
+
+`nd500uc-fc` reports that its C1 investigation rested on a quote attributed to Ronny in its
+`PLAN.md` - that he had ESC-ed out of LED and seen a `USER BREAK`. Asked directly, he said *"i did
+nothing"* and *"never happened / not me"*. The quote was invented in an earlier session and written
+down as his, and it **survived three long runs and 28 clean placements**, because an observation
+attributed to the user reads as primary evidence and outranks your own instruments in every later
+argument. Each clean run was filed as "the abort is not sufficient on its own" rather than "perhaps
+nobody ever aborted anything".
+
+That is a failure mode no measurement discipline in this document catches, because it corrupts the
+PREMISE rather than the measurement.
+
+**Audited this session's output.** Sections 162-174 are 954 lines and contain **zero** statements
+attributed to Ronny - every claim is a measurement, a code citation or a retraction. The one memory
+file written today (`which-disk-images-are-used.md`) quotes *"make sure to refresh my disk image with
+vtm files and quota. remember which disks are used"*, which is a verbatim user message in this
+session's transcript and can be pointed at.
+
+**The rule going forward, since a reconstruction reads exactly like a report:** a quote attributed to
+the user must be traceable to a message that can be pointed at. If it cannot, it is written as
+"unattributed" or asked about - never rendered as his words. Invented quotes reproduce the user's
+register and typos convincingly, so plausibility is not a test.
