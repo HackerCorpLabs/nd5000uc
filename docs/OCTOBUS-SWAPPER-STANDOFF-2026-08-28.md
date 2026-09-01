@@ -13243,3 +13243,81 @@ That reframes seven sections of this document. Nothing measured in 177-187 is wi
 was accurate at every step - but the thing it walked is looking less like a defect and more like a
 victim. **The place to look next is the step BEFORE this one, and the question is not "why does
 `CHSWS` block" but "why is the swapper not running when `CHSWS` assumes it is".**
+
+## 189. REFUTED BY ITS OWN TEST: `3START` IS sent, the swapper RUNS, and it stops after ONE monitor call
+
+Standoff 188.3 offered a hypothesis and named its test: *"It predicts that the `CHSWS` block at
+`0o164101` happens BEFORE any `3START` is sent, and that no `3START` appears in the same run."* The
+run logs already held the answer. They were decoded in order rather than counted.
+
+### 189.1 The measured sequence
+
+    [place-domain cpu-stat] MICFU=0x0A CACHE(12B)  cache-clear      @0x00428E30
+    [place-domain cpu-stat] MICFU=0x19 PHYSWR(31B) physical-write   x13, addrA 0x96..0xC4
+    [place-domain cpu-stat] MICFU=0x13 3START(23B) start-process    @0x00428D30
+    [place-domain cpu-stat] MICFU=0x01 3RMICV(1)   watchdog
+    [place-domain cpu-stat] MICFU=0x14 3MONCO(24B) mon-call-continue @0x00428D30
+    [place-domain cpu-stat] MICFU=0x01 3RMICV(1)   watchdog  x ~108, to the end of the run
+
+**The hypothesis is dead.** `3START` appears. It is not blocked by anything, and it arrives right
+after the 13 `PHYSWR`s at `0x96..0xC4` - which are precisely the "write-then-read-back VERIFY of 13
+words over ND-500 physical `0x96..0xC4`" the octobus MICFU reference describes.
+
+This is the process working as intended: 188 wrote the prediction down with a falsifier attached, the
+falsifier was cheap, and it fired. **A hypothesis that survives because nobody priced its test is
+worth nothing**, which is the whole reason the test was named in the same section as the claim.
+
+### 189.2 A long-standing symptom is STALE and must stop being quoted
+
+`OCTOBUS-MAILBOX-MICFU-SEQUENCE-REFERENCE-2026-07-28.md` states:
+
+> ...and then SINTRAN issues nothing but watchdogs and **never sends `3START`**, so the CPU stays
+> `PC=0 stopMode=WAIT`. Identifying that block is the open question.
+
+**On this lane, in this run, `3START` IS SENT and the process RUNS.** The "watchdogs forever" half is
+still exactly right; the "never sends 3START" half is not. The observation was true when made and the
+lane has moved since.
+
+**That is the `[V]`-goes-stale hazard, not a wrong carve.** The dangerous part is that the two halves
+travel together in one sentence, so the half that is still true lends credibility to the half that is
+not - and the surviving half is the memorable one. Anyone reading it today would go looking for why
+`3START` is missing and find it present, which is exactly the kind of hunt that eats a day.
+
+### 189.3 What actually happens now
+
+The swapper is **started**, **runs**, and makes **one** monitor call. That call was genuinely
+forwarded, not faked: the same capture reports
+
+    MON restart path (octobus-shortbringup) ----- posted=2 seen=1 taken=1
+
+and `seen == taken` means the restart was taken by the attached CPU rather than answered with a
+canned reply - the exact `Seen > Taken` gap the `MON-PATH-LEDGER` exists to expose is NOT present
+here. `posted=2` with one restart means **one process is parked on a monitor call.**
+
+The harness prints the innocent reading itself, and it is a real candidate: for the swapper this is
+the DESIGNED idle - `LNEWSWAP` with nothing to do answers the served node, marks `SWMSG` **PSWWAIT**
+and returns to the message loop without restarting the swapper, which is woken later by
+`5ACTSWAPPER` when work arrives. `PSWWAIT` is `N5STA=7`, and `N5STA=7` was observed on a queue node.
+
+### 189.4 The standoff, restated - and it is now a DEADLOCK shape
+
+Three measured facts that have to be held together:
+
+1. `CHSWS` built a `3SWMESS`, parked it at `SWPPING(6)`, and blocks at `0o164101` waiting for it to
+   be consumed (standoffs 185-187).
+2. The swapper is started, runs, takes one monitor call, and parks - plausibly in its designed
+   `PSWWAIT` idle, waiting to be woken when work arrives.
+3. `5ACTSWAPPER` executed **twice** (measured in every PC-watch table since 179).
+
+So there is work waiting (1), a worker waiting to be told about work (2), and the wake-up path did
+run (3). **Something between "a SWPPING message exists" and "the swapper is woken to consume it" does
+not connect.**
+
+**`[OPEN]`, and deliberately not resolved by plausibility:** whether `5ACTSWAPPER`'s two executions
+were for this message at all, whether waking requires the ND-100 to move the node out of `SWPPING`
+first, or whether the swapper woke and found nothing because it looks somewhere other than where
+`CHSWS` parked it. Those are different bugs.
+
+The next measurement is the one that separates them: **what the swapper's own message-loop state is
+at the moment `5ACTSWAPPER` runs** - specifically whether the node it examines is the `SWPPING` one
+at `0x00428E30`. Counts will not answer it; the node identity will.
