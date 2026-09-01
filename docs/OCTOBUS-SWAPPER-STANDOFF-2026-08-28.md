@@ -13999,3 +13999,45 @@ Related trap, same tick: `grep -c "via mailbox; CPU parks awaiting restart"` ret
 same log, which reads as "no MON was ever forwarded" and is false - that line is `Logger.Dbg` at
 `Machine` level and the sibling is behind `#if DEBUG_DETAIL`, so neither is in this capture. A zero
 from a pattern the build never emitted is evidence about the build, not the machine.
+
+
+## 202 - RETRACTION of 201's contradiction: TWO nodes, and I read one state onto the other `[V]`
+
+201 ended by saying the swapper "parks expecting to be woken from `PSWWAIT`, and the node it must be
+woken through is sitting at `SWPPING`". **That is wrong. There are two nodes and they hold different
+states, both of them correct.** From the same `run199.log`, counted over the whole run:
+
+```
+  0x00428D30   N5STA=0x0007 PSWWAIT   MICFU=0x0013 3START    link=0x00008E30   98 dumps
+  0x00428E30   N5STA=0x0006 SWPPING   MICFU=0x0005 3SWMESS   link=0xFFFFFFFF  100 dumps
+```
+
+`0x428D30` is `swMsg` - **the swapper's own message, and it is at `PSWWAIT(7)`**, which is exactly
+what `5ACTSWAPPER` gates on. It is not stuck. `0x428E30` is the ping node `CHSWS` posted, and
+`SWPPING(6)` is what `5ACTSWAPPER` **writes there on success** (199): take `SLOCK`, mark the ping
+`SWPWAIT(5)`, reload `X` to `swMsg`, check the swapper is `PSWWAIT(7)`, then stamp the ping
+`SWPPING(6)`.
+
+**So the gate PASSED and the wake path ran to completion.** Every state measured is the state its
+own actor is supposed to write:
+
+```
+  swMsg  PSWWAIT(7)   the swapper is free and parked        - correct
+  ping   SWPPING(6)   work has been posted to it            - correct
+  neither serviced by the ND-500 side - both fail N5STA==MSGN500(1), as the real B30 does too
+```
+
+**What is actually missing is unchanged from 199.1, and now it is the ONLY thing missing:** the
+swapper is parked on a monitor call (`posted=2 seen=1`, standoff 201 - that part stands) and nothing
+turns "`SWPPING` has been posted" into the **`3MONCO` restart** that would resume it. Posting a ping
+is not restarting a process.
+
+**Why 201 got it wrong, and it is a named trap.** `#19 - correct about the wrong object`. Every
+sentence in that paragraph is true of *some* node; the reasoning was sound; the object was
+conflated. The two addresses differ in one hex digit (`8D30` / `8E30`) and had been carried in the
+same sentences for several sections. **The fix that would have caught it: never write a node's state
+without writing its address next to it** - which is exactly what the dump does, and what my prose
+stopped doing.
+
+Corollary worth keeping: the "one of them is wrong" framing was never justified. **Two actors each
+writing a different value is the normal case, not a disagreement.**

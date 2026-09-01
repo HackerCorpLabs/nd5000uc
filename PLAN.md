@@ -8,8 +8,21 @@
 
 ## Next
 
-**NEXT: find out why the swapper's SECOND `LNEWSWAP` park left the node at `SWPPING(6)` instead of
-`PSWWAIT(7)`.** Standoff **201**. That is now a stated contradiction, not an elimination.
+**NEXT: find what should turn "`SWPPING` posted" into the `3MONCO` restart that resumes the parked
+swapper.** Standoffs **201**, **202**. That is the only step left with nothing behind it.
+
+**RETRACTED (202): there is no `PSWWAIT`/`SWPPING` contradiction - I read one node's state onto the
+other.** Two nodes, one hex digit apart, both correct:
+
+```
+  0x00428D30  swMsg  N5STA=0x0007 PSWWAIT  MICFU=0x0013 3START   - the swapper is free and parked
+  0x00428E30  ping   N5STA=0x0006 SWPPING  MICFU=0x0005 3SWMESS  - work posted to it
+```
+
+`SWPPING(6)` is what `5ACTSWAPPER` **writes on success**, after checking `swMsg` is `PSWWAIT(7)`.
+So the gate PASSED and the wake path ran to completion. Every actor writes the state it should.
+**Never state a node's status without its address beside it** - trap #19, correct about the wrong
+object.
 
 **ANSWERED (201) `[V]`, from `run199.log:2432` - already on disk, no new run:**
 
