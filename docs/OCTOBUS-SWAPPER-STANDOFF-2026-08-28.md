@@ -13657,3 +13657,75 @@ Three candidates, unranked and untested:
 **The third is the cheapest and would make the other two moot** - it is an ORDERING question, and
 ordering is what standoffs 173, 183 and 189 each got wrong by reading counts. It is answered by
 timestamping the `LNEWSWAP` calls against the `CHSWS` block, not by reading either count again.
+
+## 195. TWO nodes, two states - and the gate is aimed at the one that fails it
+
+Ordering `LNEWSWAP` against the ping, as 194.4 required. Decoded in sequence from the queue walks in
+`run185.log`; no run.
+
+### 195.1 `LNEWSWAP` has not run since `place-domain`
+
+    [after PLACE-DOMAIN]  micfu[1B:67  12B:1 23B:1 24B:1 31B:13]  swpfu[LNEWSWAP:2]
+    [after RUN]           micfu[1B:128 12B:1 23B:1 24B:1 31B:13]  swpfu[LNEWSWAP:2]
+
+**Both `LNEWSWAP` calls are at or before the `place-domain` snapshot, and none since** - through 61
+further watchdog activations (`1B` 67 -> 128) with every other MICFU count frozen. The swapper
+entered its work loop twice and has not re-entered it.
+
+That answers 194.4's cheapest candidate: **the two `LNEWSWAP` calls are not "still to come".** The
+swapper is not mid-flight; it is stopped.
+
+### 195.2 The swapper's own message reaches `PSWWAIT(7)` - the OTHER node does not
+
+Node `0x00428D30` is `swMsg`, the swapper's message. In activation order:
+
+    #32 act33   @8D30 N5STA=1 MICFU=0x13    3START posted (MSGN500)
+    #33 act34   @8D30 N5STA=3 MICFU=0x13    answered
+    #34 act35   @8D30 N5STA=1 MICFU=0x14    3MONCO posted
+    #35 act36   @8D30 N5STA=3 MICFU=0x13    answered
+    #36 act37   @8D30 N5STA=7 MICFU=0x13    *** PSWWAIT
+    #37..#39    @8D30 N5STA=7               stable thereafter
+
+while node `0x00428E30` - `swpInfo` - holds `MICFU=0x05` at `N5STA=6` (`SWPPING`) for 112 dumps.
+
+**These are two DIFFERENT nodes with two different roles and two different states**, and the
+per-round line names both: `swMsg=0x00428D30`, `swpInfo=0x00008E30`.
+
+`0x428D30` reaching `PSWWAIT(7)` is exactly the documented `LNEWSWAP`-with-nothing-to-do behaviour -
+*"answers the served node, marks SWMSG PSWWAIT (free)"*. So the swapper did that, correctly, and
+stopped.
+
+### 195.3 The sharpened question
+
+Standoff 193 established `[V]` that `5ACTSWAPPER` reads the `N5STA` of the node in `X` and requires
+`PSWWAIT(7)`. Standoff 190 established `[V]` that `X = 0o43430` = the word address of **`0x428E30`** -
+the `SWPPING` node.
+
+**But the node that IS at `PSWWAIT(7)` is `0x428D30`, the other one.**
+
+So the gate is being applied to a node that cannot satisfy it, while a node that would satisfy it
+sits beside it in the same chain. Two readings, both live, **not ranked here**:
+
+ - **(a) Wrong pointer.** `5ACTSWAPPER` is meant to receive `SWMSG` (`0x428D30`, free at `PSWWAIT`)
+   and post work into it. Being handed `0x428E30` makes the gate fail every time. If so, whatever
+   supplies that pointer is the defect.
+ - **(b) Correct decline, as 193 read it.** `5ACTSWAPPER` is meant to receive the ping node, which
+   should be `PSWWAIT` when free; it is `SWPPING` because a ping is outstanding, so declining is
+   right and the fault is that nothing consumes the ping.
+
+**What would separate them** is what `0o145164`'s call does with `X` BEFORE the status read - whether
+it resolves `X` to a different node (which would favour (b) and mean the read is of the resolved
+node, not the passed one) or passes it straight through (which would favour (a)). That is one more
+pointer word, and it is the next read.
+
+### 195.4 A conflation I was making
+
+Standoffs 190-193 spoke of "the node" as if there were one. There are two, they are adjacent in the
+same chain, and their addresses differ by `0x100`. Every statement in 190-193 remains correct as
+written - `X` really is `0x428E30`, the gate really does require 7 - but the CONCLUSION drawn in
+193.2, that the swapper simply fails to consume its ping, was reached without noticing that the
+swapper's OWN message had meanwhile gone to `PSWWAIT` exactly as designed.
+
+**Two nodes, 0x100 apart, one of which satisfies the gate and one of which does not, is precisely the
+shape that instrument-failure #19 warns about** - and this time it was not a wrong read but an
+unasked question: *how many objects are there?*
