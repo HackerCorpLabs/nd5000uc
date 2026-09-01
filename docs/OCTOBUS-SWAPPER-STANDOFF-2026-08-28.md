@@ -13321,3 +13321,67 @@ first, or whether the swapper woke and found nothing because it looks somewhere 
 The next measurement is the one that separates them: **what the swapper's own message-loop state is
 at the moment `5ACTSWAPPER` runs** - specifically whether the node it examines is the `SWPPING` one
 at `0x00428E30`. Counts will not answer it; the node identity will.
+
+## 190. The wake path DOES reference the right node — two of the three candidates die, with no run
+
+Standoff 189.4 named the separating measurement: *"the IDENTITY of the node the swapper examines when
+`5ACTSWAPPER` runs — specifically whether it is `0x00428E30`. Counts will not answer it."*
+
+**It was already measured.** `5ACTSWAPPER`'s registers have been printed in every PC-watch table
+since 179 and were read as liveness only:
+
+    CONTROL 5ACTSWAPPER hit#1 PIL=2  A=5o      D=5o      T=24o    X=43430o B=52222o L=134355o
+    CONTROL 5ACTSWAPPER hit#2 PIL=12 A=52222o  D=43430o  T=52404o X=43430o B=52222o L=136240o
+
+### 190.1 `X` identifies the SWPPING node, and the match discriminates
+
+The queue nodes converted to ND-100 word addresses (the walk prints emulator byte addresses; the
+ND-100 side addresses words), low 16 bits:
+
+| node | byte | ND-100 word | low 16 |
+|---|---|---|---|
+| **the SWPPING node** | `0x00428E30` | `0o10243430` | **`0o43430`** |
+| 3START / 3MONCO node | `0x00428D30` | `0o10243230` | `0o43230` |
+| watchdog node | `0x0042C130` | `0o10260230` | `0o60230` |
+| head node | `0x0042BE30` | `0o10257430` | `0o57430` |
+
+**`X = 0o43430` at BOTH executions, on two different levels (`PIL=2` and `PIL=12`).** It matches the
+SWPPING node exactly and matches none of the other three - so this is a discriminating match, not a
+value that would have fitted whatever was there.
+
+It is also internally consistent with the transport: the chain LINK words print as window-relative
+BYTE offsets (`link=0x00008E30`), and `0x8E30 / 2 = 0x4718 = 0o43430`. So `X` holds that node's
+window-relative WORD offset - the ND-100's own way of naming it.
+
+Graded **`[D]`, strongly** - the arithmetic is exact and discriminates 1-in-4, but nothing here
+proves `X` is *semantically* a node pointer at that instruction rather than a value that coincides.
+Confirming it needs `0o145162`'s own code read, which has not been done.
+
+### 190.2 What dies
+
+Of 189.4's three candidates:
+
+- ~~"whether `5ACTSWAPPER`'s two executions concerned this message at all"~~ - **they did.**
+- ~~"whether the swapper woke and looked somewhere other than where `CHSWS` parked it"~~ - **it
+  looked at the right node.**
+- **SURVIVING: waking requires something the ND-100 has not done** - e.g. the node must be moved out
+  of `SWPPING(6)` before the swapper will consume it, or the wake is delivered but the swapper's own
+  loop declines a node in that state.
+
+So the failure is **not** a lost pointer and **not** a wrong target. Both halves of the handshake
+name the same node; the message still is not consumed.
+
+### 190.3 The method note
+
+This cost zero runs. The data had been on screen in six consecutive tables and was read as
+*"`5ACTSWAPPER` hits=2, machine alive"* every time - a **liveness control**, which is what it was
+armed as.
+
+The registers beside it answered a question that had not been asked yet. Standoff 181 and 185 both
+had counts overturned by that same per-hit detail; this is the third time it carried the finding, and
+the first time it did so for an arm that was never meant to be evidence.
+
+**The rule: when a new question is named, search the EXISTING tables for it before building an
+instrument.** The reflex after 177-189 was to add arms and spend fifteen minutes; the answer was in
+`run185.log`, and in `run179.log` before it. An arm placed as a control still records everything the
+dump prints, and its registers do not know they were meant to be ignored.
