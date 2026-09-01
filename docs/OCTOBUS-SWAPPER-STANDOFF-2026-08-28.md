@@ -11842,3 +11842,65 @@ kind of probe from anything built in this lane so far.
 ND-500 monitor commands, but nothing here PROVES S3SM5 was the mapped segment at the sample instant.
 Section 165 withdrew exactly this kind of claim when the PIL said driver level. Here the PIL is 1,
 which is consistent with S3SM5 rather than a driver - but consistent is not proven.
+
+## 172. Groundwork for the probe that CAN see a blocked process - what is verified and what is not `[V]` addresses, `[OPEN]` layout
+
+Section 171 concluded that a PC sampler cannot answer a blocked-process question and that the right
+probe is SINTRAN's own process/queue state. This is the start of that, kept deliberately short on
+claims because the first inference I drew was wrong.
+
+### Verified: the resident symbol table names these, with addresses
+
+`SINTRAN/NPL-SOURCE/SYMBOLS/L07/l07-kallsyms.txt` (15799 symbols, `0xADDR T NAME`):
+
+| symbol | word address | octal |
+|---|---|---|
+| `BAK01` | 9951 | `0o23337` |
+| `BAK02` | 9973 | `0o23365` |
+| `RTSTA` (= `RTSTART`) | 2064 | `0o4020` |
+| `RTEND` | 2259 | `0o4323` |
+| `ARTFP` | 2232 | `0o4270` |
+| `ARTLP` | 2233 | `0o4271` |
+| `BEXQU` | 2059 | `0o4013` |
+| `LEXQU` | 12 | `0o14` |
+
+**`BAK01` is a real resident symbol** - the same name SINTRAN printed in the `0B:6B` message
+(`BAK01.37603B`), so that message names a symbol the system defines, not a free-form label.
+
+`5P-P2-MON60.NPL:910` carries the validity test, which names the table's own bounds and stride:
+
+```
+GOODRT: IF X>>=RTEND OR X<<RTSTART GO NGOOD
+        A:=X-RTSTART; A=:D:=0; T:=5RTSIZE; *RDIV ST
+        IF D><0 GO NGOOD; EXITA
+```
+
+So a legal RT-description address is inside `[RTSTART, RTEND)` **and** an exact multiple of
+`5RTSIZE` from the start - which also means an RT-description address can be VALIDATED, not just
+guessed at.
+
+### RETRACTED BEFORE IT WAS USED: "BAK01 is an RT description with a 22-word stride"
+
+`BAK02 - BAK01` is 22 words, and I took that as the RT-description stride. **It is not.** `BAK01`
+(`0o23337`) lies far outside `[RTSTA 0o4020, RTEND 0o4323)`, so by SINTRAN's own `GOODRT` test it is
+not an RT-description address at all. Whatever the 22-word spacing is, it belongs to some other
+per-background-process structure.
+
+Two symbols with a regular spacing are not a table of the thing you are looking for. The test that
+caught it was free and came from the source itself - the bounds check exists precisely so callers do
+not have to guess.
+
+### Still `[OPEN]`, and needed before any probe is worth building
+
+ - `5RTSIZE` - not present in the symbol dump under that name; without it the table cannot be walked.
+ - the RT-description FIELD layout, and which field or bit carries "what this process is waiting on".
+ - which structure `BAK01` actually heads, given it is not an RT description.
+ - `[RTSTA, RTEND)` is only 195 words, which is small for a table of descriptions - so it may be a
+   pointer/control area rather than the descriptions themselves. Unresolved.
+
+One encouraging sign for the eventual probe: `5P-P2-MON60.NPL:027732` tests
+`IF A BIT 5IEXQUEUE` - "is this message in the execution queue" - so SINTRAN does record
+queue membership as a readable BIT, which is exactly the shape a blocked-process probe wants.
+
+**No instrument should be built on this section yet.** The addresses are verified; the layout that
+would make them meaningful is not.
