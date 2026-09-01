@@ -13914,3 +13914,38 @@ That is `[D]`, not `[V]` - it is where the remaining gap must be given everythin
 for, which is an argument from elimination and has been wrong twice in this investigation (183, 193).
 The measurement that would make it `[V]` is what SINTRAN does between marking `SWPPING` and the next
 `3MONCO` that never comes.
+
+
+## 200 - The parked process IS the swapper, and its `P` is a MON 377B return address `[V]`
+
+No harness run. The parked `PC` was already measured; what was missing was reading it against the
+swapper's own bytes.
+
+```
+  PC = 0x08008255  =  0o1000101125
+  SWAPPER-K01.PSEG  0o1000101077   call $1777777777777000000377,$4,... ; MON 377B   (22 bytes)
+                    0o1000101125   if -k go $10                        <- the parked P
+```
+
+`0o101077 + 0o26 (22 bytes) = 0o101125`, and `0o101125 = 0x8255` both check by hand. So the parked
+`P` is the RESTART address of that MON 377B, and the next instruction the swapper will execute is
+the `K`-flag error test on its answer.
+
+This closes PLAN's `Next` positively rather than by elimination: **the process parked on a monitor
+call is the swapper**, identified from its own disassembly, not inferred from "it is the only thing
+started". Also `[V]`: `MON 377B` really is a swapper call - `SWAPPER-K01.PSEG` issues it from 16
+sites (`CALLG` to the segment-31 trampoline, MON number in the low halfword).
+
+**Corrects a name, not a number.** The harness comment reads *"MCNO 377B = N5SWAP (the swapper's own
+MON call)"*. The NUMBER is right. **`N5SWAP` is not in `N500-SYMBOLS.SYMB`** (L07) and I could not
+find it anywhere - so the name is unsourced and must not be quoted as a symbol. Note the shape: the
+claim was correct and its supporting name was invented, which is the pairing a symbol lookup
+confirms and a plausibility check never would.
+
+**What this does NOT settle.** `restarts=1/1` (Seen == Taken) says the answer was delivered, and the
+swapper sits at the restart address in `stopMode=WAIT`. Whether that means *answered and still
+waiting to be resumed* or *resumed, ran, and re-parked* is one measurement away and is NOT decided
+here. Everything above is bytes; this paragraph is the part that is not.
+
+**Method note.** The whole entry came from decoding the instruction at the address rather than
+searching for a pattern - the byte length of the `CALLG` is what made the two addresses meet.

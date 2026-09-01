@@ -8,8 +8,15 @@
 
 ## Next
 
-**NEXT: establish whether the process parked on a monitor call IS the swapper, and what its `P` is
-while parked.** Standoff **193**. That is an ND-500-side question - the ND-100 side is now closed.
+**NEXT: decide, by measurement, whether the swapper is *answered and still waiting to be resumed* or
+*resumed, ran, and re-parked*.** Standoff **200**. Everything else on both sides is accounted for.
+
+**ANSWERED (200) `[V]`, no run needed: the parked process IS the swapper and its `P` is a MON 377B
+return address.** `PC = 0x08008255 = 0o1000101125`, which is `0o1000101077 + 22 bytes` - the
+instruction after the swapper's own `MON 377B` `CALLG`. Next instruction is `if -k go $10`, the
+`K`-flag test on the answer. Identified from `SWAPPER-K01.PSEG`, not by elimination.
+Also `[V]`: `MON 377B` is genuinely a swapper call (16 sites in its PSEG). **But `N5SWAP`, the name
+the harness comment gives it, is in no symbol file - right number, unsourced name.**
 
 **ANSWERED (193): the wake requires `N5STA == PSWWAIT(7)`; the node is `SWPPING(6)`; `5ACTSWAPPER`
 correctly declines.** `0o145354` -> `0o23662` = `RN5ST`, and `RN5STATUS` (`CC-P2-N500.NPL` 679-687)
