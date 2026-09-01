@@ -8,26 +8,26 @@
 
 ## Next
 
-**NEXT: arm `0o163641` and `0o163643` (the two calls in the callee's own prologue) plus
-`0o163642`/`0o163644` - four addresses - to find which one swallows two of the three entries.**
-Standoff **182**.
+**NEXT: read the arm-2 walk (`RETROCORE_ND5000_WATCH=chswsarm2`) - where does `0o163637` lose
+control after `0o163647`?** Standoff **184**.
 
-**MEASURED (179-182): the stall is inside ONE routine, `0o163637`.** Reached from `0o74425`, which
-executes once. Entered THREE times with identical parameters (`T=217o A=41o D=62000o`) and an
-unchanged `L=0o74426`; since only `JPL` loads `L`, the re-entry is not a call, which excludes the
-known retry loop at `0o163624`/`0o163632` by measurement. It reaches NEITHER epilogue - confirmed
-from the caller (`0o74426` cold) and the callee (`0o164112`/`0o164114` cold) independently.
+**RETRACTED (183): the "entered three times" count was WRONG and the retry reading goes with it.**
+`0o163637`/`0o163640`/`0o163641` are straight line with nothing jumping into the third, so the entry
+count and `0o163641` must be equal. They were 3 and 1; five arms said one, one said three. The entry
+over-reports. Why is `[OPEN]` - `0o74407` is also `STF ,B -54` and measured 1, so a multi-cycle
+sampling explanation does not hold.
 
-Arm 1 does not fail (`0o163646` cold); it is simply reached once. So **two of the three entries stop
-inside the four-word prologue `0o163637`..`0o163644`**.
+That killed a clean chain of valid deductions built on it (identical parameters => retry; `L`
+unchanged => not a call => the known retry loop excluded). Every step was sound; the premise was an
+unchecked instrument reading. **Good reasoning on a bad number is more persuasive, not safer.**
 
-Dead candidates, both killed by measurement rather than argument: the stack overflow (`0o74412`
-measured 1, so the frame push returned; the `0o43660` hits were aliased foreign code at `PIL=0`) and
-`N500DF@0o51767` (loaded into `X` and used as a base address - the code never reads `,X 0`, so the
-word at it being zero was never an operand of this path).
+**WHAT STANDS `[V]`:** `0o74425` calls `0o163637` exactly ONCE. The routine runs linearly through its
+prologue and arm 1 - every call so far RETURNS, and by its success door. It reaches `0o163647` and
+never reaches either epilogue (`0o164112`/`0o164114` cold), confirmed from the caller's side too. No
+retry, no loop. The stop is at or beyond `0o163647`.
 
-**Three entries is a WINDOW TOTAL, not a bound.** Nothing measured licenses calling the loop
-infinite, and the count must not be quoted as one.
+**Standing rule earned here:** when a count is the load-bearing fact, arm its required predecessor in
+the SAME table. An arm and its required predecessor cannot both lie.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
