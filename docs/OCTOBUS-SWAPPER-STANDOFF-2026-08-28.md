@@ -12845,3 +12845,67 @@ The rule this earns: **when a count is the load-bearing fact in a conclusion, ar
 the same table.** Not the next run - the same table, so the two numbers are produced by one
 instrument under one set of conditions and can be compared without an argument about whether the runs
 were alike.
+
+## 184. Arm 2 completes cleanly, and the self-check arm confirms the table is honest
+
+`RETROCORE_ND5000_WATCH=chswsarm2`, same pack and scale, build 0 errors, test **Passed: 1**.
+
+    0 arm2 start@0o163647        hits=1
+    0b MUST EQUAL 0@0o163650     hits=1     <- SELF-CHECK: passes
+    1 callB dir land@0o163651    hits=0
+    2 converge@0o163652          hits=1
+    3 at callC@0o163662          hits=1
+    4 callC ERR exit@0o163663    hits=0
+    5 arm3 start@0o163664        hits=1
+    CONTROL 5ACTSWAPPER          hits=2
+
+### 184.1 The self-check earns its slot
+
+`0o163647` (`SAA 17`) and `0o163650` (`JPL I 51`) are adjacent, straight line, with nothing jumping
+into the second. They **both report 1**. So this table does not have the defect that voided the
+`0o163637` entry count in standoff 183, and the rest of it can be used.
+
+This is the first table in the investigation to carry that guarantee on its face rather than earning
+it retrospectively. The cost was one watch slot out of eight.
+
+### 184.2 Arm 2 runs to completion, by the success door at every step
+
+- `0o163651` (call-B's direct/error landing) **cold**, `0o163652` **hot**: call-B returned by its
+  SKIP door.
+- `0o163663` (call-C's direct/error landing) **cold**, `0o163664` **hot**: call-C likewise.
+
+So arm 2 neither fails nor blocks. Combined with 183, **every call in `0o163637` measured so far -
+the frame push, call-A, arm 1's second call, call-B and call-C - returns, and returns SUCCESSFULLY.**
+The routine is making linear progress, not spinning and not erroring.
+
+The register detail shows real work rather than a repeated state: `A` moves `36o -> 17o -> 0o`, `D`
+moves `62000o -> 4o`, and `X` changes from `51767o` (the `N500DF` base) to `141430o` at `0o163662`.
+Contrast with the identical-registers reading in 181 that turned out to be three samples of one
+event.
+
+### 184.3 So the stop is at or beyond `0o163664`, and walking is too slow
+
+The routine runs to `0o164113`. At roughly fifteen words per arm and fifteen minutes per run, walking
+it costs about ten runs. Standoff 185 bisects the whole tail in one:
+
+    0o163664  arm3 start        control, known hot
+    0o163702  arm4 start
+    0o163743  post-arms block
+    0o163750  table fill
+    0o164000  LOOP head         closed by 0o164021 JMP -21
+    0o164022  loop exit
+    0o164101  call at 0o164101
+    0o164110  LAST call         0o164112 sits immediately after it and is COLD
+
+**This table is read hot/cold, not by value.** 183's retraction came from believing a count; nothing
+in 185 depends on one. The ladder is monotone - every arm is downstream of the one above - so a hot
+arm below a cold one voids it, which is the ordering form of a required-predecessor check.
+
+The one count that carries meaning is `0o164000`: it is a loop head, so its count less one is the
+iteration count, and **`0o164000` hot with `0o164022` cold would be a loop that never terminates** -
+the first genuine spin this investigation has found, as opposed to the retry withdrawn in 183. Even
+then it is a window total and may not be called unbounded.
+
+The tail's shape already constrains the answer: `0o164110` is the last call, `0o164111` is its
+direct-return landing (a NOP), and `0o164112` is the success epilogue - which is **cold**. So control
+is lost at or before `0o164110`.
