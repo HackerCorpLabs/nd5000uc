@@ -11071,6 +11071,20 @@ independently corroborated: the thirteen `a` addresses land EXACTLY on the docum
 layout - `96 9A 9E A2 A6 AA AE B2 B6 BC C0 C4` - which is a twelve-way coincidence if the rule were
 wrong. The `b` side uses the identical rule, so a zero read there is a zero in the buffer.
 
+### A SECOND, INDEPENDENT INSTRUMENT AGREES - on the source side
+
+The copy ring reads the DESTINATION after the copy. A separate instrument in the same run watches
+the SOURCE buffer, and it agrees:
+
+```
+PHYSWR source-buffer writes [0x42CBF0..0x42CC40): 5168 total, 0 NON-ZERO, last non-zero (none)
+```
+
+Five thousand one hundred and sixty-eight writes into the buffer SINTRAN feeds these copies from,
+and **not one of them was non-zero**. Two instruments on opposite ends of the same transfer, neither
+derived from the other. Per taxonomy #7 - a single number can only be believed, never checked - this
+is the second count that had to agree, and does.
+
 ### There are NO read-backs
 
 The ring holds thirteen `WR` and zero `RD`. The `octobus-nd5000` skill's line *"start-swapper
@@ -11111,3 +11125,154 @@ progress on the hang would be false.
 Nowhere new. Section 159 still stands: every participant is healthy and parked, and the open
 question is what work should have been QUEUED and was not. `THA` is now removed from the candidate
 list - it is not a defect.
+
+## 163. Reading the stall run for what work was never queued - and the one number still missing `[V]` except where marked
+
+Working section 159's question against the run that produced 162. Everything here is read out of
+that run's own dump; nothing is inferred from a fresh guess.
+
+**Read the `place-domain` subsection below before using anything in this section.** It shows that
+one monitor command silently ran a whole bring-up ladder inside its own window, which changes what
+the per-command instruments here are actually measuring.
+
+### The swapper is parked BY DESIGN, and the instrument says so itself
+
+```
+MON restart path -----  posted=2 seen=1 taken=1
+swpfu[LNEWSWAP:2]   restarts=1/1   ansMON=377B   stopMode=WAIT
+```
+
+Two monitor-call stops posted, one restarted and taken, one still parked. The parked one is the
+SWAPPER on `LNEWSWAP`, and that is the designed idle: with nothing to do it answers the served node,
+marks `SWMSG` `PSWWAIT` and returns to the message loop WITHOUT restarting the swapper - which is
+later woken by `5ACTSWAPPER` when work arrives (`MP-P2-N500.NPL:135470`, `SWPD4` at `135747`).
+So "the swapper is idle" is not the fault. **The fault is that nothing ever wakes it.**
+
+### `5ACTSWAPPER` fires exactly once, and the FIFO is never used
+
+```
+call:MSWSWAIT-tail         @0o134354  hits=0
+bail:NOT-BSWSTARTED        @0o135551  hits=0
+call:TRAPDECODER-pagefault @0o135567  hits=0
+call:SWPD4-fifo-drain      @0o136237  hits=1
+call:SWMC-mon510           @0o142165  hits=0
+5ACTSWAPPER-entry          @0o145162  hits=1
+HANDOVER-taken-SWACTIVE    @0o145211  hits=1
+queued-on-swapwait-fifo    @0o145312  hits=0
+INVARIANT callers=1 entry=1 outcomes=1 (bailed=0)  [consistent]
+```
+
+One call, one entry, one handover, zero bails - self-consistent, so the instrument is not lying to
+itself. **Nothing was EVER queued on the swap-wait FIFO.** Of the five call sites, the four that
+would represent real work - a page fault (`TRAPDECODER-pagefault`), a MON 510 (`SWMC-mon510`), the
+`MSWSWAIT` tail - never fired at all.
+
+### Nothing page-faulted, and that absence is meaningful here
+
+```
+page-fault records posted: 0        ring: EMPTY
+TRAPS BY CONDITION (whole run): none
+demand segments built=0  growable pages mapped=0  data capabilities cleared=0
+no MICFU was ever answered 5ERANSWER in this run
+```
+
+Per taxonomy #11b, PGF is **FATAL class** (bit 38) - not disableable - so a page fault could not have
+happened invisibly. The zero is real: nothing faulted, therefore nothing asked the swapper for a
+page, therefore the swapper correctly slept. This chain is consistent end to end, which is the
+uncomfortable part: **every component is behaving correctly and the work simply never exists.**
+
+### `run` sent the ND-5000 NOTHING but watchdogs - measured by delta
+
+The two census points bracket the `run` command exactly:
+
+```
+[after PLACE-DOMAIN] micfu[1B:21 12B:1 23B:1 24B:1 31B:13]   msgs=37
+[after RUN]          micfu[1B:38 12B:1 23B:1 24B:1 31B:13]
+```
+
+`1B` (3RMICV, the WATCHDOG) climbs 21 -> 38. **Every other count is unchanged.** So the whole `run`
+command - which STALLED - issued not one non-watchdog message to the ND-5000. Whatever `run` is
+waiting on, it is waiting for it BEFORE the transport is involved.
+
+### THE SAME CLAIM FOR `place-domain` IS NOT ONLY UNMEASURED - THE CONSOLE SAYS IT IS PROBABLY FALSE
+
+There is no census point before `place-domain`, so its delta cannot be taken the way the `run` delta
+can. I was about to infer it from how the watchdogs interleave. **Reading the console instead
+inverted the answer.**
+
+```
+ND-5000: define-swap-file
+File name: swap-file:data
+
+ND-5000: place-domain cpu-stat
+
+> Loading Control Store
+INFO    * 0B:6B * 1998-09-01 10:35:48 * BAK01.37603B
+          SINTRAN III File System
+          Not used
+
+> Loading Swapper
+```
+
+**`place-domain` is what triggers the control-store load and the swapper load.** The test is
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` - it issues **no** `load-control-store` and
+**no** `start-swapper`. Those two lines are the nd-500-mon **ECSLOAD auto-retry gate**: `RSTA5` bit 9
+`5CLOST` set -> the driver returns `2032B` -> the monitor prints `Loading Control Store`, loads
+`(SYSTEM)CONTROL-STORE:DATA`, and retries.
+
+So the thirteen `PHYSWR`, the `3START` and the `3MONCO` are almost certainly INSIDE the
+`place-domain` window, not before it. `place-domain` does not send nothing - it sends everything in
+the run.
+
+**Graded [D] pending the stamped run**, which now labels every observed message with the outstanding
+command and settles it by measurement.
+
+**And the lesson is the harness's command labels, not the machine.** The label says which command was
+typed; it does not say what that command DELEGATED to. A single monitor command silently ran a whole
+bring-up ladder inside its own window, and every per-command instrument in this file inherits that
+blindness. Cf. taxonomy #19 - correct about the wrong object: the counts were right, the thing they
+were attributed to was not.
+
+### THE FILE-SYSTEM ERROR IN THE MIDDLE OF THE LOAD - stop calling this noise
+
+```
+INFO    * 0B:6B * 1998-09-01 10:35:48 * BAK01.37603B
+          SINTRAN III File System
+          Not used
+```
+
+It fires BETWEEN `Loading Control Store` and `Loading Swapper` - i.e. DURING the auto-load ladder
+that the stalled command triggered. `Not used` is SINTRAN's text for an error code with no assigned
+message, so the file system returned error `6B` and SINTRAN had nothing to print for it.
+
+This is the error the standing rule says to root-cause rather than step over
+([[fix-known-bugs-before-hunting-features]]: *"dont dismiss error as noise"*, *"all bugs are to be
+root caused and fixed"*). It sits UPSTREAM of everything section 159 was asking about: if the
+auto-load ladder failed part way, then the swapper idling with an empty FIFO and the monitor never
+resuming `place-domain` are both DOWNSTREAM consequences, and neither is measurable until this is
+settled. `BAK01.37603B` names the reporting site and is the place to start.
+
+### What the PC histogram DOES say once you stop asking it to localise
+
+Section 159 retired this instrument for localisation, and rightly. But the shape of the sample is
+still evidence:
+
+```
+place-domain cpu-stat [STALLED]: 639 samples, 58 distinct (PC,PIL)
+    PC=0x12C2..0x12C6 pil=0   576 samples   <- the IDLE loop
+    PC=0x7E78/0x7E79/0x7E7B/0x7E83 pil=1     11 samples
+    PC=0x4BA2 / 0x4730 pil=1, 0xEA4 pil=2     4 samples
+```
+
+**Nine of ten samples are the ND-100 sitting in its idle loop at `pil=0`.** A command that was
+spinning would be at its own PC; a command whose process is not scheduled at all looks like this.
+So `place-domain` is not burning cycles - it is BLOCKED, waiting on an event, and SINTRAN is idle
+because there is nothing else to run.
+
+That reframes section 159's question one level more precisely:
+
+> Not "what work should have been queued for the swapper", but **"what event is the place-domain
+> process blocked on, and who was supposed to post it?"**
+
+The swapper's empty FIFO is then a CONSEQUENCE, not the cause - the same shape as the THA hunt in
+162, where the value everyone was chasing turned out to be correctly delivered.

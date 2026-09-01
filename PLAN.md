@@ -8,7 +8,31 @@
 
 ## Next
 
-**NEXT: find what work should have been QUEUED and was not.** Standoff **159**.
+**NEXT: root-cause the file-system error `INFO * 0B:6B * ... SINTRAN III File System / Not used`
+(reporting site `BAK01.37603B`).** Standoff **163**. It fires between `> Loading Control Store` and
+`> Loading Swapper` - i.e. INSIDE the auto-load ladder that the stalled `place-domain` triggers - so
+it is UPSTREAM of everything 159 was asking about. `Not used` is SINTRAN's text for an error code
+with no assigned message, so the file system returned error `6B` and there was nothing to print.
+Standing rule: known bugs before features, and no error is noise.
+
+**THE FRAMING CORRECTION THAT MADE THIS VISIBLE:** the test is
+`ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` - it issues NO `load-control-store` and NO
+`start-swapper`. `place-domain` triggers both itself, through the ECSLOAD auto-retry gate. So the
+thirteen PHYSWR, the 3START and the 3MONCO are inside the `place-domain` window, and the harness's
+per-command labels say what was TYPED, never what that command delegated to.
+
+**THEN: what event is the `place-domain` process blocked on, and who was supposed to post it?**
+Standoff **163** sharpens 159. Nine of ten PC samples during the stall are the ND-100 IDLE loop at
+`pil=0`, so the command is not spinning - its process is not scheduled at all, i.e. BLOCKED on an
+event. The swapper's empty swap-wait FIFO (`queued-on-swapwait-fifo hits=0`, `5ACTSWAPPER` fired
+once, nothing page-faulted, PGF is FATAL class so the zero is real) is a CONSEQUENCE of that, not
+the cause.
+
+Measured and settled on the way: **`run` issues the ND-5000 nothing but watchdogs** - the census
+brackets it exactly, `1B` 21 -> 38 and every other count unchanged - so `run` blocks before the
+transport is involved. The same claim for `place-domain` is **[OPEN]**: there is no census point
+before it. The harness now stamps every observed mailbox message with the outstanding command
+(`_currentCmdLabel`), which answers it by measurement instead of by reading watchdog interleaving.
 
 > **CLOSED (standoff 162): the `THA` line of investigation is over, and it was never a defect.**
 > The copy-diagnostic ring shows SINTRAN writing `0x00000000` into all thirteen trap-config cells,
