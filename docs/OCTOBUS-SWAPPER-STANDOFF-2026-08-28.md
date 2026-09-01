@@ -12666,3 +12666,85 @@ Both epilogues cold with the entry hot measures "never returns" from the CALLEE'
 of the caller's cold landing sites - one claim, two instruments that can disagree. `0o163646` hot
 three times means every pass takes the same early error exit. `0o163647` hot means it gets deeper and
 the re-entry is not in arm 1.
+
+## 182. MEASURED from the callee's side too: `0o163637` never reaches either epilogue, and two of its three entries do not get past its own prologue
+
+`RETROCORE_ND5000_WATCH=chswscallee`, same pack and scale, build 0 errors asserted first,
+test **Passed: 1**.
+
+    0 call site@0o74425          hits=1
+    1 callee entry@0o163637      hits=3
+    2 arm1 call#2@0o163645       hits=1
+    3 arm1 ERROR exit@0o163646   hits=0
+    4 arm1 continued@0o163647    hits=1
+    5 EPILOGUE ok@0o164112       hits=0
+    6 EPILOGUE err@0o164114      hits=0
+    CONTROL 5ACTSWAPPER          hits=2
+
+      0 call site    hit#1 PIL=1 A=41o D=62000o T=217o X=51767o B=176200o L=74412o
+      1 callee entry hit#1 PIL=1 A=41o D=62000o T=217o X=51767o B=176200o L=74426o
+      1 callee entry hit#2 PIL=1 A=41o D=62000o T=217o X=51767o B=176200o L=74426o
+      1 callee entry hit#3 PIL=1 A=41o D=62000o T=217o X=51767o B=176200o L=74426o
+      2 arm1 call#2  hit#1 PIL=1 A=36o D=62000o T=217o X=51767o B=176200o L=163645o
+      4 arm1 continued hit#1 PIL=1 A=36o D=62000o T=217o X=51767o B=176200o L=163647o
+
+### 182.1 "Never returns" is now measured from BOTH sides
+
+Standoff 181 measured it from the caller: `0o74426` and the paths below the success landing all
+cold. This run measures it from the callee: **`0o164112` and `0o164114` both cold** - the routine
+reaches neither the skip epilogue nor the direct one.
+
+These are two instruments that COULD have disagreed. A cold caller landing with a hot epilogue would
+have meant the return went somewhere unexpected; a hot caller landing with cold epilogues would have
+meant the caller resumed without the callee returning. They agree, so "`0o163637` does not return"
+survives a check rather than resting on one table. That is the denominator discipline from taxonomy
+item #7 applied to a boolean instead of a count.
+
+### 182.2 Arm 1 SUCCEEDS, and only one of the three entries reaches it
+
+`0o163646`, arm 1's error exit, is **zero**. So the first arm did not fail - the earlier guess that
+every pass takes the same early error exit is refuted.
+
+But `0o163645` and `0o163647` are **1** while the entry is **3**. So of the three entries, exactly
+one got as far as arm 1's second call, and it took that call's SUCCESS door into `0o163647`. **The
+other two entries stopped between `0o163637` and `0o163645`** - inside the routine's own prologue,
+which is only four words:
+
+    163637  STF ,B -54            save the float accumulator (the parameters)
+    163640  RADD CLD SL DA        A := L
+    163641  JPL I 57 -> 0o43740   frame push
+    163642  SAA 36                A := 36
+    163643  JPL I 56 -> 0o63007   call
+    163644  RAND 0 0              direct/error landing - falls through
+    163645  JPL I 55 -> 0o104236  <- reached ONCE
+
+### 182.3 What is now established, and what is not
+
+**Established `[V]`:**
+ - The stall is inside `0o163637`, reached from `0o74425`, which executes once.
+ - The routine is entered three times with identical parameters and an unchanged `L`, so the
+   re-entry is not a `JPL` and is not the known `0o163624`/`0o163632` retry loop.
+ - It never reaches either epilogue, confirmed from the caller and the callee independently.
+ - Arm 1 does not fail; it is simply reached only once.
+ - Two of three entries stop within the four-word prologue at `0o163637`..`0o163644`.
+
+**NOT established `[OPEN]`:**
+ - Which of `0o43740` (frame push) or `0o63007` (the first call) swallows the other two entries. The
+   next arm set is those two entries plus `0o163642` and `0o163644`, and it is four addresses.
+ - What re-enters `0o163637`. The answer is at or beyond `0o163647`, since that is the deepest point
+   reached, but nothing measured says which instruction does it.
+ - **Whether three entries is a bounded retry or an unbounded loop.** The capture window ends; three
+   is what fits in it, not a total. Nothing here licenses the word "infinite", and the count must
+   never be quoted as one.
+
+### 182.4 A register reading deliberately NOT used
+
+The hit detail prints `L=0o163645` at PC `0o163645` and `L=0o163647` at PC `0o163647` - `L` equal to
+the current PC at both. A `JPL` at `0o163645` should leave `L=0o163646`, and `0o163647` (`SAA 17`)
+does not touch `L` at all, so neither value is what the instruction semantics predict.
+
+Rather than build on it, it is recorded as **unexplained**: either the snapshot is taken at a
+different point in the instruction than assumed, or `L` is not what is being printed. It changes
+none of 182.1-182.3, which rest on counts and on the `L=0o74426` triple that IS consistent across
+every table. Flagged here so the next reader does not quietly adopt it as evidence - an off-by-one in
+a register display is exactly the kind of thing that reads fluently and is wrong.
