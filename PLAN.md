@@ -8,8 +8,30 @@
 
 ## Next
 
-**NEXT: find what should turn "`SWPPING` posted" into the `3MONCO` restart that resumes the parked
-swapper.** Standoffs **201**, **202**. That is the only step left with nothing behind it.
+**NEXT: identify WHICH of the three `SWPPING` writers stamped `0x00428E30`.** Standoff **203**. It is
+a binary and it splits the remaining work.
+
+**REFUTED (203): SINTRAN DOES send the restart.** The `[D]` carried since 199.1 - *"nothing turns
+`SWPPING` posted into the `3MONCO` restart"* - is wrong. `5ACTSWAPPER`'s swapper-free arm does it
+four instructions after the `SWPPING` write:
+
+```
+  145022   X:=MSGTOSW; SWPPING; CALL WN5STATUS   % Mark that process is using the swapper
+  145054   X:=SWMSG; *AAX SWPST; STATX           % Save reason for activating swapper
+  145071   3MONCO; *MICFU@3 STATX                <- stamps SWMSG.MICFU := 3MONCO
+  145073   CALL MCCO                             % Yes, restart swapper after mon.call
+```
+
+**The witness:** `3MONCO`=`24B`=`0x14`, `3START`=`23B`=`0x13`. `145054..145073` is straight-line, so
+if `145022` ran then `145071` ran and `SWMSG.MICFU` must be `0x14`. It measures **`0x0013`** over 98
+dumps. So either that arm was never entered, or the stamp is being lost.
+
+ - `145022` wrote it -> a `3MONCO` stamp is LOST between SINTRAN and us.
+ - `133645`/`134107` wrote it -> `5ACTSWAPPER` never reached its success arm, and the `PSWWAIT` test
+   at `145001` reads something other than the `0x00428D30` the dump shows.
+
+**A state does not name who wrote it** - `SWPPING` has three writers. Same trap as 201, one section
+later.
 
 **RETRACTED (202): there is no `PSWWAIT`/`SWPPING` contradiction - I read one node's state onto the
 other.** Two nodes, one hex digit apart, both correct:

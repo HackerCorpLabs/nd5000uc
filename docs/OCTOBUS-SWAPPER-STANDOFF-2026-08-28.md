@@ -14041,3 +14041,51 @@ stopped doing.
 
 Corollary worth keeping: the "one of them is wrong" framing was never justified. **Two actors each
 writing a different value is the normal case, not a disagreement.**
+
+
+## 203 - REFUTED: SINTRAN *does* send the restart, and it is four words after the `SWPPING` write `[V]`
+
+199.1 and every plan `Next` since has carried this `[D]`: *"nothing turns SWPPING posted into the
+3MONCO restart"*. **It is wrong.** `MP-P2-N500.NPL`, inside `5ACTSWAPPER`'s swapper-free arm, read in
+order rather than searched:
+
+```
+  145001   IF A=PSWWAIT THEN                        % Swapper free?
+  ...
+  145022      X:=MSGTOSW; SWPPING; CALL WN5STATUS   % Mark that process is using the swapper
+  ...
+  145054      X:=SWMSG; *AAX SWPST; STATX           % Save reason for activating swapper
+  145057      A:=6; *AAX NUMPA-SWPST; STATX         % Par #2 & par #3 will be written into
+  145062      A:=0=:D; *AAX FUNCV-NUMPA; STDTX
+  145066      *AAX KFLIP-FUNCV; STZTX; AAX -KFLIP
+  145071      3MONCO; *MICFU@3 STATX                % <-- stamps SWMSG.MICFU := 3MONCO
+  145073      CALL MCCO                             % Yes, restart swapper after mon.call
+```
+
+The mechanism is not missing. It is **in the same routine, in the same branch, four instructions
+after the `SWPPING` write**, and SINTRAN's own comment says what it is for.
+
+**AND IT GIVES A WITNESS, WHICH IS THE USEFUL PART.** `3MONCO` is `24B` = `0x14`; `3START` is `23B`
+= `0x13`. If `145071` ran, `SWMSG.MICFU` must read `0x14`. Measured (202), stable over 98 dumps:
+
+```
+  0x00428D30  swMsg  N5STA=0x0007 PSWWAIT  MICFU=0x0013 3START   <- not 0x0014
+```
+
+So either that arm was never taken, or the stamp did not land. **`145054` through `145073` is
+straight-line** - the `IF 3SWMESS=D` at `145040` converges at `145054`, and `145066`'s `AAX -KFLIP`
+restores `X` to the `SWMSG` base - so *if `145022` executed, `145071` executed*. The two are not
+separable by any branch.
+
+**DO NOT conclude the arm was taken just because `SWPPING` is set.** `SWPPING` is written at THREE
+sites - `133645`, `134107` and `145022` - and only the last is inside `5ACTSWAPPER`'s success arm.
+Inferring the writer from the value is the same mistake as 201, one section later, so it is worth
+saying twice: **a state does not name who wrote it.**
+
+**Next, and it is now a binary:** identify which of the three wrote `SWPPING` into `0x00428E30`.
+ - if `145022` -> `145071` ran too, and a `3MONCO` stamp is being LOST between SINTRAN and us;
+ - if `133645`/`134107` -> `5ACTSWAPPER` never reached its success arm, and the `PSWWAIT` test at
+   `145001` is reading something other than what the dump shows at `0x00428D30`.
+
+`MCCO` is not defined in `MP-P2-N500.NPL` - external, not yet carved. Not needed for the above: the
+`MICFU` stamp precedes it and is the observable.
