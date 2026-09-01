@@ -12152,8 +12152,20 @@ The guarded print is decided by A, loaded two instructions earlier:
 074434  171052  SAT 52            then the three-way compare
 ```
 
-`LDX ,B -11` is not ad-hoc - it is the standard control-block fetch in this segment. `CSREA`
-(FUNCS 023, read control store) opens identically at `0o152165`:
+**CORRECTED, same day.** I first wrote that `LDX ,B -11` "is not ad-hoc - it is the standard
+control-block fetch in this segment", on the strength of `CSREA` opening the same way. **That
+co-occurrence is worth nothing:** `LDX ,B -11` appears **128 times** in this segment, and other
+frame slots more often still (`,B -67` 456 times, `,B -56` 131). Two routines using the same slot is
+what a compiler convention looks like, not evidence they address the same object. One shared idiom
+observed twice is not a shared object - the same "correct about the wrong thing" shape this document
+keeps recording.
+
+What WOULD make it a specific field is the NPL register convention, and there is real evidence for
+it: `5P-P2-MON60.NPL` documents `B` as a DATAFIELD pointer in twelve routine headers -
+`ENTRY: B=N500DF DATAFIELD`, `ENTRY: B=ND-500 CPU DATAFIELD`. If `B` is `N500DF` here too, then
+`,B -11` IS one field of one global structure and reading offset `0o20` from it is meaningful across
+routines. **That is the thing to establish** - not the co-occurrence. `CSREA` opening identically at
+`0o152165` is then a consequence rather than the evidence:
 
 ```
 152165  054767  LDX ,B -11
