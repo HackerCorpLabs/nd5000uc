@@ -8,70 +8,30 @@
 
 ## Next
 
-**THE STALL REGION NOW HAS A NAME (standoff 170):** the three `> Loading ...` messages are in
-**`030-S3SM5`**, the one segment with a full disassembly, routine map and symbol table. `> Loading
-Swapper` is inside **`CHSWL` (`0o74330`)** and `> Allocating memory` inside **`KGPIB` (`0o74447`)`**,
-with `CHSWS 0o74407` between them. So the console dies between `CHSWL` and `KGPIB`, and the next
-watch arms are NAMED ROUTINE ENTRIES rather than derived addresses: `CHSWF 0o74161`, `CHSWL
-0o74330`, `LIICO 0o74371`, `CHSWS 0o74407`, `KGPIB 0o74447`.
+**NEXT: arm `0o74445` (the `> Allocating memory` CALL SITE) and `0o74476` (its skip target), and find
+out whether the missing message is a FAULT or a DECISION.** Standoff **176**. The print is guarded by
+three inequality tests - it is reached only when A is none of `52`, `53`, `76` octal - so its absence
+may be the auto-load deliberately classifying and suppressing it, which would remove the missing
+message as evidence of the stall entirely. `0o74445` self-checks: a genuine hit must show A not in
+{52,53,76}.
 
-**MILESTONE LOCALISATION (standoff 169, no instrument needed):** the auto-load prints three
-messages in sequence - `> Loading Control Store`, `> Loading Swapper`, `> Allocating memory` - and
-**our console never reaches the third**, on every run. They live in `(SYSTEM)SEGFIL0:DATA` page 287,
-i.e. a SINTRAN SEGMENT, **not** in the ND-500 monitor program (checked in the carved J04 banks AND
-in the pack's own `ND-500-MON-J:PROG`). The `nd-500-bus-interface` skill's claim that "nd-500-mon
-prints Loading Control Store" is WRONG and matters: a watch in the monitor's address space cannot
-see this code.
+The two earlier attempts were one word off on either side: `KGPIB 0o74444` is the third guard jump
+(reachable only when `A == 76`, and its 30 hits show `A=0`/`A=1`, so they are aliased), and
+`0o74447` is the string itself.
 
-**NEXT, AND IT IS ONE SUBTRACTION (standoff 168): did the last `MON 60` ever RETURN?**
-Gateway executions = 5, error returns (`0o146263`, P+1) = 3, success returns (`0o146260`, P+2) = not
-yet measured. **If errors + successes is less than 5, a `MON 60` was issued and never came back** -
-the monitor is blocked inside SINTRAN's handler, which is what "process not scheduled, machine idle"
-looks like from outside. If they balance, the block is after the last return, in the monitor's own
-code. Opposite implications, one subtraction. The corrected polarity watch already arms both return
-arms, so the queued run answers this at no extra cost.
+**Also settled (176):** `> Loading Swapper` is printed at `0o74337`, inside `CHSWL` - found by the
+ND/PLANC INLINE-STRING idiom (`JPL` then the string immediately after; the print routine finds it via
+the link register). No instruction resolves to a string address anywhere in the segment, so a
+reference search finds nothing and that is not a gap.
 
-Ruled out on the way: the ECSLOAD retry loop is an unconditional BUSY-SPIN (`132170` is a six-word
-stub that ignores the status and always retries - `prog.md` 5.6). A spin would show thousands of
-gateway executions and the ND-100 pinned in the gateway; we measured 5 and an idle machine. So
-ECSLOAD is not the blocker.
+**STILL OPEN (173): the MON 60 counts balance but the arrival order forbids reading them that way.**
+gateway=5, error returns=3, success returns=2. One gateway hit has NO return; another is followed by
+BOTH return arms with A unchanged, which one MON cannot produce. `3+2=5` is two anomalies cancelling.
+Counts `[V]`, meaning `[OPEN]`.
 
-**QUEUED, NOT YET RUN:** `RETROCORE_ND5000_WATCH=polarity` is written and committed but NOT built -
-the RetroCore tree is lent to `nd500uc-fc` for C1/D3 real-SINTRAN fixtures (1.5-2.5 h from 2026-09-01
-12:10). Do not `dotnet build`/`dotnet test` there until they report done.
-
-**SETTLED WITHOUT A RUN (standoff 167): MON 60's P+1 (DIRECT) is the ERROR return with the status
-in A; P+2 (SKIP) is success.** `146263 LDT 21` loads T from `146304` = `002032B` (ECSLOAD) by
-P-relative addressing, and the retry loop it gates (`146271`, tail `146275 JMP -21` -> `146254`,
-two words before the `MON`) hangs off the `JMP 2` = P+1 arm. The bus-interface reference was right;
-`mon60-callers/INDEX.md` was wrong and is now annotated in place.
-
-**Consequence for 165's counts:** three of five MON 60 calls returned an error, but both statuses we
-captured (`2166o`, `2113o`) are neither `2032B` nor `4017B`, so both took the NON-retry path. Whether
-any retry actually fired is still unmeasured.
-
-**RETRACTED (166):** `A=2064o` is a parameter-block pointer, not a status - `0o146255 AAA -173` sets
-A to the block address immediately before the `MON`. The real statuses are `2166o` and `2113o`, read
-at `0o146263`, and neither is `2032B` or `4017B`, so the retries counted in 165 were not ECSLOAD
-retries.
-
-**THEN: find why `place-domain` blocks even though the monitor DOES retry it.** Standoff **165**
-refuted the obvious candidate: `MON 60` is entered 5 times and the ECSLOAD arm 3 times, alternating,
-so the auto-load ladder re-issues the command repeatedly. The command is re-issued and then blocks.
-`A=2064o` at the fourth gateway entry sits inside the documented monitor error range `2000B..2100B`
-and is the one unexplained value on the path - identifying it is the concrete next step.
-
-**MEASURED AND LOAD-BEARING (standoff 164):** every non-watchdog message in the run belongs to
-`place-domain` - the cache clear, the thirteen PHYSWR, the 3START and the 3MONCO. `run` adds only
-watchdogs. The command owns the whole ladder because it triggers it through the ECSLOAD gate.
-
-**STOP INSTRUMENTING THE `0B:6B` FILE-SYSTEM ERROR** (standoff 165). Three watches, none
-discriminated. It prints once, BOTH loads succeed after it, and it appears in all five short
-bring-up runs - every one of which stalls - so there is no negative case and the correlation says
-nothing. It was promoted only for being the sole visible error in the transcript. **The `0o37603`
-= S3FS attribution is WITHDRAWN:** the address falls inside that segment's range, but the code
-executing there runs at PIL=12 with a constant register signature, i.e. driver-level code at an
-aliased address. A PC-only watch cannot decide segment identity.
+**MEASURED AND SOLID:** MON 60 polarity from live registers - A at the gateway is a parameter-block
+pointer, A at `0o146257` is a status, A at `0o146260` is `0`. P+1 = ERROR, P+2 = success. Confirmed
+independently by the peer session's carve; `mon60-callers/INDEX.md` was the outlier and is annotated.
 
 > **CLOSED (standoff 162): the `THA` line of investigation is over, and it was never a defect.**
 > The copy-diagnostic ring shows SINTRAN writing `0x00000000` into all thirteen trap-config cells,
