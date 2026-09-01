@@ -13813,3 +13813,27 @@ both ignore a non-`MSGN500` node.
 to do, marked its own message `PSWWAIT(7)`, parked on MON 377B at `P=0x08008255` - and a ping posted
 for it sits unconsumed.** The next measurement is what `LNEWSWAP` actually examines, and whether the
 ping was posted before or after its second call.
+
+## 197. SWPFU=1 is LNEWSWAP and SWPSTAT=0 is its OK arm - so SINTRAN parked the swapper correctly
+
+Short entry; the mechanism, no re-derivation.
+
+`Nd500MicrocodeServicer.cs:257` carries the carve: `SWPDECODER` (MP-P2-N500.NPL:135443) switches on
+`SWPFU`; **`SWPFU=1` selects `LNEWSWAP`**, which reads `SWMSG.SWPSTAT` - non-zero = "error answer from
+swapper", **zero = the OK arm**.
+
+Measured (`run185.log` line 115): `ansSWPFU=1B ansSWPSTAT=0B`, both READ from the message, not
+composed by us.
+
+**So the swapper answered OK, and SINTRAN's `LNEWSWAP` correctly took the OK arm, marked `SWMSG`
+(`0x428D30`) `PSWWAIT(7)` and parked it - twice.** That is the designed idle, not a fault.
+
+**The gap, stated as narrowly as the evidence allows:** the swapper is parked on `SWMSG` =
+`0x428D30`. `5ACTSWAPPER` posted its ping by writing `SWPPING(6)` to `0x428E30` (`swpInfo`) - a
+DIFFERENT node. Nothing observed since restarts the swapper.
+
+Whether that is the defect or the design turns on the `0o145177 LDX I 154` question flagged in 196.4:
+if `X` is reloaded between the `WN5ST` write (`0o145176`) and the `RN5ST` read (`0o145200`), then
+`5ACTSWAPPER` writes one node and gates on another, and the two-node split is deliberate. **That
+single addressing mode now decides the reading, so it is the next thing to settle - against the
+ND-100 manual, not by another plausible decode.**
