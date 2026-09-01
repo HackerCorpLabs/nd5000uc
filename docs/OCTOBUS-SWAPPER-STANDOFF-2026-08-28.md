@@ -12182,3 +12182,26 @@ open question in 176a.
 span `0o152165`-`0o153631`, the FUNCS servicing region, whereas the auto-load messages live around
 `0o74337`-`0o74445`. So there is no existing annotation to inherit here, and the field will have to
 be identified from its uses.
+
+### 176c. `N500DF` is probed ONCE, early - and the neighbouring cell proves that is not enough `[V]`
+
+If `B` is `N500DF` in this segment (176b), then the guard field is read through it and the datafield
+pointer's value matters. The harness reads it exactly once:
+
+```
+resident probe  ADRZERO@0o52047 byteConv=0x0000 wordConv=0x0000 (expect 0x0840=2112) | N500DF@0o51767=0x0000
+...
+NSAMSON@0o11250=0x0004 ... ADRZERO@0o52047=0x0840
+```
+
+`N500DF` reads `0x0000` - once, at the early probe. **The cell beside it in that same line,
+`ADRZERO`, reads `0x0000` there and `0x0840` at the later probe.** So a cell of the same class,
+sampled at the same early moment, is DEMONSTRABLY not yet initialised at that point.
+
+Therefore `N500DF=0x0000` says nothing about its value when the guard runs. It is not evidence that
+the datafield pointer is null; it is evidence about when the probe fired. **A single early sample of
+a value known to change is uninformative and does not look uninformative** - it renders as a
+measurement with an address and a value.
+
+The fix is the one `ADRZERO` already has by accident: read it twice, early and late, and print both.
+Anything read once in that probe block deserves the same treatment before it is quoted.
