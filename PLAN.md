@@ -8,23 +8,22 @@
 
 ## Next
 
-**NEXT: read the target of the pointer word `0o145354` - the call at `0o145200` whose return value
-`0o145202` gates against `PSWWAIT(7)`. That converts the candidate mechanism into an answer or kills
-it.** Standoff **192**.
+**NEXT: establish whether the process parked on a monitor call IS the swapper, and what its `P` is
+while parked.** Standoff **193**. That is an ND-500-side question - the ND-100 side is now closed.
 
-**CANDIDATE MECHANISM (192): `5ACTSWAPPER` gates on `== PSWWAIT(7)`, and our node sits at
-`SWPPING(6)`.** Every small immediate in the routine is 5, 6 or 7 - exactly `SWPWA`/`SWPPI`/`PSWWA`
-and nothing else - so it is a state machine over the swapper states. At `0o145201`-`0o145203` it does
-`SAT 7` / `SKP IF DA EQL ST` / `JMP` away.
+**ANSWERED (193): the wake requires `N5STA == PSWWAIT(7)`; the node is `SWPPING(6)`; `5ACTSWAPPER`
+correctly declines.** `0o145354` -> `0o23662` = `RN5ST`, and `RN5STATUS` (`CC-P2-N500.NPL` 679-687)
+takes `X` = message address and returns `A` = `message.N5STA`. So the gate at `0o145202` tests the
+node's own status.
 
-**`[OPEN]` and load-bearing: whether the gated value is the NODE's status.** `A` is whatever the call
-at `0o145200` returned. If it is the node's state, the wake departs because the message is in the
-wrong state - which would explain a wake that ran (191), held the right node pointer (190), and
-changed nothing. Do NOT assert it on how well it fits.
+**EVERY ACTOR MEASURED IS CORRECT.** `CHSWS` posts and waits; our servicer AND the real B30 microcode
+both ignore a non-`MSGN500` node (now held by a passing test); `5ACTSWAPPER` declines to re-ping over
+an outstanding one. **The missing actor is the SWAPPER, which must consume its ping and return the
+slot to `PSWWAIT`.** It was started, ran, took ONE monitor call, and parked holding an unconsumed
+ping.
 
-**Also `[V]` (191):** both `5ACTSWAPPER` hits are the real routine in S3SMPIT, not S3SM5's aliased
-mid-loop jump - proven by return-link arithmetic (`L=134355` and `L=136240` each land one past a
-`JPL` whose pointer holds `145162`).
+`[D]` not `[V]`: that `PSWWAIT` means "free" and the swapper is obliged to clear `SWPPING`. It is the
+reading that makes all six measured facts consistent, which is evidence, not a carve.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
