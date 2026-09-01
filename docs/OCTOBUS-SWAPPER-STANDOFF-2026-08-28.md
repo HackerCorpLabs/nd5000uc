@@ -11528,3 +11528,71 @@ is the error branch, and no reading of either document can override that.
 Until it is settled, **no count taken through either arm should be described as successes or
 failures** - including section 165's "MON 60 entered five times, ECSLOAD arm three times", which is
 true as a pair of counts and unlabelled as to meaning.
+
+## 167. MON 60 polarity SETTLED from the bytes: P+1 IS the error return. `mon60-callers/INDEX.md` is wrong `[V]` 2026-09-01
+
+Section 166 left the polarity `[OPEN]` and said only a run could settle it. That was too pessimistic
+- reading the gateway with ND-100 **P-relative addressing** applied settles it outright, no run.
+
+```
+146256  153060  MON 60
+146257  124002  JMP 2        -> 146261
+146260  135023  JPL I 23     -> [146303]
+146261  004620  STA ,B -160        save the returned A
+146262  044620  LDA ,B -160        read it back
+146263  050021  LDT 21             T := mem[146263+21] = mem[146304] = 002032B  ECSLOAD
+146264  142065  SKP IF DA UEQ ST   skip when A is NOT ECSLOAD
+146265  124004  JMP 4        -> 146271
+146266  050017  LDT 17             T := mem[146266+17] = mem[146305] = 004017B
+146267  140065  SKP IF DA EQL ST
+146270  124007  JMP 7        -> 146277
+146271  054602  LDX ,B -176        the MON 60 parameter block
+146272  006006  STA ,X 6
+146273  135013  JPL I 13
+146274  135013  JPL I 13
+146275  124357  JMP -21      -> 146254   <-- BACK TO JUST BEFORE THE MON
+146277  135010  JPL I 10
+```
+
+**`146275 JMP -21` lands at `146254`, two words before the `MON 60` at `146256`. That is the retry
+loop, and it is reached only from `146257` = P+1.** The path from P+1 saves the returned A, compares
+it against `002032B` (ECSLOAD) and `004017B`, and re-issues the call when it matches either.
+
+So **P+1 (DIRECT) is the error return carrying the status in A, and P+2 (SKIP) is success.** The
+`nd-500-bus-interface` reference is RIGHT and `mon60-callers/INDEX.md` is WRONG where it says
+*"`JMP 2` = skip return (success) or `JPL I 23` = error"*. `JMP 2` sits AT P+1; calling it "the skip
+return" is the error. INDEX.md has been annotated in place.
+
+### The reading that unlocks it, and that I had been getting wrong all session
+
+The disassembler's `; -> nnnnnn` arrow is **`EA = P + displacement`**, not a jump target. For
+`JPL I` the machine then jumps to the CONTENTS of that address. So:
+
+ - `146263 LDT 21` loads T from `146304` - which is why the ECSLOAD constant is "at 146304". It is
+   an operand of an instruction 21 words earlier, not a routine.
+ - `146260 JPL I 23 -> 146303` jumps to `mem[146303] = 177335`, **not** to `146303`.
+
+### WHICH KILLED THREE ARMS OF THE WATCH I HAD JUST WRITTEN
+
+`ArmMon60PolarityWatch` armed `0o146303`, `0o146304` and `0o146305` as "ERROR handler" and the two
+constants. **All three are DATA WORDS.** They can never be executed, so all three would have read
+`hits=0` in a table whose liveness control passed - three confident zeros about addresses that are
+not code. The real error handler is at `177335`; the constants are operands and have no meaningful
+hit count at all.
+
+This is the pointer-word trap that this file already records at `0o163720`, `0o104016` and
+`0o37632`, and I walked into it a fourth time - while writing the comment that cites the other three.
+**Writing down the objection is not obeying it.** The mechanical guard: before arming any address,
+check whether the disassembly line at that address is an instruction or an operand of one nearby.
+
+### What this does NOT settle - section 165's counts stay unlabelled
+
+With the polarity known, `MON60 gateway hits=5` and `status-compare hits=3` means **three of five
+MON 60 calls returned an error**. But the two statuses captured, `2166o` and `2113o`, are neither
+`2032B` nor `4017B`, so both took `146270 JMP 7` -> `146277` - the NON-retry path. The third status
+was outside the 60-entry log window.
+
+So the honest position is narrower than 165's: the gateway has a working retry loop, and the two
+errors we actually SAW did not use it. Whether any retry fired needs the corrected arms
+(`0o146271` retry vs `0o146277` no-retry) and the full status list. That is a measurement, and it is
+queued behind the shared build tree.

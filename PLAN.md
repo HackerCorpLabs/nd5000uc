@@ -12,11 +12,15 @@
 the RetroCore tree is lent to `nd500uc-fc` for C1/D3 real-SINTRAN fixtures (1.5-2.5 h from 2026-09-01
 12:10). Do not `dotnet build`/`dotnet test` there until they report done.
 
-**NEXT: settle MON 60's return polarity by measurement** (standoff **166**). Two carved sources
-disagree about which arm is success - `mon60-callers/INDEX.md` says `JMP 2` (P+1) is success, the
-bus-interface reference says P+2 is. Whichever return arm reaches the error handler at `0o146303`
-is the error arm; the watch arms both. Until then NO count through those arms may be called
-successes or failures.
+**SETTLED WITHOUT A RUN (standoff 167): MON 60's P+1 (DIRECT) is the ERROR return with the status
+in A; P+2 (SKIP) is success.** `146263 LDT 21` loads T from `146304` = `002032B` (ECSLOAD) by
+P-relative addressing, and the retry loop it gates (`146271`, tail `146275 JMP -21` -> `146254`,
+two words before the `MON`) hangs off the `JMP 2` = P+1 arm. The bus-interface reference was right;
+`mon60-callers/INDEX.md` was wrong and is now annotated in place.
+
+**Consequence for 165's counts:** three of five MON 60 calls returned an error, but both statuses we
+captured (`2166o`, `2113o`) are neither `2032B` nor `4017B`, so both took the NON-retry path. Whether
+any retry actually fired is still unmeasured.
 
 **RETRACTED (166):** `A=2064o` is a parameter-block pointer, not a status - `0o146255 AAA -173` sets
 A to the block address immediately before the `MON`. The real statuses are `2166o` and `2113o`, read
