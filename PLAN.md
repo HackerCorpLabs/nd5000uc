@@ -8,26 +8,24 @@
 
 ## Next
 
-**NEXT: read the arm-2 walk (`RETROCORE_ND5000_WATCH=chswsarm2`) - where does `0o163637` lose
-control after `0o163647`?** Standoff **184**.
+**NEXT: read `0o145162` (`5ACTSWAPPER`) itself - what does it DO with the node in `X`, and what
+does it require of `N5STA` before the swapper will consume it?** Standoff **190**.
 
-**RETRACTED (183): the "entered three times" count was WRONG and the retry reading goes with it.**
-`0o163637`/`0o163640`/`0o163641` are straight line with nothing jumping into the third, so the entry
-count and `0o163641` must be equal. They were 3 and 1; five arms said one, one said three. The entry
-over-reports. Why is `[OPEN]` - `0o74407` is also `STF ,B -54` and measured 1, so a multi-cycle
-sampling explanation does not hold.
+**LOCATED (185-190): `CHSWS` parks a `3SWMESS` at `SWPPING(6)` and nothing consumes it.**
+`0o74425` -> `0o163637` (runs its whole length, every call returning by its success door) ->
+`0o164101` -> `0o62662`, which builds the message (`N5STA:=1`, `MICFU:=5` = `3SWMESS`) and never
+returns. Handoff:
+`docs\handoffs\HANDOFF-OCTOBUS-SWAPPER-SWPPING-DEADLOCK-2026-09-01.md`.
 
-That killed a clean chain of valid deductions built on it (identical parameters => retry; `L`
-unchanged => not a call => the known retry loop excluded). Every step was sound; the premise was an
-unchecked instrument reading. **Good reasoning on a bad number is more persuasive, not safer.**
+**The wake path is NOT the fault (190).** `X=0o43430` at both `5ACTSWAPPER` executions is exactly the
+SWPPING node's ND-100 word address, matching none of the other three nodes. So the pointer is not
+lost and the target is not wrong - **both halves of the handshake name the same node and the message
+is still not consumed.**
 
-**WHAT STANDS `[V]`:** `0o74425` calls `0o163637` exactly ONCE. The routine runs linearly through its
-prologue and arm 1 - every call so far RETURNS, and by its success door. It reaches `0o163647` and
-never reaches either epilogue (`0o164112`/`0o164114` cold), confirmed from the caller's side too. No
-retry, no loop. The stop is at or beyond `0o163647`.
-
-**Standing rule earned here:** when a count is the load-bearing fact, arm its required predecessor in
-the SAME table. An arm and its required predecessor cannot both lie.
+**Do NOT "fix" the servicer's `MessageToSwapper` arm.** It is UNREACHABLE on this lane: a `3SWMESS`
+never arrives with `N5STA=1` for the chain walk to hand over, and the real B30 skips it too
+(`0o15143` holds the immediate 1, checked in the raw microcode). Changing it would do nothing and
+leave a file that looks handled.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
