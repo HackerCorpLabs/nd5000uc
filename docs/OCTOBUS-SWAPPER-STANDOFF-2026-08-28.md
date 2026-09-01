@@ -12141,3 +12141,32 @@ actually lands.
 It does NOT make the absence harmless - a decision taken on the wrong input still ends in the wrong
 place. But it removes "the message is missing, therefore something failed" as a free inference, which
 is how it has been used since section 169.
+
+### 176b. What A holds at the guard: field `0o20` of the `,B -11` control block `[V]` idiom, `[OPEN]` name
+
+The guarded print is decided by A, loaded two instructions earlier:
+
+```
+074432  054767  LDX ,B -11        X := the control block
+074433  046020  LDA ,X 20         A := field at offset 0o20
+074434  171052  SAT 52            then the three-way compare
+```
+
+`LDX ,B -11` is not ad-hoc - it is the standard control-block fetch in this segment. `CSREA`
+(FUNCS 023, read control store) opens identically at `0o152165`:
+
+```
+152165  054767  LDX ,B -11
+152166  052041  LDT ,X 41
+152167  056044  LDX ,X 44
+```
+
+So the three guard values `52`, `53`, `76` (octal) are being compared against **one field, at offset
+`0o20`, of the block `,B -11` points at**. Naming that block and that field would say outright
+whether suppressing `> Allocating memory` is correct behaviour for this configuration - which is the
+open question in 176a.
+
+`[OPEN]`: the block's identity. The annotated `FUNCS-BODIES` do NOT cover this address range - they
+span `0o152165`-`0o153631`, the FUNCS servicing region, whereas the auto-load messages live around
+`0o74337`-`0o74445`. So there is no existing annotation to inherit here, and the field will have to
+be identified from its uses.
