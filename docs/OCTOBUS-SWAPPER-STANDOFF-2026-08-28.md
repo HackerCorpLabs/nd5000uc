@@ -13089,3 +13089,88 @@ Recorded and **deliberately not built on**: either the walk reads `N5STA` at the
 field carries something beyond the documented lifecycle. Standoff 183 was a chain of valid deductions
 from one unchecked instrument reading, so an anomalous field from an unverified dump layout gets
 written down and left alone until something independent confirms it.
+
+## 187. RESOLVED: the 3SWMESS is not a microcode call at all - it is a message TO THE SWAPPER, parked at `SWPPING(6)`, and our servicer is RIGHT to ignore it
+
+Standoff 186 left one question open - whether the swapper message is *never picked up* or *refused* -
+and flagged `N5STA` values of 5/6/7 as outside the documented `0..4` set. Both are now closed, from
+files, with no new run.
+
+### 187.1 The queue walk reads the right offsets
+
+`OctobusND5000Station.cs:1915` reads `N5STA = ReadNd100Word(node + 4)` (byte +4 = **word 2**) and
+`MICFU = ReadNd100Word(node + 12)` (**word 6**). Those are exactly the documented 5MPM offsets, so
+the 5/6/7 readings are real values at the right field - not the wrong-object error that 186.3 guarded
+against.
+
+### 187.2 `N5STA` 5/6/7 are a DIFFERENT NAMESPACE, and it is documented
+
+From `N500-SYMBOLS.SYMB`:
+
+    SWPWA=000005    SWPPI=000006    PSWWA=000007
+
+and `Nd500MicrocodeServicer.cs:2049-2051` already names them:
+
+    case 5: return "SWPWAIT(nd100)";
+    case 6: return "SWPPING(nd100)";
+    case 7: return "PSWWAIT(nd100)";
+
+**`[V]`. The `free/MSGN500/WAITING/ANSWER/5ERANSWER` list is the ND-500-side lifecycle; 5/6/7 are
+ND-100-side SWAPPER states in the same field.** 186.3 was right to write the anomaly down and refuse
+to build on it, and it dissolved on contact with the symbol table.
+
+### 187.3 The node's own history separates "never picked up" from "refused"
+
+The same node `0x00428E30` is REUSED across messages, and its history in one run is the whole answer:
+
+    MICFU=0x19 (3PHSW)   N5STA=1  x13   then  N5STA=3  x13   <- posted and ANSWERED
+    MICFU=0x01 (3RMICV)  N5STA=1        then  N5STA=3        <- posted and ANSWERED
+    MICFU=0x0A (CACHE)   N5STA=1                             <- posted
+    MICFU=0x05 (3SWMESS) N5STA=5  x1    then  N5STA=6  x112  <- NEVER 1
+
+The servicer services a node only when `N5STA == MSGN500(1)` (`OctobusND5000Station.cs`: *"answered
+messages are skipped on a re-walk (N5STA != 1)"*). **The swapper message is never marked 1, so the
+servicer never touches it.** It was never refused - the decline arm never ran, which is precisely why
+there is no retry storm, and why 186's contradiction was a contradiction.
+
+**This is a working-instance check of the strongest kind (taxonomy #14): the SAME node in the SAME
+run carries other messages that complete normally, 1 -> 3.** The mailbox path is not broken. This one
+message is different in kind.
+
+### 187.4 What the message actually is
+
+A `3SWMESS` at `SWPPING(6)` is a message **to the swapper process**, not a function call to the
+microcode. The ND-100 builds it, marks it SWPPING, and waits for the ND-500 side to consume it.
+`0o62662` is that build-and-wait, and `0o164101` never returns because the wait never ends.
+
+**So `Nd500MicrocodeServicer`'s `case N5MicroFunction.MessageToSwapper` arm is UNREACHABLE on this
+lane** - not because of the `Generation` test in it, but because a 3SWMESS never arrives with
+`N5STA=1` for the chain walk to hand over in the first place. That is why the file's comment *"no run
+has posted `0o5` to the CPU on this lane"* has been literally true throughout while a 3SWMESS node
+sat in the queue.
+
+**A near-miss worth recording.** Standoff 186 laid out the decline path - `understood = Generation ==
+ND500` is false on this lane, and the file's own banner says a decline is an infinite retry - and the
+obvious next move was to make the ND-5000 arm answer 3SWMESS. **That would have been a fix to code
+that never executes**, and it would have "worked" in the sense that nothing got worse, which is the
+worst possible outcome: a change with no effect, in a file that now looks like it handles the case.
+The thing that stopped it was 186 recording the retry-storm contradiction as `[OPEN]` instead of
+explaining it away.
+
+### 187.5 The standoff, stated plainly
+
+SINTRAN's `CHSWS` builds a swapper message, parks it at `SWPPING(6)`, and blocks in
+`0o62662` waiting for the ND-500 to consume it. Nothing consumes it, because consuming a message
+addressed to the swapper requires the swapper to be RUNNING - and starting the swapper is what this
+path is trying to do.
+
+**That last sentence is a description, not yet a diagnosis, and the difference matters.** It is
+`[OPEN]` whether:
+ - the real ND-5800 consumes `SWPPING` messages in MICROCODE (in which case we are missing a
+   microcode-side consumer and the swapper never needs to be running), or
+ - the swapper is expected to be already running by this point, and the true defect is upstream in
+   `LOAD-SWAPPER` / `START-SWAPPER` leaving it not running.
+
+Those demand opposite fixes. **Do not pick one by plausibility** - the microcode is on disk and can
+be asked directly: find what reads a queue node with `N5STA=SWPPING(6)` in `MICRO-5800-B30.DATA`. If
+nothing does, the second reading is the right one.
