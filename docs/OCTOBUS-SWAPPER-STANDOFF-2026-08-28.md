@@ -11781,3 +11781,64 @@ declares rather than addresses I derived.
 
 Section 168's subtraction is still the first thing to run; this is the natural follow-up, and both
 can share one run if the eight watch slots are split.
+
+## 171. The stall PCs have names - and naming them shows the PC histogram is STRUCTURALLY the wrong instrument `[V]` addresses, `[D]` attribution
+
+The place-domain stall histogram (section 163) was captured weeks of analysis ago and never resolved
+to symbols. S3SM5 loads at runtime word `0x4000` and spans to `0xC000`, and every non-idle sample
+falls in that range, so its symbol table names them - no new run:
+
+| PC | falls inside | next symbol | samples |
+|---|---|---|---|
+| `0x7E78` `0o77170` | **`CMLTS 0x7E6D`** | `DEFLI 0x7E8E` | 3 |
+| `0x7E79` `0o77171` | `CMLTS` | | 5 |
+| `0x7E7B` `0o77173` | `CMLTS` | | 3 |
+| `0x7E83` `0o77203` | `CMLTS` | | 2 |
+| `0x4BA2` `0o45642` | `FREES 0x4B8F` | **`GWAIT 0x4BA3`** | 2 |
+| `0x4730` `0o43460` | `TFFIS 0x4725` | `TEITR 0x4731` | 1 |
+
+`0x4BA2` is the LAST word of `FREES`, immediately before a symbol named `GWAIT`, which is the sort of
+name a blocked process sits at - but it is two samples, and adjacency is not dispatch. Noted, not
+claimed.
+
+### The four `CMLTS` samples are not a spin, and that is the important part
+
+```
+077164  JAZ 7        -> 077173
+077170  STA ,B -75
+077171  JPL I 23     -> [077214]      a CALL
+077173  STZ ,B -75
+077203  JMP 2        -> 077205
+```
+
+The samples land on BOTH arms of the branch at `077164` (`077171` and `077173`), on a call, and on a
+jump further down. That is a routine being **executed through, repeatedly** - not a tight loop spun
+in. And it is 13 samples out of 639, about 2% of the window, against 576 samples (90%) in the ND-100
+IDLE loop.
+
+So nothing is stuck in `CMLTS`. It is periodic background work - plausibly the watchdog path, since
+22 `3RMICV` watchdog messages were sent during exactly this window - and the machine is otherwise
+idle.
+
+### WHICH MEANS THE PC HISTOGRAM CANNOT ANSWER THIS QUESTION, EVER
+
+Section 163 established that the `place-domain` process is BLOCKED - not scheduled - rather than
+spinning. **A process that is not executing has no PC to sample.** Every sample the histogram can
+possibly collect belongs to something else: the idle loop, or periodic work like the above.
+
+That is taxonomy **#8** - an instrument structurally incapable of being relevant to the question
+asked of it - and it explains sections 156, 157 and 159 all failing the same way. Section 159 already
+said "do not reach for the PC histogram"; this is WHY, stated mechanically rather than as a warning:
+**it samples running code, and the thing under investigation is a process that is not running.**
+
+The right instrument for a blocked process is SINTRAN's own process state - which RT/background
+process is in which queue, and what it is waiting on - not a program counter. That is a different
+kind of probe from anything built in this lane so far.
+
+### Attribution caveat, stated because this file has been bitten by it twice
+
+`DiagPcWatch` and the histogram match the 16-bit PC only. Segments alias, so "inside `CMLTS`" is
+`[D]`: the addresses and the symbol containment are `[V]`, and S3SM5 is the segment that serves
+ND-500 monitor commands, but nothing here PROVES S3SM5 was the mapped segment at the sample instant.
+Section 165 withdrew exactly this kind of claim when the PIL said driver level. Here the PIL is 1,
+which is consistent with S3SM5 rather than a driver - but consistent is not proven.
