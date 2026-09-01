@@ -13385,3 +13385,79 @@ the first time it did so for an arm that was never meant to be evidence.
 instrument.** The reflex after 177-189 was to add arms and spend fifteen minutes; the answer was in
 `run185.log`, and in `run179.log` before it. An arm placed as a control still records everything the
 dump prints, and its registers do not know they were meant to be ignored.
+
+## 191. The aliasing check that nearly killed 190 - and instead upgraded it to `[V]`
+
+Reading `0o145162` to answer "what does the wake require of `N5STA`" turned up a problem with
+standoff 190 first.
+
+### 191.1 There are TWO different instructions at `0o145162`
+
+    030-S3SM5.dis     145161  SKP IF DX UEQ 0
+                      145162  JMP I 141  -> 145323      <- mid-loop, NOT a routine entry
+    017-S3SMPIT.asm   145161  STZ 0                     (padding)
+                      145162  RADD CLD SL DA            <- A := L, a clean routine ENTRY
+                      145163  STA -6
+
+`ND500-HANDLERS-OVERLAY.md` gives `5ACTSWAPPER=145162` in the **S3IMPIT/S3SMPIT (32000)** segment.
+`DiagPcWatch` matches the **16-bit PC only**, and segments alias. So every "`5ACTSWAPPER` hits=2"
+reading since 179 could have been S3SM5's mid-loop jump instead - which would have made 190's
+conclusion a textbook instrument-failure #19: right value, wrong object.
+
+### 191.2 The return links settle it, exactly
+
+`JPL` leaves `L = P+1`, so the measured `L` names the caller. The overlay's pointer words holding
+`145162` are at `134401`, `135635` and `136307`.
+
+    hit#1  L=134355o   134354  JPL I 25  -> 134401     and 134401 holds 145162
+    hit#2  L=136240o   136237  JPL I 50  -> 136307     and 136307 holds 145162
+
+**Both match to the exact word.** Two different call sites, two different `L` values, each landing
+one past a `JPL` whose indirect pointer holds `145162`. Nothing about S3SM5's mid-loop jump produces
+either number.
+
+**So both hits ARE the real `5ACTSWAPPER`, and standoff 190 stands - with its code identity upgraded
+from assumed to `[V]`.**
+
+**The method point:** a PC watch that matches 16 bits cannot identify code, but the REGISTERS it
+prints can. `L` is a return address, and a return address is a fingerprint of the caller. This is the
+fourth time this session the per-hit register detail carried the finding, and the first time it
+*rescued* a conclusion rather than overturning one.
+
+Worth stating plainly because the reflex was the opposite: on finding the aliasing risk the instinct
+was to withdraw 190. **Checking is not the same as retracting** - the check was cheap, it was
+available, and it produced a stronger claim than the one it was aimed at.
+
+### 191.3 What `5ACTSWAPPER` actually does with the node
+
+    145162  RADD CLD SL DA        A := L
+    145163  STA -6                save the return link
+    145164  JPL I 163 -> 145347   call
+    145165  RAND 0 0              direct-return landing
+    145166  RADD CLD SX DD        D := X
+    145167  STX -11               *** save X - and X held the SWPPING node (0o43430)
+    145170  LDA I 160
+    145171  SAD 6
+    145172  SUB I 157
+    145173  SAD ZIN SHR 5
+    145174  STD -15
+    145175  SAA 5                 A := 5
+    145176  JPL I 154 -> 145352   call
+    145177  LDX I 154
+    145200  JPL I 154 -> 145354   call
+
+`0o145167` stores `X` into the frame, which independently confirms 190: the routine RECEIVES the node
+pointer in `X` and keeps it. That is a second, structural reason to believe the wake concerned this
+message, on top of the address arithmetic.
+
+`0o145175 SAA 5` loads **5** immediately before a call. Five is `3SWMESS`. That is **suggestive and
+explicitly NOT claimed** - `5` is also a plausible count, index or CPU number, and standoff 183 is the
+standing reminder of what happens when a number is read as the thing you are hunting for. It is
+recorded as a lead, and the way to settle it is to read `0o145352`'s target rather than to assert it.
+
+### 191.4 Still `[OPEN]`
+
+What the wake requires of `N5STA` is **not yet answered** - the routine's first call at `0o145164` and
+the two at `0o145176`/`0o145200` have not been followed. The question this section set out to answer
+remains open; what it delivered instead was the assurance that the thing being read is the right
+routine at all.
