@@ -13012,3 +13012,80 @@ never returns to any landing site or epilogue.
 
 The next arm set is `0o62662`'s own six decision points, with `0o62663` armed beside `0o62662` as the
 required-predecessor check, since standoff 183 was a count that no neighbour had to agree with.
+
+## 186. MICFU 5 IS `3SWMESS`, the swapper message - and a node carrying it sits unserviced in the queue
+
+Read from `E:\Dev\Ronny\NDInsight\SINTRAN\ND500\swapper\N500-SYMBOLS.SYMB`, no run needed:
+
+    3RMIC=000001   3RSTA=000002   3RWCS=000003   3WWCS=000004
+    3SWME=000005   <-- the 5 that 0o62662 writes into [block+6]
+    3EXAD=000006   3DEPD=000007   ...   3STAR=000023
+
+**`[V]`. The value `5` that standoff 185 measured `0o62662` storing at offset 6 of the block is
+`3SWMESS`** - and offset 6 is `MICFU` in the documented 5MPM layout. Together with `N5STA:=1`
+(`MSGN500`) at offset 2, `0o62662` builds a **swapper message**. That also upgrades 185's `[D]` on the
+message-layout reading: an independently-carved symbol table now says the value at the MICFU offset
+is a real MICFU name, which is not something a coincidence supplies.
+
+**This closes an older open item.** Commit `ffdfe99` was *"Find the 3SWMESS writer in resident
+SINTRAN"*. The writer is **`0o62662`**, reached from **`0o164101`**, inside the routine `0o163637`
+that `CHSWS` calls once.
+
+### 186.1 Independent corroboration from the mailbox side
+
+The same run's `X5BEX` ex-queue walk (`IServicerHost`: the per-CPU extension block's message chain)
+shows four nodes, and the last one carries the swapper message:
+
+    DW #33 ... @0x0042BE30 N5STA=0x0000 MICFU=0x0000 -> @0x0042C130 N5STA=0x0001 MICFU=0x0001
+           -> @0x00428D30 N5STA=0x0003 MICFU=0x0013 -> @0x00428E30 N5STA=0x0005 MICFU=0x0005 link=-1
+
+while the SERVICED list - the one that names each function from its symbol - contains only:
+
+    MICFU=0x01 3RMICV, 0x0A CACHE(12B), 0x13, 0x14, 0x19    ... and NEVER 0x05
+
+**A node carrying `MICFU=0x0005` is present in the queue across dozens of activations and is never
+serviced.** That is a second instrument, on the mailbox rather than the ND-100 PC, reaching the same
+conclusion: SINTRAN builds a swapper message, and nothing answers it, so the send-and-wait at
+`0o164101` never returns. The PC walk and the queue walk could easily have disagreed; they do not.
+
+**Two formats, two instruments - do not merge their counts.** `MICFU=0x0005` (4-digit) is a queue
+node's CONTENTS; `MICFU=0x05` (2-digit) would be a SERVICED call. A naive `grep -c "MICFU=0x0*5"`
+returns 113 and reads as "the swapper message was serviced 113 times", which is the exact opposite of
+what the data says. The 113 is one unserviced node re-observed on every queue dump.
+
+### 186.2 What our servicer does with it, and the contradiction that is NOT resolved
+
+`Nd500MicrocodeServicer.cs` already knows the hardware answer - *"On the B30: `0o5` 3SWMESS ->
+`0o15221` MSG_ILLEG ILLEGAL"* - and sets, for the octobus lane:
+
+    case N5MicroFunction.MessageToSwapper:  // 05 = 3SWMESS
+        understood = Generation == Nd500Generation.ND500;   // FALSE on ND5000
+
+so on this lane a 3SWMESS is declined. The file's own banner a few lines below states the
+consequence: **"A DECLINED MICFU IS NEVER A QUIET GAP - IT IS AN INFINITE RETRY"**, with two measured
+cases of 132,042 and 174,476 identical requests.
+
+**We do not observe a retry storm.** The routine is entered ONCE and blocks. So the decline path and
+the measurement do not match, and this is `[OPEN]` rather than a solved bug. Candidate readings, none
+of them chosen here:
+ - the message never reaches the servicer's dispatch at all (no named `0x05` line supports it having
+   been serviced even once), so the decline arm never runs and SINTRAN waits on an `N5STA` that never
+   changes;
+ - or it is declined and SINTRAN's wait is not a retry loop at this call site.
+The distinction is between "nobody picked it up" and "it was refused", and they demand different
+fixes. **Nothing measured so far separates them.**
+
+The servicer's comment *"no run has posted `0o5` on this lane (the MICFU histogram shows neither), so
+this is a LATENT gap"* is therefore **only half stale**: a node carrying `0o5` demonstrably exists in
+the queue now, but the histogram it refers to counts SERVICED functions, and that still shows none.
+Both statements are true, and the gap between them IS the finding.
+
+### 186.3 Flagged, not used
+
+Queue nodes show `N5STA` values of `0x0005`, `0x0006` and `0x0007`. The documented set is
+`free=0, MSGN500=1, WAITING=2, ANSWER=3, 5ERANSWER=4`. Values above 4 are outside it.
+
+Recorded and **deliberately not built on**: either the walk reads `N5STA` at the wrong offset, or the
+field carries something beyond the documented lifecycle. Standoff 183 was a chain of valid deductions
+from one unchecked instrument reading, so an anomalous field from an unverified dump layout gets
+written down and left alone until something independent confirms it.
