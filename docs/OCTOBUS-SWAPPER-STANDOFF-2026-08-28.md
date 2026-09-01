@@ -12338,3 +12338,147 @@ implemented so the next window is a build and a run, not a fresh analysis.
 `,B -57` appears 124 times in this segment. It is noted only because within THIS routine the same
 slot is reloaded three times, which is consistent with one object being re-examined after each call.
 Consistent with, not evidence of.
+
+## 179. The 21-word window read again with the calling convention carved out - the arm set drops from eight addresses to four, and one of section 178's two "may not return" calls is refuted
+
+Section 178 decoded the window at `0o74407`-`0o74434` and proposed an eight-address arm set built
+around one question: **does the path vanish into one of the two `JPL I` calls?** That was the right
+question, but it did not need a run. Both calls are answerable from the listing, because the routine
+they belong to is compiler-generated and its calling convention is carved in the helpers themselves.
+
+Everything here is read from `030-S3SM5.dis` in
+`E:\Dev\Ronny\NDInsight\tools\sintran-segment-carver\versions\L-VSX-500\re\`. No harness ran.
+
+### 179.1 The calling convention, `[V]` from the frame helpers' own instructions
+
+The window's prologue is three words:
+
+    074407  STF ,B -54            save F
+    074410  RADD CLD SL DA        A := L        (capture the return link into A)
+    074411  JPL I 75  -> 074506   call [074506] = 0o44030
+
+`0o44030` is **the frame-push helper**, not a routine this code chose to call:
+
+    044030  STX ,B -51            park X
+    044031  STA ,B -50            park A - which the caller just loaded with L
+    044032  LDA 46                stack limit
+    044033  LDX ,B -47            stack pointer
+    044034  SKP IF DX MGRE SA     in range?
+    044036  JPL I 43  -> 044101   overflow handler
+    044043  AAX 21                advance the stack pointer by 21 octal = 17 words
+    044045  LDA ,B -50
+    044046  STA ,B -74            *** the saved link lands in ,B -74 ***
+    044053  EXIT
+
+and `0o44054`, immediately after it, is the matching **pop**, whose tail is the whole answer:
+
+    044055  AAX -21               retract the stack pointer
+    044067  LDA ,B -74            fetch the saved link
+    044070  RADD CLD SA DL        *** L := A ***
+    044077  EXIT                  return through it
+
+**So `,B -74` IS the saved return address, `[V]` - not derived, not inferred from a neighbour.**
+That single fact decodes the rest of the routine:
+
+- **`MIN ,B -74` increments the saved return address.** That is the SKIP return - the caller resumes
+  at P+2. Same P+1/P+2 polarity settled for MON 60 in section 168, now seen from the callee side.
+- **`STA ,B -77` writes the status the caller will read**, and does NOT touch `,B -74`. That is the
+  DIRECT return - the caller resumes at P+1 with a status.
+
+The window's own tail is exactly those two epilogues sharing one pop:
+
+    074502  MIN ,B -74            SUCCESS: bump the link
+    074503  JMP I 11  -> 074514   = 0o44054, pop and return
+    074504  STA ,B -77            ERROR:   store the status
+    074505  JMP -2    -> 074503   then fall into the same pop, link NOT bumped
+
+### 179.2 CALL#1 is the prologue. Section 178's "may not return" on it is RETRACTED
+
+`0o74411` is the frame push. It returns via `EXIT` at `0o44053` on every path except a stack
+overflow (`0o44036 -> 0o44101`). Arming `0o74412` to ask "did the call at `0o74411` come back" was
+therefore going to spend a build window confirming that the compiler emits a working prologue.
+
+Section 178 wrote of that arm: *"the cheapest possible test of the most likely explanation for a
+path that vanishes."* It was neither - it was a test of the most likely explanation for a path that
+vanishes **in hand-written code**, applied to a routine that is not hand-written. Reading the target
+cost four minutes and no build.
+
+### 179.3 CALL#2 returns BOTH ways, so `0o74426` is a landing site, not an exit
+
+`0o74425 JPL I 62 -> 074507` calls `0o163637`, a real routine - it opens with the same
+`STF ,B -54 / RADD CLD SL DA / JPL <push>` prologue. Its body is a chain of steps in the same
+convention:
+
+    163643  JPL I 56  -> [163721]
+    163644  RAND 0 0              <- direct/error landing (a NOP holding the slot)
+    163645  JPL I 55  -> [163722]
+    163646  JMP I 55  -> [163723] = 0o164114
+
+and `0o164114` is that routine's own `STA ,B -77` error epilogue, byte-for-byte the shape of the
+window's `0o74504`:
+
+    164112  MIN ,B -74
+    164113  JMP I 23  -> 164136
+    164114  STA ,B -77
+    164115  JMP -2    -> 164113
+
+**So the routine at `0o163637` returns - by both doors.** It never swallows the path. Which makes
+the two words after `0o74425` a skip-return pair, not a call and an exit:
+
+    074426  JMP 56 -> 074504      DIRECT landing  = CALL#2 failed, propagate its status
+    074427  LDX ,B -57            SKIP   landing  = CALL#2 succeeded
+
+Section 178 labelled `0o74426` "EXIT C". It is an exit, but it is reached only by the callee
+choosing the direct door - which is a different claim, and a measurable one.
+
+### 179.4 The window, re-read
+
+    074407  STF ,B -54            prologue                       hits=1 (177)
+    074410  RADD CLD SL DA        A := L
+    074411  JPL I -> 0o44030      prologue: push frame           (returns)
+    074412  LDX ,B -57            sole landing
+    074413  LDA ,X -22
+    074414  BSKP ONE 30 DA        bit test 1
+    074415  JMP -> 074504         *** EXIT: error, status in A
+    074416  BSKP ZRO 70 DA        bit test 2
+    074417  JMP -> 074502         *** EXIT: success
+    074420  LDD ,B -65            save local -65 into -63
+    074423  LDD ,X -7             local -65 := [X-7]
+    074425  JPL I -> 0o163637     the real call                  (returns both ways)
+    074426  JMP -> 074504         *** EXIT: error, propagate CALL#2's status
+    074427  LDX ,B -57            success landing
+    074430  LDA ,X -17
+    074431  JAF -> 074476         EXIT D - EXCLUDED, 0o74476 measured ZERO in 177
+    074434  SAT 52                guard start                    hits=0 (177)
+
+**Three candidate exits remain, and they are mutually exclusive**: `0o74415`, `0o74417`, `0o74426`.
+Exactly one of them carries the path. `0o74431` is already excluded by section 177's zero at
+`0o74476`, and falling through to `0o74434` is excluded by section 177's zero there.
+
+### 179.5 The arm set, now four addresses
+
+    0o74407  = 0x7907   prologue        expect 1  - control, the bound's left edge
+    0o74415  = 0x790D   EXIT error-1
+    0o74417  = 0x790F   EXIT success
+    0o74426  = 0x7916   EXIT error-2 (CALL#2 failed)
+    plus 5ACTSWAPPER                    liveness
+
+Exactly one of the three exits must read 1 and the other two 0. Any other table - two exits hot, or
+all three cold with the prologue hot - is itself a finding, because it would mean the path leaves
+somewhere the decode says it cannot.
+
+**Still not armed** - the shared build tree is with `nd500uc-fc`. But the next window is now four
+arms and one run, not eight arms and an interpretation.
+
+### 179.6 What this cost and what it is worth
+
+Section 178's arm set would have consumed a build window to learn that a compiler prologue returns.
+The correction came from asking a question section 178 did not ask: **not "does this call return?"
+but "what IS this call?"** - one `grep` for the pointer word's value, one `sed` for the target's
+body.
+
+The general shape, and it is the same family as instrument-failure #19 (correct about the wrong
+object): **`JPL I <pointer>` renders identically whether the callee is a routine the code chose or
+plumbing the compiler emitted.** The disassembly cannot tell them apart, and the instrument built on
+top of it would have measured the plumbing with a straight face. Read the target before arming the
+landing site.

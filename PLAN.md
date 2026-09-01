@@ -8,9 +8,18 @@
 
 ## Next
 
-**NEXT: read the 21 words between `0o74407` (`CHSWS`, hit once) and `0o74434` (guard start, hit
-ZERO) and find where the auto-load path leaves.** Standoff **177**. That is the tightest bound this
-investigation has had.
+**NEXT: arm FOUR addresses and run once - `0o74407` (prologue, control), `0o74415`, `0o74417`,
+`0o74426`. Exactly one of the last three must read 1.** Standoff **179**.
+
+The 21-word window is decoded and the exits are enumerated. The calling convention is carved `[V]`
+from the frame helpers themselves (`,B -74` holds the saved return link, so `MIN ,B -74` is the skip
+return and `STA ,B -77` is the direct/error return) - so every `JPL` landing site in the window is
+identified, and the two calls both return. Section 178's eight-arm set is superseded: `0o74411` is
+the compiler's frame push, not a semantic call, and `0o74426` is CALL#2's error landing rather than
+an exit of its own.
+
+**Blocked only on the shared build tree** (held by `nd500uc-fc`). The next window is one build and
+one run, not an analysis.
 
 **MEASURED (177): the `> Allocating memory` code is NEVER REACHED** - not the print (`0o74445`), not
 the guard (`0o74434`), not the skip target (`0o74476`). So the missing message is neither a failure
