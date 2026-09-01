@@ -11904,3 +11904,87 @@ queue membership as a readable BIT, which is exactly the shape a blocked-process
 
 **No instrument should be built on this section yet.** The addresses are verified; the layout that
 would make them meaningful is not.
+
+## 173. The MON 60 counts BALANCE - and the arrival ORDER says do not trust the balance `[V]` counts, `[OPEN]` interpretation
+
+Run with `RETROCORE_ND5000_WATCH=swload`, single test, same pack and windows.
+`OUTCOME: nd-500=OK place-domain=STALL run=STALL startMessagesSeen=1` - unchanged.
+
+```
+MON60 gateway@0o146256   hits=5
+MON60 ERROR ret@0o146257 hits=3
+MON60 OK ret@0o146260    hits=2
+S3SM5 CHSWF@0o74161      hits=0
+S3SM5 CHSWL@0o74330      hits=1
+S3SM5 LIICO@0o74371      hits=1
+S3SM5 CHSWS@0o74407      hits=1
+(the fifth S3SM5 arm was misplaced - see below)
+```
+
+### The counts say every call returned. 3 + 2 = 5.
+
+By section 168's stated rule that would settle it: the monitor is NOT blocked inside SINTRAN's
+handler, and the block is after the last return, in the monitor's own code.
+
+**The register log refutes reading it that way.** In arrival order:
+
+```
+gateway  #1  A=272o        <- parameter-block pointer
+ERROR    #1  A=2166o       <- status out.  textbook
+gateway  #2  A=365o
+OK       #1  A=0o          <- SUCCESS RETURNS A=0.  textbook
+gateway  #3  A=1312o
+ERROR    #2  A=2113o
+gateway  #4  A=2064o       <- NO RETURN FOLLOWS
+CHSWL    #1  A=0o    L=75236o
+gateway  #5  A=136000o  B=176200o  L=146253o
+ERROR    #3  A=136000o     <- BOTH return arms, same A, unchanged
+OK       #2  A=136000o     <- the model forbids this
+LIICO    #1  A=41o
+```
+
+Two things the model cannot produce:
+
+ - **`gateway #4` has no return at all** before the next gateway entry.
+ - **`gateway #5` is followed by BOTH return arms**, with A unchanged across all three. A call
+   returns to exactly one of P+1 or P+2, and `0o146257` is `JMP 2` which jumps to `0o146261` - it
+   cannot fall into `0o146260`.
+
+So the totals balance by coincidence of two anomalies, not because five calls made five returns.
+**`3 + 2 = 5` is exactly the kind of clean number that ends an investigation, and it would have ended
+this one wrongly.** The counts are `[V]`; what they mean is `[OPEN]`.
+
+### What the first three pairs DO establish, and it is worth having
+
+They are textbook, and they confirm section 167 from live data rather than from reading:
+
+ - A at the gateway is a small parameter-block pointer (`272o`, `365o`, `1312o`).
+ - A at `0o146257` is a status (`2166o`, `2113o`).
+ - **A at `0o146260` is `0`** - which is precisely the documented "SKIP = success, A=0".
+
+The `0o146260` = success reading is now measured, not just derived. Section 167 stands.
+
+`gateway #5`'s signature (`A=136000o`, `B=176200o`, `L=146253o` - a link INTO the gateway region) does
+not look like a call site building a parameter block at all, and is the likeliest of the two
+anomalies to be an aliased address rather than a real gateway execution. Not asserted.
+
+### The auto-load path: CHSWL, LIICO and CHSWS each ran EXACTLY ONCE
+
+`CHSWF` never ran. The three that did are in address order, once each, interleaved with the MON 60
+traffic above - consistent with a single pass through the load path that then stops.
+
+### MY FIFTH ARM WAS MISPLACED, AND ITS 30 HITS MEAN NOTHING
+
+I armed `0x7927` and labelled it `KGPIB@0o74447`. **`KGPIB` is at `0x7924`.** `0x7927` is where the
+`> Allocating memory` STRING starts - section 170's own table says so, and I read the string address
+out of that table instead of the symbol address next to it. It reported `hits=30`, which is
+executing string bytes as code, i.e. an aliased address.
+
+Fifth arm-placement error of this session, and the third of this exact kind (operand words at
+`0o146303`-`0o146305`, the aliased `0o37603`, now a string). The pattern is stable enough to state as
+a rule: **when a table lists a string address and a symbol address side by side, arming the row means
+arming the SYMBOL - and the label must be generated from the value armed, not typed.** The dump
+already prints the armed value in octal, which is the only reason this was visible.
+
+`KGPIB` itself remains unmeasured, so "did the path reach the routine that prints
+`> Allocating memory`" is still open - the one thing this run was best placed to answer.
