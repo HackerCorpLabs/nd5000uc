@@ -13174,3 +13174,72 @@ path is trying to do.
 Those demand opposite fixes. **Do not pick one by plausibility** - the microcode is on disk and can
 be asked directly: find what reads a queue node with `N5STA=SWPPING(6)` in `MICRO-5800-B30.DATA`. If
 nothing does, the second reading is the right one.
+
+## 188. The microcode ANSWERS: its mailbox scan requires `N5STA==1`, so reading 1 of 187.5 is refuted
+
+Standoff 187.5 left two readings that demand opposite fixes, and said not to pick by plausibility
+because the microcode is on disk. It was asked.
+
+### 188.1 Raw-word confirmation, not a rendered listing
+
+`MAILBOX-MICROCODE-PSEUDOCODE.md` sec 2.1 and 3 say `MSG_LINK1` at `0o15143` XORs the fetched
+`N5STA` halfword with `BM00`(=1) and processes the node only on equality. That is a rendered
+document, and this claim decides which of two opposite fixes is right, so it was checked against
+`E:\Dev\Ronny\ND5000UC\docs\MC\MICRO-5800-B30.DATA` (262144 bytes = 16384 words x 16):
+
+    0o015141  lo=0x000001081A62A204   low16=0xA204
+    0o015142  lo=0x000002011A630000   low16=0x0000
+    0o015143  lo=0x000000001A640001   low16=0x0001   <-- the constant 1
+    0o015144  lo=0x812000001A670000   low16=0x0000
+    0o015205  lo=0x000000021A860000   low16=0x0000
+
+**`[V]`. `0o15143` carries the immediate `1` and its neighbours carry zero** - the constant is
+specific to that word, which is what makes it a confirmation rather than a coincidence.
+
+### 188.2 What it settles, and the boundary of the claim
+
+The mailbox scan is the documented path by which the microcode picks up a queue node, and it
+**requires `N5STA == MSGN500(1)`**. A node parked at `SWPPING(6)` is skipped there - by the REAL
+B30, not merely by our servicer. The microcode's `N5STA` vocabulary is `0..4` (sec 2.1, "all four
+confirmed in the listing"); `SWPPING` is not in it.
+
+**So 187.5's reading 1 - "the ND-5800 consumes SWPPING messages in microcode, and we are missing a
+consumer" - is REFUTED**, and with it the idea that the fix belongs on our servicer side.
+
+**The precise boundary, because it matters:** what is verified is that the *mailbox scan* skips
+non-1 nodes. That is not a sweep proving no microword anywhere reads `SWPPING`. It refutes the
+specific mechanism reading 1 proposed, which is the one that would have sent the work to the wrong
+side of the seam. A full sweep of all 16384 words for a `6` compare against the `N5STA` offset would
+close the general case and has not been done.
+
+### 188.3 The connection to a long-standing symptom
+
+Reading 2 stands: **the swapper is expected to be RUNNING to consume this message.** And that lines
+up with a symptom recorded long before this investigation - from the octobus MICFU reference:
+
+> `start-swapper` performs a write-then-read-back VERIFY of 13 words over ND-500 physical
+> `0x96..0xC4`, which COMPLETES AND PASSES - and then SINTRAN issues nothing but watchdogs and
+> **never sends `3START`**, so the CPU stays `PC=0 stopMode=WAIT`.
+
+We now have a mechanism that would produce exactly that: SINTRAN is **blocked inside `CHSWS`**,
+waiting for a swapper message to be consumed, and never reaches the point of issuing `3START`
+(MICFU `0o23`). The watchdog `3RMICV` traffic continues because it runs at a different level - which
+is why the machine looks alive while nothing advances.
+
+**This is a hypothesis with a clear test, not a conclusion.** It predicts that the `CHSWS` block at
+`0o164101` happens BEFORE any `3START` is sent, and that no `3START` appears in the same run. The
+run logs already hold both facts, and the ordering between them has NOT been checked - counts and
+arrival order are different questions, which is precisely what standoff 173 got wrong about the
+MON 60 returns and what standoff 183 got wrong about a count nobody cross-checked.
+
+### 188.4 Where the defect now sits
+
+If the swapper must be running before `CHSWS` posts to it, then the fault is **upstream**, in
+`LOAD-SWAPPER` / `START-SWAPPER` leaving process 0 not running - and the whole 21-word window, the
+routine `0o163637`, and the send at `0o62662` are all a CORRECT program waiting correctly for
+something that should already have happened.
+
+That reframes seven sections of this document. Nothing measured in 177-187 is withdrawn - the walk
+was accurate at every step - but the thing it walked is looking less like a defect and more like a
+victim. **The place to look next is the step BEFORE this one, and the question is not "why does
+`CHSWS` block" but "why is the swapper not running when `CHSWS` assumes it is".**
