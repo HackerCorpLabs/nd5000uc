@@ -207,7 +207,17 @@ still land on `struct pcb` field starts with the `0xBA/0xBB` byte-field hole pre
 **NEXT, one run:** the segment is in the message (`MSWMC`) and the servicer already formats
 `PHYSWR seg=... off=... -> ND500 phys 0x...`, but that note does not reach the harness capture.
 Surface it, resolve `PST[seg]`, declare THAT base. Prediction stays one value: `THA` non-zero after
-a completed 3START. **`ND100Machine.ND5000.cs` currently declares 0 and must be corrected.**
+a completed 3START.
+
+**DONE, and this file's instruction was pointing at the wrong file (2026-09-02).** It said
+*"`ND100Machine.ND5000.cs` currently declares 0 and must be corrected"*. That file has **never**
+called `DeclareDitBase` - `git log -S 'DeclareDitBase'` on it returns nothing. The declaration lives
+in `Nd500CpuProcessBridge.cs` (:403 and :866), it is already **learned rather than hardcoded**
+(`servicer.ObservedDitBase`, computed at `Nd500MicrocodeServicer.cs:1649` as the resolved ND-500
+physical address rounded down to the 256-byte PCB boundary, and at :2656 as `dest - offset`), and it
+is guarded on the write COUNT so a legitimately-zero base is not mistaken for "nothing learned".
+So the segment-relative correction is honoured in code; only this line was stale. A pointer comment
+now sits at the attach site so the next reader does not go looking for a declaration there.
 
 **Superseded note: Deliberately no blanket
 default - base 0 is SINTRAN's layout, not universal (NDIX puts `pcbtab` at KVA `0xe0000000`), and
