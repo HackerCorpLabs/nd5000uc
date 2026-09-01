@@ -13871,3 +13871,46 @@ discrepancy - noted as a lead, not claimed.
 §173 is closed as a question about counts-versus-order: the order is now measured and explained.
 **What it leaves open is narrower and real: one MON 60 call that never returns.** Whether that
 matters to the swapper standoff is untested - it is at a different `B` from the `CHSWS` path.
+
+## 199. The X-reload is BY DESIGN: `5ACTSWAPPER` gates on the SWAPPER's message, not the ping
+
+Probe added to the harness, run `chswstail`, test **Passed: 1**:
+
+    5ACTSWAPPER X-reload: ptr@0o145353=0x0000  cell@0o110054=0x4698
+
+**`0x4698` = `0o43230` = `swMsg` (`0x428D30`)** - the node at `PSWWAIT(7)`.
+
+So the sequence is deliberate:
+
+    0o145176  WN5ST     write SWPWAIT(5) to the PING node passed in X   (0x428E30)
+    0o145177  LDX I 154 X := mem[0o110054] = swMsg                      (0x428D30)
+    0o145200  RN5ST     read the SWAPPER's message status
+    0o145202  gate      == PSWWAIT(7)?  -> yes, the swapper is free
+    0o145224  WN5ST     write SWPPING(6) to the ping node
+
+**The two-node split is the design, not the defect.** `5ACTSWAPPER` asks "is the swapper free?" of the
+swapper's own message, and marks the ping on the ping node. Both calls passed the gate (`swMsg` stayed
+`PSWWAIT(7)` throughout), and the second simply re-marked an already-`SWPPING` node - which is why
+only one 5->6 transition is visible.
+
+**195.3's reading (a), "wrong pointer into 5ACTSWAPPER", is dead.** Reading (b) stands: every ND-100
+actor is correct.
+
+`ptr@0o145353=0x0000` is NOT used: S3SMPIT is an overlay and is probably not mapped at probe time, so
+that read is unreliable. A meaningful value at `0o110054` is self-evidently meaningful; a zero is not
+evidence of anything. [the same rule that closed `N500DF@0o51767` in 181.3]
+
+### 199.1 What is left, stated as narrowly as the evidence allows
+
+The ping is posted and re-posted; `swMsg` says the swapper is free; the swapper is parked on a
+monitor call. `posted=2 seen=1 taken=1` - **one stop posted has NO restart seen**, and only one
+`3MONCO` (`24B:1`) ever went out.
+
+So: **after `5ACTSWAPPER` marks `SWPPING`, nothing sends the parked swapper its restart.** Posting a
+ping is not the same as restarting the process, and the restart is the step with no measurement
+behind it.
+
+That is `[D]`, not `[V]` - it is where the remaining gap must be given everything else is accounted
+for, which is an argument from elimination and has been wrong twice in this investigation (183, 193).
+The measurement that would make it `[V]` is what SINTRAN does between marking `SWPPING` and the next
+`3MONCO` that never comes.
