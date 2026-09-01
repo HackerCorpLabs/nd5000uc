@@ -12056,3 +12056,61 @@ session's transcript and can be pointed at.
 the user must be traceable to a message that can be pointed at. If it cannot, it is written as
 "unattributed" or asked about - never rendered as his words. Invented quotes reproduce the user's
 register and typos convincingly, so plausibility is not a test.
+
+## 176. The message CALL SITES, found by the inline-string idiom - and the right arm is neither symbol `[V]`
+
+Section 174 said the owner of a string is the code that references it, and that finding it needs a
+search rather than another arm. Done - and the answer was structural, not a search.
+
+**No instruction anywhere in `030-S3SM5.dis` resolves to either string address.** That is not a gap:
+these are ND/PLANC **inline strings**. The caller does `JPL` and the string follows IMMEDIATELY; the
+print routine finds it via the link register and returns past it. So the reference is positional -
+the call site is simply the word before the string.
+
+```
+074337  135042  JPL I 42     ; -> [074401]
+074340  "$> Loading Swapper'"        <- string begins here
+```
+
+```
+074434  171052  SAT 52
+074435  142065  SKP IF DA UEQ ST     skip when A is NOT 52
+074436  124040  JMP 40  -> 074476    A == 52: skip the print
+074437  171053  SAT 53
+074440  142065  SKP IF DA UEQ ST
+074441  124035  JMP 35  -> 074476    A == 53: skip the print
+074442  171076  SAT 76
+074443  142065  SKP IF DA UEQ ST
+074444  124032  JMP 32  -> 074476    A == 76: skip the print
+074445  135043  JPL I 43     ; -> [074510]
+074446  "$> Allocating memory'"      <- string begins here
+```
+
+### What this settles
+
+ - **`> Loading Swapper` is printed at `0o74337`, which IS inside `CHSWL`.** Section 170's
+   containment happened to be right, but for the wrong reason (nearest preceding symbol); it is right
+   now because the CALL SITE is in that range. `CHSWL hits=1` and the message printing once agree.
+ - **`> Allocating memory` is printed at `0o74445`** - and it is GUARDED by three inequality tests.
+   The print is reached only when A is none of `52`, `53`, `76` (octal). Any of the three jumps to
+   `0o74476` and skips it.
+ - **The correct arm for "did the path reach the print" is `0o74445`** - not `KGPIB 0o74444`, and not
+   the string at `0o74447`. Both of my previous attempts were one word off on either side of it.
+
+### And it confirms the `KGPIB` hits are aliased, on the register evidence
+
+`0o74444` is the third guard jump, reachable ONLY when `A == 76`. The register log for its 30 hits
+shows `A=1o` and `A=0o`, never `76`. **A hit at that address with A not equal to 76 cannot have
+arrived through the guard chain**, so those 30 hits are code at an aliased address, exactly as
+section 174 concluded from the PIL and link registers - now with a second, independent reason.
+
+That is the useful shape: an arm whose address has a REQUIRED register precondition can self-check.
+`0o74445` inherits it - a genuine hit there must show A not in {52, 53, 76}.
+
+### The open question, now sharply posed
+
+The three guards are a decision, not an error path: something is being classified and the print is
+suppressed for three specific values. If `0o74445` never hits while `0o74476` does, the auto-load
+deliberately skipped the allocation message - which would make the missing message a NORMAL outcome
+and remove it as evidence of the stall entirely. Worth knowing before another instrument is built on
+its absence.
