@@ -11463,3 +11463,68 @@ one of which stalls, so the correlation is perfect and worthless: there is no ru
 
 **Stop instrumenting this error until a working instance exists.** It is not demonstrably upstream of
 anything; it was promoted on the strength of being the only error visible in the transcript.
+
+## 166. RETRACTION: `A=2064o` was never a status. And two carved sources disagree about MON 60's return polarity `[V]` code, `[OPEN]` polarity
+
+### Retracting section 165's one "unexplained value"
+
+Section 165 said `A=2064o` at the fourth gateway entry "sits inside the documented ND-500 monitor
+error range `2000B..2100B`, which is worth following". **It is not a status, and that observation is
+withdrawn.**
+
+The gateway's real code (`nd-500-mon-j04.prog.asm`, bank 1) says what A is at that instruction:
+
+```
+146244  RADD AD1 CLD SL DX          <- gateway entry
+146245  JPL I 34        -> 146301
+146250  STA ,B -157                 building the parameter block
+146253  STA ,B -173
+146255  AAA -173                    A := address of the parameter block
+146256  MON 60                      <- my "gateway" arm
+146257  JMP 2           -> 146261
+146260  JPL I 23        -> 146303
+146261  STA ,B -160                 store the returned A
+146262  LDA ,B -160                 read it back
+146263  LDT 21                      <- my "ECSLOAD catch" arm
+146264  SKP IF DA UEQ ST            compare the status against a constant
+```
+
+`146255 AAA -173` sets A to the ADDRESS of the parameter block immediately before the `MON`. So
+`272o`, `365o`, `1312o`, `2064o` are **parameter-block pointers**. `2064o` falling inside an error
+range is a coincidence of numeric range - the exact class of mistake section 165 was written to
+record, made again in the same section. Numbers do not carry their own units.
+
+### What the arms DID measure - better than intended
+
+`146263` is not an "ECSLOAD catch". It is `LDT 21`, the first half of a compare, reached only via
+`146257`. Its value is that A there has just been reloaded from the saved return (`146261`/`146262`),
+so **A at that arm IS the returned status**: `2166o` and `2113o` on the two logged hits, of three.
+
+Neither is `2032B` (ECSLOAD) nor `4017B` - the two codes the gateway auto-retries on, held as
+constants at `146304` and `146305`. So the retries counted in 165 were **not** ECSLOAD retries.
+
+### THE POLARITY CONFLICT - do not resolve it by picking the source you like
+
+Two carved sources disagree about which arm of `MON 60` is which, and the disagreement decides
+whether "3 of 5" means three successes or three failures:
+
+ - **`mon60-callers/INDEX.md`**: *"`JMP 2` = skip return (success) or `JPL I 23` = error"* - making
+   `146257` success and `146260` error.
+ - **the `nd-500-bus-interface` skill**, marked byte-PROVEN and itself a correction of an earlier
+   inversion: *"SKIP (P+2) = success/A=0; DIRECT (P+1) = error/A=status"* - making `146260` (P+2)
+   success and `146257` (P+1) error.
+
+They cannot both be right. **The code favours INDEX.md**: the ECSLOAD constants sit at `146304` and
+`146305`, inside the routine reached by `JPL I 23` -> `146303`, so the auto-retry logic lives on the
+`JPL I 23` branch, which makes that branch the ERROR branch and `JMP 2` the success branch. That in
+turn means `MON 60` SKIPS on error, contradicting the "byte-PROVEN" note.
+
+**Left `[OPEN]` deliberately.** One of these is a documented, deliberate correction of a previous
+inversion, and overturning it on a structural argument is how the inversion got introduced the first
+time. It is settled by measurement, not by argument: arm `146257` and `146260` separately along with
+the error handler at `146303` and the two constants, and count. Whichever branch reaches `146303`
+is the error branch, and no reading of either document can override that.
+
+Until it is settled, **no count taken through either arm should be described as successes or
+failures** - including section 165's "MON 60 entered five times, ECSLOAD arm three times", which is
+true as a pair of counts and unlabelled as to meaning.

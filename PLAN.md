@@ -8,7 +8,22 @@
 
 ## Next
 
-**NEXT: find why `place-domain` blocks even though the monitor DOES retry it.** Standoff **165**
+**QUEUED, NOT YET RUN:** `RETROCORE_ND5000_WATCH=polarity` is written and committed but NOT built -
+the RetroCore tree is lent to `nd500uc-fc` for C1/D3 real-SINTRAN fixtures (1.5-2.5 h from 2026-09-01
+12:10). Do not `dotnet build`/`dotnet test` there until they report done.
+
+**NEXT: settle MON 60's return polarity by measurement** (standoff **166**). Two carved sources
+disagree about which arm is success - `mon60-callers/INDEX.md` says `JMP 2` (P+1) is success, the
+bus-interface reference says P+2 is. Whichever return arm reaches the error handler at `0o146303`
+is the error arm; the watch arms both. Until then NO count through those arms may be called
+successes or failures.
+
+**RETRACTED (166):** `A=2064o` is a parameter-block pointer, not a status - `0o146255 AAA -173` sets
+A to the block address immediately before the `MON`. The real statuses are `2166o` and `2113o`, read
+at `0o146263`, and neither is `2032B` or `4017B`, so the retries counted in 165 were not ECSLOAD
+retries.
+
+**THEN: find why `place-domain` blocks even though the monitor DOES retry it.** Standoff **165**
 refuted the obvious candidate: `MON 60` is entered 5 times and the ECSLOAD arm 3 times, alternating,
 so the auto-load ladder re-issues the command repeatedly. The command is re-issued and then blocks.
 `A=2064o` at the fourth gateway entry sits inside the documented monitor error range `2000B..2100B`
