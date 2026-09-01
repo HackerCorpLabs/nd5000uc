@@ -12114,3 +12114,30 @@ suppressed for three specific values. If `0o74445` never hits while `0o74476` do
 deliberately skipped the allocation message - which would make the missing message a NORMAL outcome
 and remove it as evidence of the stall entirely. Worth knowing before another instrument is built on
 its absence.
+
+### 176a. The skip target is a NORMAL continuation, not an error bail `[D]`
+
+Reading where the three guards send control:
+
+```
+074476  LDD ,B -63          <- all three guards jump here
+074477  STD ,B -65
+074500  JPL I 13            a call
+074501  STA ,B -66
+074502  MIN ,B -74
+074503  JMP I 11            leaves the routine
+```
+
+The epilogue `STA ,B -66` / `MIN ,B -74` / `JMP I 11` is the SAME shape as the one at
+`0o74373`-`0o74375` on the other path through this routine. Both arms converge on an ordinary
+return, and `0o74476` contains no error call, no status store and no jump to a handler.
+
+**That strengthens "the missing message is a decision, not a fault"** - suppressing the print looks
+like a designed alternative flow rather than something going wrong. Graded `[D]`, not `[V]`:
+`0o74506`-`0o74514` are POINTER WORDS (the disassembler renders them `IOT 3637`, `ADD I -115` and so
+on), so anything read past `0o74505` by eye is unreliable, and I have not traced where `0o74503`
+actually lands.
+
+It does NOT make the absence harmless - a decision taken on the wrong input still ends in the wrong
+place. But it removes "the message is missing, therefore something failed" as a free inference, which
+is how it has been used since section 169.
