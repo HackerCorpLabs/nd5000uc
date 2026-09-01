@@ -13525,3 +13525,67 @@ stores `X`), and provably changed nothing.
 
 **Not asserted.** The next read is `0o145354`'s target - one pointer word and one routine - and it
 converts this from a candidate to an answer or kills it.
+
+## 193. ANSWERED: the wake requires `N5STA == PSWWAIT(7)`, the node is `SWPPING(6)`, so `5ACTSWAPPER` correctly declines
+
+Standoff 192 left one load-bearing question: is the value gated at `0o145202` the NODE's status, or
+something else? The pointer word `0o145354` holds `0o23662`, and `SYMBOL-2-LIST.SYMB.TXT` names it:
+
+    RN5ST=023662
+
+`RN5STATUS` is documented in `CC-P2-N500.NPL` lines 679-687 (via `MP-P2-N500.md` and
+`CC-P2-N500.md`):
+
+    Entry:  X = Address of message within bank
+    Exit:   A = Status value read
+    Reads status from message.N5STA field, cache-fool double read (BSET BCM 120 DX; N5STA@3 LDATX)
+
+**So `A` at `0o145202` IS the node's `N5STA`.** 192.2's `[OPEN]` is closed, and it was closed by
+reading the callee rather than by noting how well `6`-versus-`7` fitted the stall.
+
+### 193.1 The complete chain, every link verified
+
+1. **`CHSWS` builds a swapper message and parks it.** `0o74425` -> `0o163637` -> `0o164101` ->
+   `0o62662`, which writes `N5STA:=1`, `MICFU:=5` (`3SWMESS`) and never returns (185-186).
+   The live node at `0x00428E30` reads `MICFU=0x0005`, `N5STA=SWPPING(6)`, for 112 dumps.
+2. **`5ACTSWAPPER` runs, twice.** Confirmed as the real routine in S3SMPIT, not S3SM5's aliased
+   mid-loop jump, by return-link arithmetic: `L=134355` and `L=136240` each land one past a `JPL`
+   whose indirect pointer holds `145162` (191).
+3. **It receives THAT node.** `X=0o43430` at both hits is the node's ND-100 word address, matching
+   none of the other three queue nodes (190); and `0o145167 STX -11` stores it (191.3).
+4. **It reads the node's `N5STA`.** `0o145200` calls `RN5ST`/`RN5STATUS` with `X` = the message.
+5. **It requires `PSWWAIT(7)`.** `0o145201 SAT 7` / `0o145202 SKP IF DA EQL ST` /
+   `0o145203 JMP -> 145312`.
+6. **The node is `SWPPING(6)`. Six is not seven. It leaves.**
+
+### 193.2 What that means - and the reading is the opposite of a bug here
+
+`PSWWAIT(7)` is the swapper message slot being FREE. `SWPPING(6)` is a ping already outstanding. So
+the gate reads: *"is the swapper's slot free? then fill it and wake."* Seeing `SWPPING`,
+`5ACTSWAPPER` concludes a ping is ALREADY pending and correctly does nothing - posting a second one
+would clobber the first.
+
+**Every actor measured so far is behaving correctly.** `CHSWS` correctly posts and waits. The
+servicer correctly ignores a non-`MSGN500` node, and so does the real B30 microcode (187-188, now
+covered by a passing test). `5ACTSWAPPER` correctly declines to re-ping. **The missing actor is the
+SWAPPER ITSELF, which must consume its ping and return the slot to `PSWWAIT`.**
+
+That is consistent with everything measured: the swapper was started (`3START`), ran, took ONE
+monitor call, and parked (189). It is parked holding an unconsumed ping.
+
+Graded: steps 1-6 and the `N5STA` identification are `[V]`. **The semantic reading in this section -
+that `PSWWAIT` means "free" and the swapper is the one obliged to clear `SWPPING` - is `[D]`**, resting
+on the harness's own description of `LNEWSWAP` marking `SWMSG PSWWAIT (free)`. It is the reading that
+makes all six measured facts consistent, which is evidence, but it is not a carve.
+
+### 193.3 The question that replaces it
+
+**Not "why does nothing consume the message" but "why does the swapper, having been started and run,
+not consume its own ping?"** That moves the investigation off the ND-100 side entirely - eight
+sections of ND-100 disassembly are now closed - and onto what the swapper process does after its one
+monitor call.
+
+The next measurement is on the ND-500 side: what the swapper's `P` is while it sits parked, and
+whether it ever re-enters its message loop. `posted=2 seen=1 taken=1` says one process is parked on a
+monitor call; whether that parked process IS the swapper has not been checked, and it is the first
+thing to establish before reading any swapper code.
