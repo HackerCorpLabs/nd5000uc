@@ -13461,3 +13461,67 @@ What the wake requires of `N5STA` is **not yet answered** - the routine's first 
 the two at `0o145176`/`0o145200` have not been followed. The question this section set out to answer
 remains open; what it delivered instead was the assurance that the thing being read is the right
 routine at all.
+
+## 192. `5ACTSWAPPER` is a state machine over SWPWAIT/SWPPING/PSWWAIT, and it gates on `== PSWWAIT(7)`
+
+Following the routine confirmed in 191. Read from
+`re\segments-ref\017-S3SMPIT\017-S3SMPIT.asm`, no run.
+
+### 192.1 Its entire constant vocabulary is the three swapper states
+
+Every small immediate loaded anywhere in `0o145162`..`0o145346`:
+
+    145175  SAA 5      SWPWAIT
+    145201  SAT 7      PSWWAIT
+    145223  SAA 6      SWPPING
+    145240  SAA 5      SWPWAIT
+    145257  SAA 6      SWPPING
+
+and from `N500-SYMBOLS.SYMB`: `SWPWA=000005`, `SWPPI=000006`, `PSWWA=000007`.
+
+**Five immediates, three distinct values, and they are exactly the three ND-100-side swapper states -
+with nothing else in the routine.** A routine called `5ACTSWAPPER` whose whole constant vocabulary is
+the swapper state set is not a coincidence worth hedging about. `[V]` that these constants are those
+states.
+
+### 192.2 The gate
+
+    145200  JPL I 154 -> 145354     call
+    145201  SAT 7                   T := PSWWAIT
+    145202  SKP IF DA EQL ST        skip unless A == 7
+    145203  JMP 107   -> 145312     ... otherwise leave
+
+**There is an explicit equality gate on `PSWWAIT(7)`**, and everything past `0o145203` is reachable
+only when it holds. Our measured node sits at **`SWPPING(6)`**.
+
+**What is `[V]` and what is not.** The gate exists and tests 7 - that is read off the instructions.
+Whether the value in `A` at `0o145202` IS the node's status is **`[OPEN]`**: `A` is whatever the call
+at `0o145200` returned, and that call has not been followed. It could be the node's state, the
+swapper's own state, or a return code. **Those are different, and the difference decides whether this
+is the answer or merely near it.**
+
+That distinction is the whole lesson of standoffs 183 and 190: a value that fits the hypothesis is
+not the same as a value whose identity has been established. The way to settle it is to read
+`0o145354`'s target, not to note how well 6-versus-7 explains the stall.
+
+### 192.3 CORRECTION to 191.3 - `SAA 5` is SWPWAIT, not `3SWMESS`
+
+Standoff 191.3 recorded `0o145175 SAA 5` as a lead, noting that "five is `3SWMESS`" while explicitly
+declining to claim it. **The better reading now has evidence: it is `SWPWAIT(5)`**, one of the three
+states this routine manipulates, sitting alongside `SAA 6` and `SAT 7` in the same short span.
+
+Recording it as a lead rather than a finding cost one sentence and saved a wrong entry in the
+evidence record - the same discipline that stopped the unreachable-servicer-arm "fix" in 187. **Two
+plausible readings of the number 5 existed; the one that fit what I was hunting for was the wrong
+one.**
+
+### 192.4 Where this leaves the standoff
+
+The deadlock now has a candidate mechanism with a named gate: SINTRAN parks the message at
+`SWPPING(6)`, and the wake routine's path continues only on `PSWWAIT(7)`. If the gated value is the
+node's status, the wake looks at a message in the wrong state and departs at `0o145203` - which would
+explain a wake that provably ran (191), provably held the right node pointer (190, `0o145167`
+stores `X`), and provably changed nothing.
+
+**Not asserted.** The next read is `0o145354`'s target - one pointer word and one routine - and it
+converts this from a candidate to an answer or kills it.
