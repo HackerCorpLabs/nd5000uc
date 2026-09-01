@@ -8,6 +8,13 @@
 
 ## Next
 
+**THE STALL REGION NOW HAS A NAME (standoff 170):** the three `> Loading ...` messages are in
+**`030-S3SM5`**, the one segment with a full disassembly, routine map and symbol table. `> Loading
+Swapper` is inside **`CHSWL` (`0o74330`)** and `> Allocating memory` inside **`KGPIB` (`0o74447`)`**,
+with `CHSWS 0o74407` between them. So the console dies between `CHSWL` and `KGPIB`, and the next
+watch arms are NAMED ROUTINE ENTRIES rather than derived addresses: `CHSWF 0o74161`, `CHSWL
+0o74330`, `LIICO 0o74371`, `CHSWS 0o74407`, `KGPIB 0o74447`.
+
 **MILESTONE LOCALISATION (standoff 169, no instrument needed):** the auto-load prints three
 messages in sequence - `> Loading Control Store`, `> Loading Swapper`, `> Allocating memory` - and
 **our console never reaches the third**, on every run. They live in `(SYSTEM)SEGFIL0:DATA` page 287,

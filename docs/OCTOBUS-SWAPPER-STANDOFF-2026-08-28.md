@@ -11725,3 +11725,59 @@ Section 168's subtraction is still the next measurement, unaffected: gateway exe
 returns = 3, success returns unmeasured. If they do not balance, a `MON 60` never returned - and
 "never returned" is now given a place to be, since the printing code is SINTRAN-side and is exactly
 the sort of code a `MON 60` handler would be executing while its caller waits.
+
+## 170. The stall region has a NAME: the messages are in `S3SM5`, and `> Loading Swapper` lives in `CHSWL` `[V]` addresses, `[D]` meanings
+
+Continuing 169 while the build tree was lent out. The messages are not just "in a SINTRAN segment" -
+they are in **`030-S3SM5`**, the ND-500 System Monitor segment, which is the one segment already
+fully disassembled with a routine map and a Ghidra symbol table.
+
+Found by testing every carved segment binary rather than guessing which one:
+
+```
+030-S3SM5.bin    98304  ['Loading Control Store', 'Loading Swapper', 'Allocating memory']
+062-S3SSM5.bin   98304  ['Loading Control Store', 'Loading Swapper', 'Allocating memory']
+```
+
+(`062-S3SSM5` is the second copy seen at image page 1241 in section 169 - a twin segment, not a
+second routine.)
+
+### The addresses, with the unit conversion done correctly
+
+The routine map states the convention: `runtime_word = file_word + 0x4000`. Applying it:
+
+| message | file byte | runtime word | octal | falls inside |
+|---|---|---|---|---|
+| `> Loading Swapper` | 29123 | `0x78E1` | `0o74341` | **`CHSWL` `0x78D8`** (next symbol `LIICO 0x78F9`) |
+| `> Allocating memory` | 29263 | `0x7927` | `0o74447` | **`KGPIB` `0x7924`** (next symbol `SGPBS 0x7937`) |
+| `> Loading Control Store` | 29615 | `0x79D7` | `0o74727` | at/after `TERMO 0x79A3` |
+
+**So the console dies between `CHSWL` and `KGPIB`.** `CHSWS 0x7907` (`0o74407`) sits between them and
+is the obvious next step in the path.
+
+There is a naming family - `CHSWF 0o74161`, `CHSWL 0o74330`, `CHSWS 0o74407` - which reads as
+CHeck-SWapper-something. **The expansions are `[D]` and I am not asserting them**; the addresses and
+the containment are `[V]`, and that is all the next instrument needs.
+
+### A units error I made and caught inside the same tick
+
+I first read symbol `LOAD 0x7201` as "between the two strings" because `0x7201` is numerically
+between the string FILE BYTE offsets `0x71C3` and `0x724F`. It is not: symbol values are RUNTIME
+WORDS and the string offsets were FILE BYTES. `LOAD` is at file byte `2*(0x7201-0x4000) = 0x6402`,
+nowhere near.
+
+Same shape as the retracted `A=2064o` claim in section 166 - **two numbers compared without checking
+they are in the same units, producing a confident and completely wrong adjacency.** Twice in one
+session. The guard is to convert both sides into one stated unit before comparing, and to write the
+conversion down, which is what the table above does.
+
+### What this buys the next measurement
+
+The arms stop being guesses at addresses and become NAMED ROUTINE ENTRIES in a segment with a
+symbol table: `CHSWF 0o74161`, `CHSWL 0o74330`, `LIICO 0o74371`, `CHSWS 0o74407`, `KGPIB 0o74447`.
+Whichever is the last to hit names where the auto-load path stopped - the same discriminating shape
+as the RUNSW block watch, and unlike every arm set since, these are entries the symbol table itself
+declares rather than addresses I derived.
+
+Section 168's subtraction is still the first thing to run; this is the natural follow-up, and both
+can share one run if the eight watch slots are split.
