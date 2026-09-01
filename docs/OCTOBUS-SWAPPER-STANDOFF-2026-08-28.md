@@ -12909,3 +12909,106 @@ then it is a window total and may not be called unbounded.
 The tail's shape already constrains the answer: `0o164110` is the last call, `0o164111` is its
 direct-return landing (a NOP), and `0o164112` is the success epilogue - which is **cold**. So control
 is lost at or before `0o164110`.
+
+## 185. LOCATED: the routine runs to `0o164101` and blocks in a call that BUILDS AND SENDS A 5MPM MESSAGE
+
+`RETROCORE_ND5000_WATCH=chswstail`, same pack and scale, build 0 errors, test **Passed: 1**.
+
+    1 arm3 start@0o163664        hits=1
+    2 arm4 start@0o163702        hits=1
+    3 post-arms block@0o163743   hits=1
+    4 table fill@0o163750        hits=1
+    5 LOOP head@0o164000         hits=2
+    6 loop exit@0o164022         hits=1
+    7 call at 164101@0o164101    hits=1
+    8 LAST call@0o164110         hits=1     <- ALIASED, see 185.1
+
+### 185.1 The last arm is foreign, and the registers say so before the count can mislead
+
+`0o164110` reports a hit with `B=221o X=30o L=10626o` against this path's `B=176200o X=141430o`, and
+it is ordered **FIRST in the hit list - before the routine was even entered.** Aliased foreign code
+at a 16-bit PC, the same failure as `0o43660` in standoff 181.
+
+Read as a bare count it would have said *"the routine reaches its final call"*, which is false and
+would have moved the search a dozen words past the actual stop. **Second time in this investigation
+that per-hit registers have overturned a count in the same table that produced it.**
+
+The genuine arms corroborate themselves in a way the alias cannot: `X=141430o` and `B=176200o` are
+constant across all of them, and `0o164101`'s `A=5o` is exactly what `0o164100 SAA 5` loads one word
+earlier. **The parameter set by the preceding instruction appearing in the register dump is a
+predecessor check that costs nothing** - it comes free with the detail already printed.
+
+### 185.2 The loop TERMINATES - no spin
+
+`0o164000` is 2 and `0o164022` is 1: the loop closed by `0o164021 JMP -21` ran two iterations and
+exited normally. The candidate named in 184 - a loop that never terminates - is **refuted**. Nothing
+in this routine spins.
+
+### 185.3 The stop, located
+
+Every arm from `0o163664` to `0o164101` is genuine and hot. `0o164110` is not ours. So:
+
+    164100  SAA 5                  A := 5
+    164101  JPL I 15  -> 0o62662   <- ENTERED, never returns
+    164102  JMP 12    -> 0o164114  its error landing -> the error epilogue, measured COLD in 182
+    164103  ...                    its success landing, never reached
+
+**The routine runs its entire length and blocks in the call at `0o164101`.** Both of that call's
+landing sites are cold, and both of `0o163637`'s epilogues are cold, which is consistent from three
+directions.
+
+### 185.4 What `0o62662` does - and this is the whole point
+
+    062662  STF ,B -54            prologue: save the parameters
+    062663  RADD CLD SL DA
+    062664  JPL I 26 -> 0o62712   frame push
+    062665  LDA ,B -61
+    062666  JAZ 3     -> 062671   if zero, build the message
+    062667  LDA 24                else load a status
+    062670  JMP 20    -> 062710   and take the error exit
+    062671  LDA ,B -77
+    062672  LDX ,B -67            X := the message block
+    062673  STA ,X 7
+    062674  SAA 1
+    062675  STA ,X 2              *** [block+2] := 1
+    062676  LDA ,B 72
+    062677  STA ,X 4              *** [block+4] := (,B 72)
+    062700  SAA 5
+    062701  STA ,X 6              *** [block+6] := 5
+    062702  JPL I 12  -> 0o62714
+    062703  RAND 0 0              direct landing
+    062704  JPL I 11  -> 0o62715
+    062705  JMP 3     -> 062710   error
+    062706  MIN ,B -74            success epilogue
+    062707  JMP I 7   -> 0o62716
+
+**Offsets 2, 4 and 6 of a block, written with 1, a CPU-ish value, and 5.** The documented 5MPM
+message layout is `N5STA=2, X5CPU=4, MICFU=6`, and `N5STA=1` is `MSGN500` - *message to the ND-500*.
+
+Graded `[D]`, not `[V]` - the offsets and the value 1 match the layout, but no symbol has been
+carved for this block. What raises it above a coincidence is **corroboration inside the measured
+data**: arm 2 at `0o163660`/`0o163661` does `LDA ,B 72` then `STA ,X 4` - the *same* source into the
+*same* offset - and arm 2 also writes `,X 7` and `,X 10`. So `,B -67` is one block that the whole of
+`0o163637` has been filling in, field by field, across four arms. **`0o163637` is a message
+BUILDER, and `0o62662` is the send-and-wait step.**
+
+That is exactly the shape this standoff was looking for: the ND-100 assembles a 5MPM message, hands
+it over, and does not come back.
+
+### 185.5 What is now bounded, and the honest gaps
+
+**`[V]`:** `0o74425` calls `0o163637` once; it runs linearly through four arms and a terminating
+loop, every call returning by its success door, to `0o164101`; that call enters `0o62662` and control
+never returns to any landing site or epilogue.
+
+**`[OPEN]`, and not to be guessed:**
+ - **Which MICFU 5 is.** The value written to `[block+6]` is 5. The short MICFU list to hand
+   (`3RMICV=1`, `3STAR=23B`, ...) does not name 5, and the full table must be read rather than
+   inferred from the two neighbours that are known.
+ - **Which of `0o62702` or `0o62704` blocks**, or whether `0o62662` gets that far at all. Its own
+   prologue has a frame push and an early `JAZ` bail at `0o62666` that would take the error exit
+   without any message being sent.
+ - Whether the block at `,B -67` is the 5MPM message buffer or a local staging copy.
+
+The next arm set is `0o62662`'s own six decision points, with `0o62663` armed beside `0o62662` as the
+required-predecessor check, since standoff 183 was a count that no neighbour had to agree with.
