@@ -13729,3 +13729,87 @@ swapper's OWN message had meanwhile gone to `PSWWAIT` exactly as designed.
 **Two nodes, 0x100 apart, one of which satisfies the gate and one of which does not, is precisely the
 shape that instrument-failure #19 warns about** - and this time it was not a wrong read but an
 unasked question: *how many objects are there?*
+
+## 196. `5ACTSWAPPER` is the WRITER of `SWPPING(6)` - so it passed its own gate, and the ping was posted correctly
+
+Reading `0o145164`'s target, as 195.3 required. All three pointer words resolve by name in
+`SYMBOL-2-LIST.SYMB.TXT`:
+
+    145347 -> 023706 = SLOCK      (take the lock)
+    145352 -> 023670 = WN5ST      (WRITE  message.N5STA)
+    145354 -> 023662 = RN5ST      (READ   message.N5STA)
+
+### 196.1 The routine writes the states it tests
+
+    145164  JPL I -> SLOCK        take the lock
+    145167  STX -11               keep the node
+    145175  SAA 5                 A := SWPWAIT
+    145176  JPL I -> WN5ST        *** WRITE N5STA := 5
+    145200  JPL I -> RN5ST        read a status
+    145201  SAT 7
+    145202  SKP IF DA EQL ST      require PSWWAIT(7)
+    145203  JMP -> 145312         ... otherwise leave
+    ...
+    145223  SAA 6                 A := SWPPING
+    145224  JPL I -> WN5ST        *** WRITE N5STA := 6
+
+`0o145223`/`0o145224` sit **after** `0o145203`, so they are on the **gate-PASSED** path.
+
+**`5ACTSWAPPER` is therefore the writer of the `SWPPING(6)` we have been staring at since standoff
+185** - not `CHSWS`, and not the swapper. And because that write is only reachable through the gate,
+**`5ACTSWAPPER` must have passed its own `PSWWAIT(7)` test at least once.**
+
+### 196.2 The measured node history corroborates it exactly
+
+Node `0x00428E30` across the whole run:
+
+    N5STA=0x0005 MICFU=0x0005    x1      <- SWPWAIT, written at 0o145176
+    N5STA=0x0006 MICFU=0x0005    x112    <- SWPPING, written at 0o145224
+
+**Write 5, then write 6, then never again.** That is the exact signature of one pass through
+`0o145176` -> gate -> `0o145224`. Two independent things - a disassembly and a 112-sample state
+history - predicting the same two writes in the same order.
+
+### 196.3 What this does to the two readings of 195.3
+
+- **(a) "wrong pointer into `5ACTSWAPPER`" is now unlikely.** The routine passed its gate and
+  completed the posting sequence. A wrong pointer would have failed the gate on the first call, and
+  then nothing would ever have written `SWPPING`.
+- **(b) "correct decline, and the fault is that nothing consumes the ping" is supported.** Call one
+  found `PSWWAIT`, posted the ping, wrote `SWPPING`. Call two found `SWPPING`, and correctly declined
+  to clobber an outstanding ping. Both `5ACTSWAPPER` executions are accounted for, in order, by one
+  mechanism.
+
+**So standoff 193.2's CONCLUSION survives while its REASONING is replaced.** 193.2 said the swapper
+must consume its ping, and reached that by assuming the swapper simply never looked - which 194
+refuted with `LNEWSWAP:2`. The conclusion now rests on something better: the ping was demonstrably
+posted by a routine that demonstrably passed its own precondition.
+
+Worth stating rather than quietly banking: **being right for the wrong reason is not the same as
+being right, and the correction is not cancelled by the outcome.** 194's withdrawal of 193.2 was
+correct when made, on the evidence then available.
+
+### 196.4 Flagged as UNRESOLVED, not used
+
+`0o145177 LDX I 154` sits between the `WN5ST` write and the `RN5ST` read, which would mean the status
+gated at `0o145202` belongs to a DIFFERENT node than the one written at `0o145176`. Read
+P-relative-indirect that resolves through `0o145353` to `0o110054`, and `0o110054` holds
+`135115 JPL I 115` - an instruction, not a plausible message pointer.
+
+**That is evidence my addressing read is wrong, not evidence about the machine**, so nothing here
+depends on it. It matters because it decides whether the write and the read touch the same node, and
+196.1-196.3 are written to be true either way. Settling it needs the `LDX I` addressing mode checked
+against the ND-100 manual rather than inferred from one plausible-looking decode - the pointer-word
+trap, which has already cost this investigation four times.
+
+### 196.5 Where the standoff stands
+
+The ND-100 side is now understood end to end, and **every actor on it is behaving correctly**:
+`CHSWS` posts and waits; `5ACTSWAPPER` takes the lock, finds the slot free, posts the ping, marks it
+`SWPPING`, and on its second call declines to clobber it; the servicer and the real B30 microcode
+both ignore a non-`MSGN500` node.
+
+**The open question is entirely on the ND-500 side: the swapper ran `LNEWSWAP` twice, found nothing
+to do, marked its own message `PSWWAIT(7)`, parked on MON 377B at `P=0x08008255` - and a ping posted
+for it sits unconsumed.** The next measurement is what `LNEWSWAP` actually examines, and whether the
+ping was posted before or after its second call.
