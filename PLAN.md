@@ -8,17 +8,98 @@
 
 ## Next
 
-**1 - make PLACE-DOMAIN complete on the macro round.** It is the single thing standing between us
-and a real program running. Everything else on this list is behind it or beside it.
+**NEXT: find what work should have been QUEUED and was not.** Standoff **159**.
 
-**On the hw-accp round: the mailbox mismatch is SETTLED - use `0x0042890A`.** Standoff section 109.
-`X5ACT_carved` is exactly `5FPMAILBOX(2129) x 2048 + 0x10A`, and it falls inside the same window
-where the macro round measures 627 real MICFU writes. The "discovered" `0x007FFEF6` is 266 bytes
-below **8 MB exactly** - and 266 is `0x10A`, the SAME offset, so the discovery computes the right
-offset against the wrong base and hangs the mailbox off the top of memory. Re-read every hw-accp
-measurement taken through the discovered address before quoting it; `ext-block X5ACT=0001` in
-particular was read off the wrong object. Fix is the deterministic `5FPMAILBOX` address, not the
-`0xFFFF -> 0` sniff - already recorded in `MEMORY.md` under `nd5000-timeout-convergence`.
+> **CLOSED (standoff 162): the `THA` line of investigation is over, and it was never a defect.**
+> The copy-diagnostic ring shows SINTRAN writing `0x00000000` into all thirteen trap-config cells,
+> including `0x4200B6` = the PCB `tha` field, and reading nothing back. `THA == 0` is the guest's
+> own value, faithfully delivered. The falsification this plan used to carry - *"THA should be
+> non-zero after a completed 3START"* - asserted a value SINTRAN does not write, so it could never
+> have passed. Separately, a real gap WAS closed on the way: `DitConfigured` was false for the whole
+> life of an octobus run (every `ReadDIT_*` returned 0 and logged a warning); the base is now
+> learned from the thirteen writes and declared in `OnStartProcessND5000`. That does NOT move the
+> stall and must not be reported as progress on it.
+>
+> **Before instrumenting anything else in the servicer/bridge pair, read standoff 162's PATTERN
+> note:** every ND-5000 path has a classic ND-500 twin beside it, the classic one reads like the
+> only one, and three separate wrong placements this session were all that same mistake.
+
+**The detail on that (standoff 159).** Every participant in
+the stall is healthy: the ND-100 is alive and interrupted 286 times DURING the stall and is sitting
+in its IDLE loop (not spinning - confirmed against a control window where nothing was happening);
+answers are delivered `74/74`; the swapper started, answered MON 377B and idles correctly; the
+ND-5000 sits in `WAIT`. Nobody is failing to signal anybody. **Do not reach for the PC histogram -
+it is structurally incapable of answering this** (it reports the idle loop with 93% confidence
+whether or not anything is wrong; sections 156/157 were spent on that).
+
+> **SUPERSEDED (section 155): "the ACCP timeout, NOT the pack."** The
+> `ACCP was terminated; Microprogram has stopped` line prints ONCE, before the control store is ever
+> downloaded, and never again - a true report at monitor entry that self-clears, not the blocker.
+> Kept because it was the stated Next for one day.
+
+**OLDER FRAMING (superseded, section 154): the ACCP timeout, NOT the pack.** `ND-5000 timeout: ACCP was terminated; Microprogram has
+stopped` is printed as the FIRST line after `@nd-500`, before any command is typed, in every run
+including the ones called working. Standoff **154** shows why it comes first: `place-domain` on a
+domain with CORRECT segment names (`cpu-stat`) and on one with STALE floppy names (`LED-B03`,
+110-page PSEG + 193-page DSEG present on the pack) produces a **bit-identical** machine state -
+`PC=0x08008255 stopMode=WAIT startSeen=1 startMicfu=23B startTaken=True ansMON=377B THA=0` for both,
+and no error on either console. The stall is upstream of anything domain-specific, so the pack's
+stale names cannot be the active blocker and correcting them would not change the outcome.
+
+> **SUPERSEDED FRAMING (kept because it drove the work for weeks): "THE PACK IS INSTALLED WRONG. Fix
+> that before measuring place-domain again."** Standoff sections 126 and 152. `(PACK-ONE:SYSTEM)DESCRIPTION-FILE:DESC` is LED's floppy description file copied
+unchanged - 22528 bytes.
+
+> **THE TEXT ABOVE IS CORRECT. Two attempts to "sharpen" it on 2026-08-31 were both wrong and are
+> retracted - see standoff sections 152 / 152a / 152b.** Recorded because the wrong versions were
+> briefly written into this file and may have been read.
+>
+>  - **Retracted claim 1: "the registered domains have no files on the pack, the intersection is
+>    empty."** False, and it was a GREP ARTEFACT - the pack was listed filtering on `:DOM`, and these
+>    two domains use the older `:PSEG`/`:DSEG` form. All four files are present:
+>    `(SYSTEM)LED-B03:PSEG`, `:DSEG`, `(SYSTEM)SCRATCH-SEG-01:PSEG`, `:DSEG`.
+>  - **Retracted claim 2: "so `place-domain CPU-STAT` cannot work on this pack."** False. A passing
+>    run on that exact pack shows no `NO SUCH DOMAIN` at all: the control store loads, the swapper
+>    loads and STARTS (`startTaken=True`, MON 377B answered), and the ND-5000 then sits in `WAIT` -
+>    which is exactly what the ND-60.136.04A ch.11 note below predicts.
+>
+> What IS verified from that decode: three tables (domains at 0x100 in 56-byte entries, file/device
+> at 0x800, segments at 0x4000 in 192-byte entries); the two domain names are clean; the floppy
+> prefix lives on the SEGMENT records; and the file read was sha256-identical to the pack's own copy.
+> The defect is the one stated below - stale `(...FLOPPY-USER)` segment names that only fail at
+> `:PSEG`/`:DSEG` open time.
+
+ND-30.003.007:4607:
+*"The description file still contains the definitions valid for the user the domain is copied from.
+This must be corrected."* `COPY-DOMAIN` rewrites those names; `@COPY-FILE` cannot.
+
+ND-60.136.04A ch.11 explains the shape exactly: the `(directory:user)` prefix is **not consulted
+until the `:PSEG`/`:DSEG` are opened**, so a file-copied domain RESOLVES and only fails LATER at
+file-open. That is precisely what place-domain does - it gets all the way through, the swapper
+starts and answers MON 377B, and then SINTRAN goes quiet with nothing to page in.
+
+**So `THA=0` is NOT established as the blocker** - a domain whose files cannot be opened may never
+get a populated context. Item 1's remaining CPU-side questions are ON HOLD until a correctly
+installed pack exists (`nd500uc-d4` is building the ENTER-DIRECTORY / COPY-DOMAIN /
+DEFINE-STANDARD-DOMAIN fixture).
+
+**UPDATE 2026-08-31 - that fixture's own blocker is root-caused (standoff 136).** It crashed with
+`NOT KNOWN TRAP`, and the cause was the fixture, not the emulator: `AttachRealCpuNow()` was called
+only just before RUN, but place-domain LOADS AND STARTS THE SWAPPER as part of placement, so nothing
+was there to take the `3START` and it fell through to an all-zero stop record. A 116-message census
+shows every answer `N5STA=0003`, zero `5ERANSWER`, and **zero PHYSWR sent at all** - which also kills
+my own section 132 idea that a floppy-directory domain gives a segment with no PST entry. Their
+verification run is in flight. My half of that split (standoff 134, 135) is finished and needed no
+engine code.
+
+**DO NOT "fix" NO SUCH PAGE by zero-filling.** ND-60.136.04A:2987 says the Monitor zero-fills on a
+NO SUCH PAGE at execution time - real text, naming our exact error - but it is section 6.9.2
+LOW-ADDRESS and concerns a HOLE INSIDE AN EXISTING segment file. Nothing ties it to a MISSING file.
+Implementing it would make the symptom vanish, turn the lane green, and hide a broken install behind
+genuine-looking manual backing.
+
+**What is unaffected and still worth doing:** items 4, 6, 7, 9 and the SCHPAR half of 10 are all
+pack-independent.
 
 ---
 
@@ -78,7 +159,22 @@ guest-owned table) while `SetupDIT` keeps clearing (for an emulator-owned one);
 one PROVED that `SetupDIT(0)` erases a guest-written table, which would have produced an unchanged
 `THA=0` and read as "the fix did nothing" a third time.
 
-**STILL TO DO: nothing on the octobus lane calls `DeclareDitBase` yet.** Deliberately no blanket
+**DECLARED BASE 0 - AND IT IS WRONG. Section 125.** `THA` is still 0. The declaration DID run, so
+this is not another inert fix: `PHYSRD`/`PHYSWR` are **SEGMENT-RELATIVE**, and the harness line I
+read the addresses off prints the RAW OPERAND with a comment saying so - *"Operands are ND-500-side
+byte offsets"*. So `0x96..0xC4` are offsets INSIDE a physical segment, and the DIT base is
+`PST[segment] page * 2048`, not 0.
+
+**The LAYOUT survives; only the BASE was wrong** - section 115 conflated the two. The twelve offsets
+still land on `struct pcb` field starts with the `0xBA/0xBB` byte-field hole predicted, and the
+`LOADCT_*` decode is DPA-relative so it never spoke to the base at all.
+
+**NEXT, one run:** the segment is in the message (`MSWMC`) and the servicer already formats
+`PHYSWR seg=... off=... -> ND500 phys 0x...`, but that note does not reach the harness capture.
+Surface it, resolve `PST[seg]`, declare THAT base. Prediction stays one value: `THA` non-zero after
+a completed 3START. **`ND100Machine.ND5000.cs` currently declares 0 and must be corrected.**
+
+**Superseded note: Deliberately no blanket
 default - base 0 is SINTRAN's layout, not universal (NDIX puts `pcbtab` at KVA `0xe0000000`), and
 baking one OS's map into a shared path is the same class of error as the sentinel. **place-domain
 will not change until the lane declares the base; do not re-measure expecting movement.**
@@ -280,6 +376,66 @@ characterised yet.
 Throw, log and die on anything missing. Never tolerate. **Progress is measured in fields
 IMPLEMENTED, never in halts removed.**
 
+**FIVE FIELDS IMPLEMENTED 2026-08-31 (standoff 150), and the inventory below could not see any of
+them.** `COND,CALL` (60), `COND,ENTM` (61), `COND,ENTT` (62), `COND,JUMPG` (63) returned a
+hard-coded `false`, and `G,TOOPS` (GET 14) was coded as an alias of `G,OOPS`. Details and manual
+citations in item 6b; the point for THIS item is the method:
+
+> **AN UNIMPLEMENTED FIELD THAT RETURNS A PLAUSIBLE ANSWER IS INVISIBLE TO A THROW-SITE COUNT.**
+> The 25-site list below is an inventory of places that ADMIT they are missing. A `return false`
+> and an `[D: same]` alias admit nothing - they answer, the machine keeps running, and the whole
+> feature silently does not work. Every ENTT in the image was being refused, and no throw, no
+> failing test and no sweep divergence said so. The sweep could not: ENTT is unreachable from the
+> corpus, which is exactly the condition that hides this class.
+>
+> **So the inventory needs a SECOND axis: fields whose implementation is a CONSTANT.** Grep
+> `Conditions.cs` and the GET/DEST switches for arms that fall through to a literal or to another
+> arm's behaviour, and check each against its manual line. Cheap, and it found five in one pass.
+>
+> **THAT SWEEP IS NOW RUN, and it paid out again (2026-08-31, standoff 151).**
+> `Conditions.cs` is CLEAN - three constant arms remain (`COND,ENTER` 32, `COND,PDONE` 36,
+> `COND,IRALT` 59) and each has a documented reason; `COND,IRALT`'s `false` is genuinely correct
+> for the current machine, not a placeholder.
+> The DEST switch was not clean. Five destinations carried "treated as a plain X load [D]" and
+> wrote the microword's own value; ND-05.022.1 ch.8 gives each a FIXED SOURCE:
+>
+> ```
+>   197 D,IAC,SUML     SUM IS TRANSFERRED TO IAC Y REGISTER    0 sites  -> left as-is, [OPEN]
+>   205 D,IAC,CLKNPC   LA -> NPC                               0 sites
+>   206 D,IAC,CLKP     NPC -> P                                1 site   0o4465
+>   207 D,IAC,CLKSP    P -> SP                                 2 sites  0o11535, 0o14407
+>   227 D,DAC,SUMB     SUM IS TRANSFERRED TO DAC B REGISTER    0 sites  -> left as-is
+> ```
+>
+> **The count came FIRST and it halved the work** - three of the five are phantoms, exactly like
+> ORCON.A ALTEN. The manual line alone would have had us implement all five.
+> **What proves the manual right at the live sites is the microcode, not the manual:** 0o11535 is
+> `ALU,XOR A,BM00 B,X1 D,IAC,CLKSP` - and `XOR BM00,X1` is this project's own documented NO-OP
+> FILLER, the word that exists only to time the one-word condition delay. A word whose ALU result
+> is timing filler cannot be storing that result, so the destination must ignore the bus. We were
+> writing filler into SP. 0o4465 agrees: `XOR A,IAC,L B,SC14` into P, and an XOR of L with SC14 is
+> not a program counter.
+> **Both live sites are in code item 7 cares about:** 0o11535 sits in the LREGBL register-block
+> loader (beside `LOADRB_P`/`LOAD_NEW_P`/`LOADRB_L`/`LOADRB_B`) and 0o14407 is inside RETT, just
+> past `RETT_NPLBR`. Sweep: `MicrowordDecodeTests.ConstantAnswerDestinations_HowManyB30WordsUseThem`.
+> Free corroboration: `D,DAC,SUMB` and `D,DAC,B` both having ZERO sites is a THIRD independent
+> confirmation of standoff 145 - B's only live write port on this image is destination 228.
+> **MEASURED AFTER THE CHANGE, both suites, 2026-08-31:** ND5000 **766 passed / 0 failed**;
+> `Emulated.Tests.ND500` **2264 passed / 0 failed / 13 skipped** (4 m 29 s), which is the baseline
+> exactly. So the three reclock strobes are a strict improvement - nothing depended on SP/P/NPC
+> carrying the bus value, including the two suites that cover `LREGBL` and `RETT`.
+> The tell that started it was not a throw - it was a microword PATH TRACE showing a branch taking
+> the same arm no matter what the inputs were.
+>
+> **THE CLASS IS NOW SWEPT, 2026-08-31 (negative result, recorded so it is not re-run).** The
+> constant-answering field is the defect shape that hid BOTH ENTT bugs, so the whole package was
+> re-checked for more of it. A grep for `[D: same]` over `CPU.ND5000/src` now returns only the two
+> lines that DOCUMENT the G,OOPS/G,TOOPS pair, and `ReadA`/`ReadB`/`Conditions.cs`/`Alu.cs`/
+> `Sequencer.cs` contain no bare `return 0` arm standing in for an unimplemented select. The
+> remaining unimplemented fields all THROW, so a throw-site inventory is once again a true
+> inventory of them - which it was not before this sweep.
+
+
 **THE WORK LIST, enumerated 2026-08-31** (it used to live only on the task, which is exactly what
 this file is for). 25 throw sites in `CPU.ND5000/src`, and they are NOT 25 gaps - they split:
 
@@ -312,9 +468,51 @@ this file is for). 25 throw sites in `CPU.ND5000/src`, and they are NOT 25 gaps 
 ```
 
 **BEFORE IMPLEMENTING ANY ENTRY, RESTRICT ITS B30 COUNT TO REACHABLE SITES.** Raw sweeps have twice
-invented work that did not exist: `ABR,NEXT` 20 raw -> 0 reachable; `ORA,ALTEN` 532 raw -> 0. Note
-two of the eleven above are the ALTEN pair, which is exactly the case that swept to zero - so start
-by re-checking whether they are reachable at all before writing anything.
+invented work that did not exist. **Done for the ALTEN pair 2026-08-31**
+(`MicrowordDecodeTests.AltenArms_HowManyB30WordsCouldReachThem`), and it splits them:
+
+```
+  words with OR_ENABLE set                              1079
+  ORCON.A == 3  raw 532   guarded (OrEnable AND AOp==63)   0   <- UNREACHABLE, nothing to implement
+  ORCON.D == 3  raw 395   guarded (OrEnable)              48   <- REAL, and bounded
+```
+
+The guards are taken from the call sites, not guessed: `orconA = (Orcon >> 2) AND 3` is only reached
+when `OrEnable != 0 AND AOp == 63` (`CpuND5000.cs:2465`); `orconD = Orcon AND 3` at `:3158`.
+
+So the raw numbers suggest ~900 words of work and the truth is 0 and 48 - **`ORCON.A` ALTEN is a
+phantom, confirmed a second time.** Implement `ORCON.D` ALTEN only.
+
+**48 is an UPPER BOUND**: the destination path may carry guards beyond `OrEnable` that this sweep
+does not model.
+
+**ENUMERATED - section 127. They are ONE FAMILY.** All 48 carry `ORCON=0x03` exactly and sit in a
+single band `0o5717..0o10054`, whose labels are `MBR_*` (move block reverse), `MBF_*` (forward),
+`BMOVEBY_*` and `BMOVEHW_*` - **the block-move / string-move family**, which is precisely what
+ND-05.022.1's `ORD,ALTEN` (561) "OR destination from string DEST. operand" exists for.
+
+**CORRECTION - section 129: `STRING_sfill` is 168/168 MATCH, 0 diverge.** The "fails all 168" claim
+came from a stale skill note; the sweep's own history records the fix. Whole sweep is
+match=23933 diverge=1424, ABOVE the baseline floor. **So ALTEN has no failing measure behind it** -
+it is real unimplemented hardware, not a live defect, and its priority drops.
+
+**The sharper question:** 48 words in the image reach `ORCON.D` ALTEN and it throws, so why does
+nothing fail? Either no corpus vector executes those 48, or the block-move family has no golden
+coverage. **Reachable IN THE IMAGE is not executed BY A TEST** - settle that before writing the arm.
+
+**BUT ALTEN IS NOT FIRST - section 128.** The four OR-destination arms are symmetric, and ALTEN needs
+an ALT operand triple that something must populate. That something is `G,OPSTRD`, and it is **not
+missing - it is FLATTENED** onto `G,OPS` (`CpuND5000.cs:1188`, graded `[D]`), so the operand stream
+advances and the DESCRIPTOR is lost. Its own `[OPEN]` predicted this: *"a string operand is a
+descriptor, not a scalar ... if a string instruction ever reads the wrong operand, revisit here
+first"* - and the SFILL remark records exactly that, a fill of the right LENGTH at the wrong ADDRESS
+using the descriptor's element count as the base.
+
+```
+  1  G,OPSTRD delivers the string DESCRIPTOR, not just an operand advance
+  2  an ALT triple then exists for ORCON.D ALTEN's 48 block-move sites to route to
+  3  the 168 STRING_sfill vectors are the measure, already failing
+```
 
 ## 5 — DONE. Single-float `-0.0` TEST follows the microcode
 
@@ -349,6 +547,47 @@ this item always said:** seed distinct values at PCB `0xBC`/`0xC0`/`0xC4`, conte
 
 ## 7 - Adjudicate the remaining engine divergences
 
+**TRIAGED 2026-08-31 - section 131.** Golden-vector landscape: 125 files, match=21729,
+diverge=1408, unsupported=1140.
+
+```
+  PACKED DECIMAL   792 = 56% of all divergence   values 100% CORRECT, FLAGS ONLY
+                   psub/psubr are 360/0 - the engine is not broken
+  ARITHMETIC_rem   match=0 diverge=200 unsup=280 - NOT A TARGET, see below (section 137)
+  __div_ / __mul_  60 / 41
+  transcendentals  acos 40, alog2 36, alog10 32, alog 24
+```
+
+**`ARITHMETIC_rem` IS A DEGENERATE CORPUS, NOT A DIVERGENCE - standoff 137, measured 2026-08-31.**
+All 480 vectors are REM-BY-ZERO; all 480 expect `ST=0x1000` (DZ) and nothing else; **256 of the 480
+are EXACT duplicates** (224 distinct inputs, one repeated 35 times). The 280/200 split is just the
+`F REM`/`D REM` file composition. No vector computes a remainder, and `MacroOracleState` has no DZ
+flag, so the only thing the corpus asserts is not even in the oracle's compare set. Regenerate it;
+do not chase its numbers.
+
+Under it, two real things, and the first belongs to item 4 not item 7:
+ - `F REM` dies on a **missing UPSTREAM dest-bank intercept** for select 31 (the ordinary macro
+   REG37 port), so it falls through to `OperandRouter`, which has no case 31 because it should never
+   see one. **Do NOT "fix" this by adding `case 31:` to the router** - that stops the die and starts
+   writing the wrong bank silently, which is the exact trap in the standing rule.
+ - `D REM` diverges on **Z alone** (microword Z=1, functional Z=0). One flag, needs adjudication.
+Diagnostic: `RemOracleDiagTests` in the ND-5000 tests.
+
+**KNOWN RED, pre-existing (verified by stashing my own change and re-running): the ND-5000 suite is
+755 passed / 4 failed / 3 skipped of 762** - `Entt_TrapFrame_CannotBeDriven_HardFail`,
+`Rett_TrapReturn_CannotBeDriven_HardFail`, `Trace_OfRealColdBoot_RecordsAddressesLabelsAndRegisterDeltas`,
+`BothEngines_ProduceTheSameMonitorCall`. Not triaged yet.
+
+`ND5000-PACKED-DECIMAL-Z-FLAG-BOTH-CORES-WRONG-2026-07-28.md` already has the packed case worked:
+corpus was degenerate and fixed (`77620f6f3`), values verified correct, `ST,LOAD`/`AluSts` theory
+experimentally REFUTED, and the analogous float `-0` verdict is **corpus wrong, microword + manual
+right** (ND-05.020.01 §9.5). **So the biggest block needs a real-hardware datapoint, not more
+analysis.**
+
+**Do `ARITHMETIC_rem` first** - it is the only large one that is genuinely unimplemented and needs no
+datapoint.
+
+
 **SSKIP: DONE 2026-08-31.** The real B30 sets `Z=1` on EVERY non-trap termination - it does not
 distinguish "source empty" from "different element found". Manual 14.14 says otherwise and the
 microcode overrules it, as it did for the BI TEST carry and the single-float TEST sign. `CpuND500`
@@ -367,6 +606,118 @@ checked - and the obvious patch from it (invert one arm) would have been wrong. 
 covering all three terminating conditions showed the whole branch was wrong. Then, because the
 answer came back constant, `I1` was added as the discriminator: a flag that reads 1 for every input
 is indistinguishable from an instrument that never ran.
+
+## 6b - BUILD THE ENTT/RETT TRAP FIXTURE (Ronny chose this 2026-08-31)
+
+**Decision taken:** the two permanently-red tests `Entt_TrapFrame_CannotBeDriven_HardFail` and
+`Rett_TrapReturn_CannotBeDriven_HardFail` (`CallManualCoverageTests.cs` 611/623) get a REAL fixture,
+not an `Assert.Ignore`. Rationale: a suite that can never go green cannot signal a new failure -
+proven on the same day, when two genuine false reds sat beside them unnoticed (standoff 139).
+
+**The "not drivable" claim is about the ORACLE'S API, not the machine.** Verified 2026-08-31:
+
+```
+    map[188] = new DispatchEntry(443, -1, -1);   // 0xBC ENTT [labe]   entry 000673 octal
+    map[131] = new DispatchEntry(456, -1, -1);   // 0x83 RETT [labe]   entry 000710 octal
+    .LABE also has ENTT1/ENTT2/ENTT_REGS/ENTT_DITS/ENTT_STAH/ENTT_CLRTS/ENTT_TRRET/ENTT_STARTE
+```
+
+Both instructions are dispatched and implemented in the real B30. The precedent for extending the
+oracle already exists - ENTSN was "not drivable" until `RunBoth` gained
+`pendingCallReturn`/`pendingArgCount`/`tosSeed`, and it is green now.
+
+**What has to be seeded, and the two sides differ - this is the whole job:**
+ - FUNCTIONAL (`Entt.cs`): `pcb.InsideTrapHandler`, `pcb.PendingTrapNumber`, `pcb.TrappingPC`,
+   `pcb.ResumePC`, `regs.THA`. All C# properties - straightforward.
+ - MICROWORD: there is **no `InsideTrapHandler` property in `CpuND5000` at all**. The flag lives in
+   the PCB IN MEMORY - `MmsUnit.PcbInsideTrapHandlerOffset = 0xBB`, which is `pcb_ith`, the same
+   single-byte field identified in standoff 116. So seeding it means laying out a real PCB and
+   pointing the CPU at it, not setting a property.
+
+**Order of work:**
+ 1. **DONE 2026-08-31 - standoff 140.** `EnttReadTraceDiagTests` drove both from their `.LABE`
+    entries with nothing seeded. **Neither routine hits an unimplemented microword** - ENTT ran its
+    full 400-tick budget, RETT ran 194 and ended on the unseeded `P=0`. So the microword side needs
+    only SEEDING, not implementation. Measured seed set: PCB bytes `0xBB` `pcb_ith` (the flag),
+    `0xBA` `pcb_md`, `0x9A` `pcb_ote2`, plus `0xB6` `pcb_tha`; and a saved register block at `0x14`
+    upward. RETT's stores confirm the PCB layout independently - it writes `0xBB`(ith), `0xBC`(tos),
+    `0xC0`/`0xC4`(ll/hl), `0xB6`(tha), `0xA6`/`0xAA`(mte1/mte2). **`pcb_md` is NOT in the functional
+    engine's requirement list**, which is exactly why the microcode was asked first.
+ 2. **DONE 2026-08-31 - standoff 141.** `MacroInstructionOracle.TrapSeed` seeds both engines from
+    one description - PCB bytes for the microword side, `GetPCB(0)` fields + `regs.THA` for the
+    functional side. Both hard-fail tests replaced by real drives.
+ 3. **IN PROGRESS.** Both tests now execute the instructions and are red with a MEASUREMENT
+    rather than a refusal. Two things left, in this order:
+    a. **ANSWERED 2026-08-31 - standoff 143. ENTT CANNOT BE SEEDED INTO LEGALITY.** A 2x2x2 matrix
+       over `pcb_ith` x `pcb_pia` x pending-call gave EIGHT IDENTICAL results (48 writes, zero into
+       the frame, always ISE). The gate is `COND,SAVC1` at `ENTT1` @`014042`: true goes to the body,
+       false falls one word to `TRAP_ISE` = the 0x23 = 35 the probe recorded. **`SAVC1` is an
+       INTERNAL saved condition - not a PCB field, not a memory cell** - so no seed can set it. Same
+       mechanism as the classic store's `AM#37`, which our own memory note already described as "the
+       CALL-in-flight interlock". Frame base confirmed as `SC7 + 256` = THA+256, so the instrument
+       was always pointed at the right address.
+       **THEREFORE: ENTT must be ARRIVED at, not seeded** - drive an instruction that genuinely
+       traps, let the microcode take its trap entry and set the condition, then run ENTT as the
+       handler's first instruction. Forcing `SAVC1` from outside would prove nothing about the path
+       SINTRAN actually takes, so it is not an option.
+       **DONE 2026-08-31 - standoff 150. THE ARRIVAL IS BUILT AND ENTT RUNS.** Test
+       `Entt_ArrivesThroughTheTrapPath_AndBuildsTheFrame`. Measured path, in order:
+       `TRAP_START 014031 -> 014036 G,TOOPS -> 014037 -> 014040 CSAVE -> 014041 G,COOPS ->
+       ENTT 000673 -> 674 -> 675 -> ENTT1 014042 -> ENTT2 014044 -> 014045 -> ENTT_REGS 014046`.
+       Exactly one TRAP_ISE on the way (the deliberate stimulus), `SavedCond1 = 1`.
+       **Two real engine defects had to be fixed, and neither was a seeding problem:**
+        - `COND,ENTT` (62) and its siblings `COND,CALL` (60), `COND,ENTM` (61), `COND,JUMPG` (63)
+          were hard-coded `false` in `Conditions.cs`. All four are documented one-liners in
+          ND-05.022.1 ch.8 ("MACROINSTR. IS ENTT"), answered from the instruction register:
+          CALL 0xC3, ENTM 0xDF, ENTT 0xBC, JUMPG 0xB4. New field `Registers.InstrOpcode`.
+        - `G,TOOPS` was coded as identical to `G,OOPS` (the comment said `[D: same]`) and so
+          DISPATCHED to the instruction it is only meant to LOOK at. ND-05.020.01:2432: "G,TOOPS is
+          used to test if the target instruction is ENTT, ENTM, etc., and it only needs IMAP
+          information." With it dispatching, 014036 jumped straight to 000673, skipping the CSAVE at
+          014040 - so the gate always read 0 and EVERY ENTT was refused. Now `PeekInstructionForTest`
+          publishes the opcode without dispatching and without advancing P (014041's G,COOPS does
+          the real fetch). `COND,ENTER` (32) deliberately left false: MICROCODE-FIELDS.md says
+          "ENTF/ENTM/ENTT" but ND-05.022.1 says "CHECK FOR ENT- INSTRUCTIONS", and the two readings
+          disagree about ENTS/ENTB. [OPEN]
+       **Bonus fact the machine handed over, worth not re-deriving:** `pcb_tha` (0xB6) points at a
+       TABLE of handler addresses indexed `THA + trapNumber*4`, NOT at a handler. TRAP_START reads
+       that entry (measured `CS 14032: [0000508C]`, THA 0x5000, ISE trap 0x23) and a zero entry
+       falls out to TRAP_ERR - which is ND-05.020.01:3222's "THM, trap handler missing ... when no
+       ENTT instruction ... is found as a trap handler entry" seen from the microcode side. The
+       own-trap-enable words are `pcb_ote1` 0x96 / `pcb_ote2` 0x9A; with them zero the trap is
+       routed to the ACCP/mailbox instead and TRAP_START is never reached at all.
+       ND5000 suite **765 passed / 0 failed** (was 757 with 2 permanently red).
+    b. **DONE 2026-08-31 - standoff 144.** RETT's frame is **B-relative** (measured by making B and
+       THA differ; with both zero the two addressing models were indistinguishable). Seeded, and
+       RETT now drives on both engines. **ONE genuine divergence remains: the microword engine does
+       NOT restore B from the frame (B stays 0x2000) while the functional engine does (B becomes 0).**
+       **RESOLVED THEN REVERTED - standoff 147.** The carve HOLDS: the classic lane independently
+       enumerated twelve `D,B` writers on `CONT-STORE-10611` (different image, different count) and
+       read RETT's body word by word - no B write on either generation. But removing
+       `regs.B = savedB` took `Emulated.Tests.ND500` from **2264/0 to 2252/12**, so the change is
+       **REVERTED** and parked as a patch in the scratchpad.
+       **The live hypothesis is that the functional engine's B restore COMPENSATES for something
+       genuinely missing elsewhere** - which makes the carve correct and the change premature, and
+       makes the twelve failures point at the missing thing rather than at RETT. First name to
+       surface was `Ents_PendingCall_SurvivesPageFaultTrapAndRett` (the CALL/ENT sequence interlock
+       across a page-fault trap) but that run straddled the revert, so it is a LEAD, not evidence.
+       **CLOSED 2026-08-31 - standoff 149.** All twelve names captured in a coordinated window
+       (binary timestamp verified AFTER the source edit). **FIVE files, and only ONE is a
+       trap-semantics test** - the other eleven are real program execution (NC-A06 prompt and HELP,
+       CPU-STAT, CAT-500, the byte-exact compile AND link vs the C emulator). So the B restore is
+       LOAD-BEARING, standing in for the handler's `LREGBL` register-block load that our trap-return
+       path does not model. Tree is behaviour-identical to HEAD with a 37-line comment recording the
+       whole chain. **The remaining work is to model the handler's register-block load; only then can
+       the assignment go.** Not scheduled - it is a real feature, not a cleanup.
+       Also fixed: PCB bytes removed from the memory compare - the engines store the trap flag in
+       different places (memory vs object), so comparing that cell manufactured two false
+       divergences.
+    **STILL OPEN in 6b:** the manual's frame-slot assertions (Ref 6.4 / 13.10-13.11), and a
+    CROSS-ENGINE ENTT comparison - the functional engine has no trap-arrival seam the oracle can
+    drive, so the current ENTT test is microword-only and says so.
+
+**This also unblocks item 6** (TOS/THA on the microword CPU), which needs the same PCB-backed
+trap context, and item 4's trap-path fields.
 
 ## 8 — Lock every fix with a red-first regression test
 
@@ -463,6 +814,44 @@ that reason, and `0x7F` is in the probe marked inert.
  - ND-500 classic 3022, the DOM corpus, NLL work — `nd500uc-47`.
  - nd100x/nd500x integration over ndbus — **deferred by Ronny**, gated on RetroCore's own ND-500 and
    ND-5000 CPUs being validated against `nd-500-mon` first. Do not start it, do not design the seam.
+
+---
+
+## BUILD OUT OF TREE - this removes session contention entirely
+
+Two sessions share `E:\Dev\Repos\Ronny\RetroCore`. A running testhost holds
+`Emulated.Testsin\Emulated.HW.dll`, so the other session's build dies on MSB3027 and leaves the
+tree SPLIT - `Emulated.HWin` newer than `Emulated.Testsin` - after which the next run may load
+the old DLL. One source tree, only the output moves:
+
+```bash
+  dotnet build Emulated.Tests/Emulated.Tests.csproj -nodeReuse:false -o 'D:
+c-bin\out'
+  dotnet vstest 'D:
+c-bin\out\Emulated.Tests.dll' --TestCaseFilter:"..."
+```
+
+Proven by `nd500uc-d4` on 2026-08-31: a full 6-minute capture ran out of that folder while another
+testhost held `Emulated.Testsin`, with no collision.
+
+**Two traps, both measured:**
+ - **`-p:BaseOutputPath` LOOKS like it works** - clean build, 0 errors - and silently writes nothing
+   anywhere. A build that succeeds at doing nothing, and then you test a stale binary. **Use `-o`.**
+ - `-p:BaseIntermediateOutputPath` breaks the MC68K source-generator project, so `obj/` stays in the
+   tree.
+ - **A THIRD trap, measured 2026-08-31: any test that locates its DATA by walking UP from the test
+   binary SILENTLY SKIPS out of tree.** `JsonVectorSweepTests.VectorDir()` climbs from
+   `TestContext.CurrentContext.TestDirectory` looking for `Emulated.Tests.ND500`; from
+   `D:
+c-bin\...` there is no repo above it, so it returns null and the test calls
+   `Assert.Ignore`. The run reports **exit 0, `Skipped! - Failed: 0`** - green-looking, and it
+   measured nothing. Out-of-tree is safe for self-contained tests; **any golden-vector or
+   corpus-driven test must run IN TREE.**
+
+**And do not trust the cross-session idle notice as "their run finished."** It fired twice on
+2026-08-31 (03:06 and 11:53) while a background test was still executing - idle means the TURN
+ended, not the RUN. Check the testhost's CPU time instead; a live octobus run sits at ~35-40 s of
+CPU per wall minute.
 
 ---
 

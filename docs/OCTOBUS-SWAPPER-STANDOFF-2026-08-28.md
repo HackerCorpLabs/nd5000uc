@@ -531,6 +531,13 @@ minutes** (02:57:12 → 03:04:46) before failing. That is a lane which reaches a
 domain, and dies in a *known, carved* way — the 5SWAP `RPHS` protect violation, whose `P` value
 `0o1000010533` is already recorded.
 
+> **CORRECTED 2026-08-31 (see section 146): "known, carved" must NOT be read as "understood engine
+> defect".** The classic lane retracted exactly that framing today — the 5SWAP protect violation is
+> **no longer reproducible**, and its two causes were both OUTSIDE the emulator: the harness attached
+> no ND-500 CPU before PLACE-DOMAIN, and a `DEFINE-SWAP-FILE` **definition does not survive a cold
+> start** (the pack carried the swap FILE; the DEFINITION was what was missing). The address and the
+> trap are still correctly measured; what is wrong is treating them as a property of the engine.
+
 **Tonight, 29 August, it does not get that far.** `place-domain`, `recover`-style install, with a
 swap file, without a swap file, on the stock pack, on DOMS-CSFIX — every one stalls after
 `> Loading Swapper` and never prints `> Allocating memory`.
@@ -8407,3 +8414,2700 @@ one OS's memory map into a shared path, which is the same class of error as the 
 
 So the honest status: **the blocker is removed, the wiring is not done, and place-domain will not
 change until it is.** Do not re-measure expecting movement.
+
+### 124a. A fifth in the family, and one that only a BASE RATE could catch `[V]` 2026-08-31
+
+Four mechanisms found in one day that return a confident answer about the wrong thing:
+
+```
+  DITBASE == 0 sentinel     a configured DIT at physical 0 reads as "no DIT"        s123
+  TraceMonitorCall filter   a real MON 377B reads as "no MON call"                  s123a
+  corpus register model     no OTE/MTE/THA slot, so no row can assert a delivered
+                            ignorable trap - the rows are not wrong, they are
+                            UNEXPRESSIBLE                                           s112a
+  -p:BaseOutputPath         a clean build, 0 errors, and nothing written anywhere -
+                            a build that SUCCEEDS AT DOING NOTHING, after which you
+                            test a stale binary                                     peer, this date
+```
+
+None errors. None logs a skip.
+
+### The fifth is a different shape, and the sharpest of them
+
+`nd500uc-d4`, chasing a linkage-loader failure, found `SCRATCH-SEG-01:LINK` reporting a byte count
+of exactly **2^32 with zero pages**. That is a beautiful corrupt-size explanation: a wrapped length,
+an empty file, an obvious root cause.
+
+**Every `:LINK` file on both floppies is identical, including the loader's own, which works.** The
+striking value was the NORM. Only counting the other files could say so.
+
+That is not "an instrument lying" - the read was correct and the value was real. It is a **base-rate
+failure**: a value looks diagnostic because it is unusual, and nobody checked whether it is unusual.
+The defence is one query - how many other things look like this? - and it is cheap enough that not
+running it is the mistake.
+
+Related to failure-taxonomy #14 ("an authoritative NEVER makes an ORDINARY observation look like a
+finding") but distinct: #14 is a framing arriving after the data, this is a missing denominator. The
+real root cause turned out to be a MISSING FILE - the loader asks for
+`SEGMENT-D002-S01`, the floppy carries `SCRATCH-SEG-01` - which the corrupt-size story would have
+hidden behind a plausible answer.
+
+## 125. CORRECTION to section 115: those are SEGMENT OFFSETS, not physical addresses `[V]` 2026-08-31
+
+Declaring the DIT base at physical 0 did not work either - `THA=0x00000000` again, second
+falsification, 30 m 51 s, pack confirmed. The declaration DID run (the harness calls
+`AttachNd5000Cpu` at line 368), so this is not another inert fix. The base is simply wrong.
+
+### What I misread
+
+`PHYSRD`/`PHYSWR` (30B/31B) are **SEGMENT-RELATIVE**. The servicer says so in its own comment -
+*"PHYSRD is SEGMENT-RELATIVE and walks the physical segment table"* - and
+`TryResolvePhysicalSegmentAddress` does the walk the microcode does:
+
+```
+    entry = PST[segment]            halfword entries, index*2, microcode 011460 -> 007771
+    physicalByteAddress = (entry AND 0x3FFF) * 2048 + offsetInSegment
+```
+
+The message carries the SEGMENT in `MSWMC` and the OFFSET in `N500A`/`N500A_LO`. And the harness
+line I built section 115 on prints the raw operand, with a comment that says exactly what it is:
+
+```
+    // Operands are ND-500-side byte offsets; absolute = Nd500AddressBase + off
+    extra = $"  addrA=0x{aAddr:X8} addrB=0x{bAddr:X8} nrbyt={n}";
+```
+
+**So `addrA = 0x96..0xC4` are OFFSETS INSIDE A PHYSICAL SEGMENT.** I read them as ND-500 physical
+addresses and concluded the DIT is at physical 0.
+
+### What SURVIVES, and it is most of it
+
+The layout identification is untouched:
+
+ - the twelve offsets land exactly on `struct pcb` field starts, and the never-written `0xBA/0xBB`
+   are the only two single-BYTE fields in the span - a hole the layout PREDICTS;
+ - the raw decode of the eight `LOADCT_*` routines gives **DPA-relative** offsets, and
+   `DPA = PcbBase + domain*256 + 0x80` - that constrains the LAYOUT and says nothing about where
+   `PcbBase` is, so it is unaffected by this correction;
+ - our own `DIT_*_OFFSET` constants and `pcb.h` are likewise layout-only.
+
+**Section 115 conflated LAYOUT with BASE.** The layout is confirmed four ways and stands. The base
+was inferred from one reading of one log field, and that reading was wrong.
+
+Since the PCB fields sit at segment offsets `0x96..0xC7`, the PCB starts at the SEGMENT BASE, so:
+
+```
+    DIT base = PST[segment] page * 2048        NOT 0
+```
+
+### Failure-taxonomy #19 again, and this time it survived four cross-checks
+
+Correct about the wrong object: the twelve VALUES were right, the field identification was right,
+and only what kind of address they are was wrong. Every check I ran verified the values against a
+layout - none asked what address space the numbers were in. **The one question that would have
+caught it is the one I did not ask: "an offset from what?"**
+
+### Next, and it needs one run
+
+The segment number is in the message (`MSWMC`) and the servicer already prints it -
+`PHYSWR seg=... off=... -> ND500 phys 0x...` - but that NoteMessage does not reach the capture the
+harness writes. Surface it, read the segment, resolve `PST[seg]`, and declare THAT base. The
+prediction stays a single value: `THA` non-zero after a completed 3START.
+
+**Do not declare base 0 again**; `ND100Machine.ND5000.cs` currently does, and it is wrong.
+
+## 126. THE PACK IS INSTALLED WRONG - and that outranks most of sections 115-125 `[V]` 2026-08-31
+
+`nd500uc-d4` carved it to bytes on the pack we boot. `(PACK-ONE:SYSTEM)DESCRIPTION-FILE:DESC` is
+22528 bytes - the same size as the LED distribution FLOPPY's - and every stored name still carries
+the floppy directory:
+
+```
+  @0x00800  (211160B03-XX-01D:FLOPPY-USER)'L
+  @0x04004  (211160B03-XX-01D:FLOPPY-USER)SCRATCH-SEG-01'
+  @0x040C4  (211160B03-XX-01D:FLOPPY-USER)LED-B03'
+```
+
+I confirmed the same content independently on the loose copy in this repo before their message
+arrived - same five names, same prefix - though THEIRS is the check that counts, because it is the
+DESC inside the pack that is actually booted rather than a file with the same name lying next to it.
+
+ND-30.003.007:4607 states the rule: *"The description file still contains the definitions valid for
+the user the domain is copied from. This must be corrected."* `COPY-DOMAIN` rewrites those names;
+`@COPY-FILE` cannot. The pack was built with the latter.
+
+### Why this matters more than the trap configuration
+
+ND-60.136.04A ch.11: the segment entry stores `(directory:user)filename` and **the prefix is not
+consulted until the `:PSEG`/`:DSEG` are opened.** So a file-copied domain RESOLVES and then fails
+LATER, at file-open time.
+
+That is the exact shape of what I have been measuring for a day:
+
+```
+  place-domain gets far      swapper starts, MON 377B asked and answered, parks - all correct
+  then SINTRAN goes quiet    nothing but watchdogs; "> Allocating memory" never appears
+```
+
+If the domain's segment files cannot be opened, there is nothing to page in and nothing further to
+ask the CPU of. **The stall is very likely the install, not the CPU.**
+
+### What this does to sections 115-125
+
+**Still stands, because none of it depends on the pack:**
+
+ - the PCB/DIT layout - `pcb.h`, our own constants, and the raw `LOADCT_*` decode;
+ - `DITBASE == 0` as a sentinel colliding with a legal base - a real defect, and its red-first test
+   is a unit test with no pack in it;
+ - the microcode loads OTE/CTE/MTE/TEMM on context load, which we did not;
+ - everything in the ACCP, SSKIP, divide-by-zero and corpus work, all pack-independent.
+
+**Does NOT stand:**
+
+ - **"`THA=0` is the gap that stops place-domain."** It may simply be that a domain whose files
+   cannot be opened never gets a properly populated context. I asserted a causal role for a symptom
+   I had only ever seen on a broken pack.
+ - section 125's next step - hunting the real DIT base through `PST[seg]` - is PREMATURE. Measuring
+   it on a pack that cannot open its own segments would tell me about the failure, not the machine.
+
+**So: re-measure on a correctly installed pack BEFORE drawing anything further from place-domain.**
+
+### The near-miss that belongs at the top of the taxonomy
+
+They found ND-60.136.04A:2987 - *"If a NO SUCH PAGE condition occurs at execution time, the Monitor
+will zero fill the page in memory"* - and nearly implemented it in the MMU. Real text, naming our
+exact error. It is section 6.9.2 LOW-ADDRESS and concerns a HOLE INSIDE AN EXISTING segment file;
+an explicit search found nothing tying NO SUCH PAGE to a MISSING file.
+
+**Implementing it would have made the symptom vanish, made the lane green, and permanently hidden a
+broken install behind genuine-looking manual backing.** A citation that fits the error text and not
+the situation is worse than no citation, because it survives review.
+
+The same trap is live on my side: I have been changing CPU trap-config code to chase a symptom that
+a bad install may fully explain. My changes are defensible on their own evidence and I am keeping
+them - but not one of them should be described as fixing place-domain.
+
+## 127. Item 4's ALTEN pair: one phantom, one bounded to the BLOCK-MOVE family `[V]` 2026-08-31
+
+The plan's standing rule is to restrict a field's B30 count to REACHABLE sites before implementing,
+because raw sweeps have twice invented work that did not exist. Done for the ALTEN pair
+(`MicrowordDecodeTests.AltenArms_HowManyB30WordsCouldReachThem`), and it splits them cleanly:
+
+```
+  words with OR_ENABLE set                                1079
+  ORCON.A == 3  raw 532   guarded (OrEnable AND AOp==63)     0   PHANTOM
+  ORCON.D == 3  raw 395   guarded (OrEnable)                48   REAL
+```
+
+Guards taken from the call sites, not guessed: `orconA = (Orcon >> 2) AND 3` is reached only when
+`OrEnable != 0 AND AOp == 63` (`CpuND5000.cs:2465`); `orconD = Orcon AND 3` (`:3158`).
+
+**The raw numbers suggest ~900 words of work. The truth is 0 and 48.** `ORCON.A` ALTEN is confirmed
+a phantom for the second time - the plan already recorded "532 raw -> 0 reachable" and this
+reproduces it independently.
+
+### The 48 are one family, not scattered work
+
+Every one carries `ORCON=0x03` exactly, and they occupy a single contiguous band,
+`0o5717..0o10054`. The labels in that band name it:
+
+```
+  MBR_*       move block REVERSE      MBR_ALOOP, MBR_W, MBRWLOOP, MBR_B, MBR_BLOOP ...
+  MBF_*       move block FORWARD      MBF_ALOOP, MBF_W, MBFWLOOP, MBF_B, MBF_BLOOP ...
+  BMOVEBY_*   block move BYTE         BMOVEBY_FR/_F/_FAL/_FW/_FWL/_FB/_FBL ...
+  BMOVEHW_*   block move HALFWORD
+```
+
+**The BLOCK-MOVE / string-move family** - which is exactly what ALTEN is for: ND-05.022.1 defines
+`ORD,ALTEN` (561) as *"OR destination from string DEST. operand"*, with `G,OPSTRD` (539) fetching
+the second string-operand specifier.
+
+Two shapes among the 48: `Dest=18/19, AOp=56 (A,DATA), MemOp=15, Adact=1` - the memory-moving
+words - and `Dest=8/24/26, MemOp=0` - the register/address bookkeeping around them.
+
+### Why this matters beyond item 4
+
+The nd5000-microcode skill records that the microword lane **fails every one of the 168
+`STRING_sfill` golden vectors**, and lists `G,OPSTRD` and "ALT-prefix/ORCON ALTEN itself" among the
+throwing features. This puts a number and a location on that: the string/block-move destination path
+is 48 microwords in one band, and `ORCON.D` ALTEN is the arm they all need.
+
+So item 4's next entry is not "implement ALTEN" in the abstract - it is **model the string
+destination operand for the block-move family**, with a bounded site list and an existing failing
+corpus to measure against.
+
+### The caveat that keeps 48 honest
+
+**48 is an UPPER BOUND.** The sweep models `OrEnable` because that is the gate visible at the call
+site; the destination path may carry further guards this does not express. The number is small
+enough to read, which is the point - a bounded list can be checked, a raw count can only be
+believed.
+
+## 128. `G,OPSTRD` is not missing - it is FLATTENED, and its own [OPEN] predicted this exact failure `[V]` 2026-08-31
+
+I went to implement `ORCON.D` ALTEN and found the dependency runs the other way.
+
+**The four OR-destination arms are symmetric**, which is what makes the missing one legible:
+
+```
+  ORD,IN    (0)  destination = register named in the instruction code   Regs.InstrRin
+  ORD,OP    (1)  destination = the CURRENT operand                      OcaKind/OcaReg/OcaEa
+  ORD,OP1   (2)  destination = the FIRST operand                        Op1Kind/Op1Reg/Op1Ea
+  ORD,ALTEN (3)  destination = the STRING DEST operand                  <- needs an ALT triple
+```
+
+So ALTEN needs an alternate-operand triple that something has to populate. That something is
+`G,OPSTRD` - ND-05.022.1 (539), *"get second operand specifier for string instr"*.
+
+### It is implemented, and the skill note saying it throws is stale
+
+`CpuND5000.cs:1188`, case 13, is real code: `G,OPSTRD` is flattened onto `G,OPS` - "bring in the
+next operand specifier" - graded `[D]` with its evidence (every SMOVE-family member is the same
+two-word pair over `0o1235..0o1252`, and word 2's only effect is the operand advance). It does not
+throw.
+
+**And it carries an [OPEN] that reads as a prediction:**
+
+> *"the real hardware distinction is presumably string DESCRIPTOR handling (a string operand is a
+> descriptor, not a scalar). Nothing on the swapper path exercises that yet. **If a string
+> instruction ever reads the wrong operand, revisit here first.**"*
+
+### The prediction came true, and it is already measured
+
+The SFILL remark in `MicrowordDecodeTests`:
+
+> *"the microword lane fails every one of the 168 `STRING_sfill` golden vectors, and on the live
+> swapper it executed a fill of the right LENGTH at the wrong ADDRESS - it used the descriptor's
+> element count as the base. **So the descriptor is not reaching the fill loop.**"*
+
+Right length, wrong address, element count used as base - that is exactly what a flattened
+`G,OPSTRD` produces: the operand stream advances, the DESCRIPTOR is lost, and the fill takes a
+scalar where a (count, address) pair belonged.
+
+### So item 4's entry is ordered, and ALTEN is not first
+
+```
+  1  G,OPSTRD must deliver the string DESCRIPTOR, not just advance the operand stream
+  2  an ALT operand triple then exists for ORCON.D ALTEN's 48 block-move sites to route to
+  3  the 168 STRING_sfill vectors are the measure, and they are already failing
+```
+
+Implementing ALTEN first would have had nothing to read: the destination it routes to is produced
+by the step above it.
+
+### Third time today that our own comment named the failure before we measured it
+
+`Divide.cs` cited the microcode against the corpus rows; `Nd5000ControlStoreLink` recorded the
+address-latch correction; and here an `[OPEN]` said which line to revisit and under exactly what
+symptom. **The notes are load-bearing and they are being read too late.** The cheap habit is to grep
+the `[OPEN]` markers for the subsystem BEFORE forming a plan for it, not after the measurement
+arrives.
+
+## 129. CORRECTION to 127/128: `STRING_sfill` is 168/168. The premise was a STALE STATUS NOTE `[V]` 2026-08-31
+
+Sections 127 and 128 both close on "the 168 `STRING_sfill` golden vectors are the measure, already
+failing". **They are not failing.** Measured directly:
+
+```
+  ND5000_DIFF_FILE=STRING_sfill  Sweep_DumpOneFileDiffs
+    === STRING_sfill.json: diverging cases (microword vs functional golden) ===
+    --- match=168  diverge=0  unsupported=0 ---
+
+  whole sweep: match=23933 diverge=1424   (baseline floor 22248 / ceiling 1638) - ABOVE baseline
+```
+
+The claim came from the `nd5000-microcode` skill's "still open" list. `JsonVectorSweepTests`'
+own history records the fix in a comment - *"four gained - **STRING_sfill 0->168**"* - and the skill
+was never updated.
+
+**The octobus skill warns about exactly this, as its FIRST trap:** *"STATUS HEADERS IN THIS TREE
+LIE. Check the code, not the heading... Before investigating any 'open' item, grep the code and the
+tests for it. More than half the time it is done."* I did not, and built two sections on it.
+
+### What survives 127/128
+
+Everything that was MEASURED rather than inherited:
+
+ - the ALTEN reachability split - `ORCON.A` 532 raw / **0** reachable, `ORCON.D` 395 raw / **48**;
+ - those 48 being one contiguous band, `0o5717..0o10054`, the `MBR_*`/`MBF_*`/`BMOVEBY_*`/
+   `BMOVEHW_*` block-move family;
+ - the four OR-destination arms being symmetric, so ALTEN needs an ALT operand triple;
+ - `G,OPSTRD` being FLATTENED onto `G,OPS` rather than missing, graded `[D]`, with its own `[OPEN]`.
+
+### What is FALSE, and what it changes
+
+"The string family is broken and ALTEN is the blocker" is false. SFILL passes completely. So **item
+4's ALTEN entry has no failing measure behind it**, and its priority drops accordingly - it is real
+unimplemented hardware, not a live defect.
+
+### The question that replaces it, and it is a sharper one
+
+If `ORCON.D` ALTEN throws, and 48 words in the image reach it, **why does nothing fail?**
+
+Two candidates, and they are distinguishable: either no corpus vector ever executes those 48 words,
+or the block-move family has no golden coverage at all. That is the same raw-vs-reachable distinction
+one level further out - **reachable IN THE IMAGE is not the same as executed BY ANY TEST** - and it
+decides whether ALTEN is untested-but-needed or genuinely dormant.
+
+### Method note - the rule I wrote one section earlier
+
+Section 128 ended: *"grep the `[OPEN]` markers for the subsystem BEFORE forming a plan for it."* I
+did that this tick and it worked - two markers, both saying descriptor branches are unmodelled. But
+I applied it only to the CODE and not to the CLAIM, and the false part came from a skill file. **The
+same check has to cover the status notes, which are the thing most likely to be stale**, because
+code gets fixed and prose does not.
+
+## 130. The install findings, and the two my own memory already held `[V]` 2026-08-31
+
+`nd500uc-d4`'s full write-up is `E:\Dev\Ronny\ND500UC\docs\ND500-DOMAIN-INSTALL-2026-08-31.md`
+(commit cb34551). The parts that bear on this lane:
+
+**Domains belong on DOMAIN-USER, not SYSTEM.** Five product sheets plus the vendor cold-start file
+agree. Our pack has everything on SYSTEM, whose quota is exhausted TO THE PAGE - reserved 21713,
+used 21713 - while DOMAIN-USER sits at 1000 reserved and 0 used. There are 16419 free pages on the
+volume. **So `NO SPACE IN DEFAULT DIRECTORIES` is the QUOTA, not the disk.**
+
+**Having the file is not having the registration.** `LIST-DOMAIN` returns two domains,
+`SCRATCH-DOMAIN` and `LED-B03`, while the same pack carries a dozen `:DOM` files including
+`CPU-STAT` and `PLANC-500-G00`. The file list and the domain list are different objects.
+
+**The reusable tell:** a file-copied domain fails LATE. The stored name carries its directory and
+the prefix is not read until the `:PSEG`/`:DSEG` are OPENED, so everything that merely RESOLVES a
+name works and only opening breaks. **If something works right up to its last step, suspect the
+description file before the machine.**
+
+### Two of these were already in my own memory, from 2026-08-26
+
+`nd500-domain-registration-not-file-copy` records, measured five days ago:
+
+ - registration is a separate step from copying files - `place-domain LINKAGE-LOAD-H02` answers
+   `NO SUCH DOMAIN` though the pack carries every one of its files;
+ - **`NO SPACE IN DEFAULT DIRECTORIES` is SINTRAN saying "not in your defaults", NOT "disk full"**;
+ - the DOMS pack's DESC holds exactly `LED-B03, SCRATCH-DOMAIN, SCRATCH-SEG-01` and **no NLL** -
+   the same three names I re-read out of the file today;
+ - and that both tables are the same 22528-byte fixed size, so **equal size proves nothing about
+   equal content** - which is the same caution the peer's byte-proof rests on.
+
+The peer's quota numbers SHARPEN the second one from "not in your defaults" to a specific
+exhausted-to-the-page reservation, which is better than what I had. But I had the shape and did not
+bring it to this lane.
+
+### One datapoint that may save them a cycle
+
+They list `SYSTEM/LINKAGE-LOAD-H02` having `:PSEG`/`:DSEG`/`:UTIL` but **no `:LINK`** as a finding,
+citing ND-60.136.04A:1105 that a segment is a PSEG/DSEG/LINK trio. My memory note records that
+exact hypothesis being TESTED and REFUTED on 2026-08-26:
+
+> *"the absent `:LINK` file is the blocker - the installer spec does list four files
+> (`:PSEG :DSEG :LINK :DESC`) and the pack had three. Added `:LINK` to a copy; **still**
+> `NO SUCH DOMAIN`."*
+
+So the missing `:LINK` is real but **not sufficient** - adding it does not make the domain placeable.
+Registration is still the gate. Sent to them.
+
+### The pattern, again
+
+That memory note's own closing lesson is *"explaining a disagreement instead of decoding the thing
+that settles it"*. Today's version is narrower and worse: I had already decoded the thing that
+settles it, wrote it down, and then spent a day on the CPU without re-reading it. **Fourth time this
+session that a note we already own named the answer before we measured it.**
+
+## 131. Item 7 triaged: 56% of the microword divergence is ONE family, and it is already characterised `[V]` 2026-08-31
+
+Ran the golden-vector landscape (`Sweep_AllGoldenVectors_Report`, 125 files) to give item 7 the same
+treatment that worked on the ND-500 corpus.
+
+```
+  files=125   match=21729   diverge=1408   unsupported=1140
+
+  PACKED DECIMAL - 8 files, diverge=792 = 56% of ALL divergence
+     ARITHMETIC_pmpy    match=160  diverge=200      ARITHMETIC_ppack   match=0    diverge=36
+     ARITHMETIC_pmpyr   match=160  diverge=200      ARITHMETIC_ppackr  match=0    diverge=36
+     ARITHMETIC_padd    match=200  diverge=160      ARITHMETIC_psub    match=360  diverge=0
+     ARITHMETIC_paddr   match=200  diverge=160      ARITHMETIC_psubr   match=360  diverge=0
+
+  TOP NON-PACKED
+     ARITHMETIC_rem     match=0    diverge=200  unsupported=280   <- entirely broken
+     ARITHMETIC__div_   match=607  diverge=60
+     ARITHMETIC__mul_   match=583  diverge=41
+     FLOAT_MATH acos/alog2/alog10/alog          40 / 36 / 32 / 24
+```
+
+`psub` and `psubr` at 360 match / 0 diverge are the discriminator: the packed-decimal ENGINE is not
+broken, or subtract would fail too.
+
+### And the repo already had the answer - read BEFORE theorising this time
+
+`ND5000-PACKED-DECIMAL-Z-FLAG-BOTH-CORES-WRONG-2026-07-28.md` records, with an experiment:
+
+ - the 216-diverge `padd` table was **DEGENERATE** - unseeded operands, every case `0+0=0` - and the
+   generator was fixed (commit `77620f6f3`);
+ - **the microword's packed VALUE result is 100% correct** - zero value diffs across all six
+   360-case files - and `psub`/`psubr` went to `diverge=0`, exactly what this sweep still shows;
+ - **the remaining diverges are Z/S-FLAG-ONLY**;
+ - the `ST,LOAD`/`AluSts` root-cause hypothesis was **experimentally refuted**;
+ - and its 2026-08-08 update records the same shape for the float `-0` store, with the verdict
+   *"corpus wrong on these 8 rows - microword + manual beat the two-functional-core consensus"*,
+   citing ND-05.020.01 §9.5 (MZRO compares all 32/16/8 bits; there is no float-magnitude carve-out).
+
+**So item 7's largest block is values-correct, flags-only, and the documented verdict on the
+analogous case is that the CORPUS is wrong.** That is the same conclusion reached independently for
+the ND-500 conformance corpus, where 196 of 242 remaining failures are fixture defects. Two corpora,
+two independent triages, the same answer: most of what is left is the measure, not the machine.
+
+### What is actually open here
+
+ - **packed decimal**: needs a REAL-HARDWARE datapoint to close the flag question; the doc says so
+   and lists the synthetic `-0` store as worth including in a request. Not closable by more analysis.
+ - **`ARITHMETIC_rem`**: `match=0, diverge=200, unsupported=280` - the one genuinely unimplemented
+   thing in the top list, and MODULO is already noted elsewhere as reachable only via two-byte
+   opcodes. This is the best-value item-7 target that does not need a datapoint.
+ - transcendentals: ~132 combined, and `cos`/`exp` already have a carved handoff.
+
+### Method note, and this one is positive
+
+Four times today a note we already owned named an answer we then re-derived. This tick I checked the
+repo for a packed-decimal document BEFORE forming a theory about the 792, and it had the corpus
+degeneracy, the refuted hypothesis and the verdict. **The habit works; the cost is one grep.**
+
+## 132. `NOT KNOWN TRAP` is NOT my DIT finding - our tree refutes the flattering match `[V]` 2026-08-31
+
+`nd500uc-d4` drove `place-domain` with a directory-prefixed name and got one line past my stall:
+
+```
+  N500: place-domain (210319H02-XX-01D:FLOPPY-USER)LINKAGE-LOAD-H02
+  > Loading Control Store
+  > Loading Swapper
+  FATAL * 21B:77B * ... ND-500(0) Monitor Internal / Fatal intern
+  ND-500(0) error: The Swapper stopped
+   NOT KNOWN TRAP        at program address:  0    0B
+```
+
+They noted it *"is the shape your DIT work would predict - no trap handler configured, so the trap
+number resolves to nothing and the restart address is zero"*, and explicitly did not claim it.
+
+**Our own tree refutes that reading, and I would rather record the refutation than accept the
+match.**
+
+```
+  Nd500UCSintranBootTests.cs:2516   "NOT KNOWN TRAP is ND-500-MON's fall-through when the trap
+                                     number it is handed has no entry in its OWN message table"
+                                     - the MONITOR failing to NAME a number, not the CPU failing
+                                     to DISPATCH one.
+
+  Nd500MicrocodeServicer.cs:3306    "place-domain prints NOT KNOWN TRAP at program address 5 400B
+                                     while our CPU posts NO trap at all (TRAPS posted=0), so the
+                                     trap number ND-500-MON renders must come out of the ANSWER
+                                     MESSAGE."
+
+  Nd500MicrocodeServicer.cs:1602    answering 5ERANSWER to a PHYSWR "made SINTRAN print NOT KNOWN
+                                     TRAP and never send a 3START for the domain".
+```
+
+**`TRAPS posted=0` is what kills it.** A trap that was never posted cannot have failed to find a
+handler. My DIT/THA work predicts a trap that IS RAISED and cannot be DELIVERED; this is a trap
+number appearing in a message with no trap behind it. Different failure.
+
+And there is a mechanism that fits better without touching the CPU: `TryResolvePhysicalSegmentAddress`
+declines with `PHYSWR seg=... DECLINED - no PST entry`, `understood=false`, which becomes
+5ERANSWER - route 3 above. A domain loaded from a FLOPPY directory is a plausible reason for a
+segment to have no PST entry, which would tie this back to the install rather than to a CPU defect.
+
+### Why this one was worth stopping for
+
+It is the most attractive kind of wrong answer: a peer independently offering evidence that MY
+open finding explains THEIR new symptom. Two days of DIT work, and a symptom shaped like a missing
+trap handler. Accepting it would have felt like convergence.
+
+**The check that refuted it took one grep of our own source** - the same habit that has now paid
+twice in three ticks, against four earlier failures to use it. `TRAPS posted=0` was written down by
+whoever hit this on the 3022 lane, precisely so the next person would not read the string as a
+dispatch failure.
+
+Discriminators sent for their re-run: whether the servicer log shows the DECLINED line, what the
+gate prints for TRAPS posted, and the answer-message fields (a reference PHYSWR answer is
+`N5STA=0003 MICFU=0019 STOPR=0021 NUMPA=2800 MCNO=0002 TRAPN=0000`, so a non-zero `TRAPN` there names
+the field feeding the render). Also noted: their address is `0 0B` and the recorded precedent is
+`5 400B`, so they may not be the same event.
+
+## 133. My half of the split: the monitor's trap table starts at bit 5, so "0" is not a trap number `[V]` 2026-08-31
+
+Ronny split the `NOT KNOWN TRAP` investigation: `nd500uc-d4` takes the ANSWER MESSAGE (what we
+write), this lane takes the MICROCODE and the MONITOR'S TABLE (what the monitor reads). Neither
+writes engine code until we agree a root cause.
+
+### First, a correction to the framing
+
+The peer asked whether their `0 0B` and "my" `5 400B` are the same event. **The `5 400B` is not
+mine.** This lane has never printed `NOT KNOWN TRAP` - zero occurrences across all four
+place-domain captures (cell5-cell8); the octobus stall is SILENT, and the only "FATAL" in the log
+is the word inside an instrument's own explanatory text. `5 400B` is a COMMENT in
+`Nd500UCSintranBootTests.cs` - the peer's own lane's test file - recording a historical 3022
+observation. I quoted it without saying it was a note rather than a run, which is what created the
+false symmetry.
+
+### The trap-name table, carved
+
+`nd-500-mon-j04.prog`, `BANK2::22c4` onward, backslash-separated:
+
+```
+  ZERO  CARRY  SIGN  FLAG  OVERFLOW
+  INVALID-OPERATION  DIVIDE-BY-ZERO  FLOATING-UNDERFLOW  FLOATING-OVERFLOW  BCD-OVERFLOW
+  ILLEGAL-OPERAND-VALUE  SINGLE-INSTRUCTION-TRAP  BRANCH-TRAP  CALL-TRAP
+  BREAK-POINT-INSTRUCTION-TRAP  ADDRESS-TRAP-FETCH  ADDRESS-TRAP-READ  ADDRESS-TRAP-WRITE
+  ...  STACK-UNDERFLOW  PROGRAMMED-TRAP  DISABLE-PROCESS-SWITCH-TIMEOUT
+  PROTECT-VIOLATION  TRAP-HANDLER-MISSING
+```
+
+That order matches our own `TrapCondition` numbering from bit 5 up: Z=5, C=6, S=7, K=8, O=9, then
+IVO=11, DZ=12, FU=13, FO=14, BO=15, IOV=16, SIT=17, BT=18, CT=19, BPT=20, ATF=21, ATR=22, ATW=23.
+
+**The table STARTS at ZERO, which is bit 5. Nothing exists below it.** So a rendered trap number of
+`0` is not a real trap with a missing entry - it is below the first entry, and the only way to get
+there is to hand the monitor a field that was never set. That is the "untouched field" branch, and
+it agrees with the recorded `TRAPS posted=0`. **CORRECTED 2026-08-31 (section 136): that phrase is
+NOT a measurement of the failing capture.** It is a source comment in `Nd500MicrocodeServicer.cs:3306`
+plus a gate line from MY OWN octobus run; the peer's build had no trap counters when their capture
+was taken. The conclusion below stands on the table bytes alone and never needed it.
+
+**Confidence, stated narrowly:** the ORDER and the absence of anything below ZERO are solid from the
+bytes. The exact index arithmetic is NOT pinned - the list is broken into groups by `00` bytes,
+there is a `(length, pointer)` descriptor array elsewhere in BANK2 I have not tied to it, and our
+numbering has a gap at bit 10 that a dense array would not have. So *"0 falls through"* is firm;
+*"trap N renders name N-5"* is not.
+
+### A second table, and it belongs to the other half
+
+`BANK2::4f1c` is a DIFFERENT list - *Memory error / Memory timeout / Indirect capability to other
+machine / Zero in the capability / **Zero in PST** / Zero in last level index entry for process
+segment*. Those are page-fault CAUSE strings, and "Zero in PST" is the same condition this lane's
+own instrument prints as `0xD PFZPST(no PST entry)`. **If the decline is a missing PST entry, that
+is the table that would name it - not the trap table.**
+
+### A string that nearly became the answer
+
+`NOT-KNOWN\` at `BANK2::4265` looks like the obvious match for "NOT KNOWN TRAP". It is in a table of
+DATA-TYPE names - `BYTE\ HALF-WORD\ WORD\ FLOAT...` - with a width array `1,2,4,4,4,4` above it. It
+means "unknown data type". The console text has spaces and the string has a hyphen, which is the
+tell. **Grepping for the string nearly produced a confident wrong table**; what settled it was
+reading what sits AROUND the hit rather than the hit itself.
+
+## 134. The microcode half: `PHYSWR` has NO error exit - it cannot answer `5ERANSWER` `[V]` 2026-08-31
+
+The peer's half of the split asked me two things about the real B30. Both are now answered from the
+microcode, and the answers are sharper than expected because the routine has no error path at all.
+
+### `SC10` is the answer status, and `MSG_END` is the single exit that writes it
+
+`MSG_END` @`017412` is the common tail every message handler falls into. Its body:
+
+```
+    017417   ADACT AA=2 AB=1 ORCON=0x04           set up the message address
+    017420   ALU,A TYP,HW A,SC10 ... WR,POF        <-- STORE SC10 AS A HALFWORD INTO THE MESSAGE
+    017421   ALU,A TYP,HW A,SARG SARG=100401 ... [ADDR=GIVEINT]   ring the ND-100
+```
+
+So `SC10` carries the status code, one halfword is written back, and then the interrupt is raised.
+**That halfword is the ONLY thing `MSG_END` writes into the message** - no data, no byte count, no
+error code beside it.
+
+### `BMnn` is an OCTAL BIT POSITION, which fixes the two constants
+
+Not inferred - our own `AccessModule.cs` carve says it verbatim: `BM11` (octal) = bit 9 = AOBF,
+`BM12` = bit 10 = AIBF, `BM05` = bit 5 = ATRAP, `BM13` = bit 11, `BM14` = bit 12. So `BMnn` is
+`1 << nn` with `nn` read as octal:
+
+```
+    BM02             = 4      = 5ERANSWER
+    BM01 + CRY,ONE   = 2 + 1  = 3   = ANSWER
+```
+
+Both readings corroborate each other: `MSG_ILLEG` @`015221` does `ALU,A A,BM02 ... D,SC10` - the
+decline is literally "status := 4" - and an unrelated site @`001064` does `ALU,A-1 A,BM02 ... D,SC10`,
+i.e. 4-1 = 3 = ANSWER. Two independent sites agree on the same constant.
+
+### `MSG_PHYSWR` writes ANSWER on every exit, and has no other exit
+
+`MSG_31` @`015255` dispatches to `MSG_PHYSWR` @`015600`. The routine has exactly **two** exits, and
+both set the same status:
+
+```
+    015613   ALU,A CRY,ONE A,BM01 B,X1 D,SC10  ... [ADDR=MSG_END]    word loop finished  -> SC10 = 3
+    015616   ALU,A CRY,ONE A,BM01 B,X1 D,SC10  ... [ADDR=MSG_END]    byte tail finished  -> SC10 = 3
+```
+
+There is no third exit, no branch to `MSG_ILLEG`, and no other write to `SC10` anywhere in the body.
+**On this path the microcode is structurally incapable of answering `5ERANSWER`.**
+
+The label file agrees independently. `MSG_ILLEG` is referenced from `015217`, `015224`, `015226`,
+`015227`, `015230`, `015231`, `015232`, `015233`, `015241`, `015242`, `015243` - all of them WORDS OF
+THE MICFU DISPATCH TABLE itself (`MSG_00`, `MSG_02`..`MSG_07`, `MSG_15`..`MSG_17`). `015254`
+(`MSG_30`) and `015255` (`MSG_31`) are NOT in that list. So `5ERANSWER` on a copy-family MICFU means
+one thing only: **the MICFU code was never implemented**, decided by table lookup before any handler
+runs. It is not something a serviceable `PHYSWR` can decide to return.
+
+### What a serviceable `PHYSWR` actually does, in order
+
+```
+    015600-015604   read 4 operands out of the message at ORCON 0x0E, 0x12, 0x16, 0x18
+    015610          D,MM,PHS   <- load the physical-segment register from SC5
+    015611-015616   word loop, then a 0..3 byte tail (SARG=000003 masks the low 2 bits of the count)
+    015621 / 015625 WR,PHYS    <- the actual guest-memory writes, byte and word
+    -> MSG_END      one status halfword back, then GIVEINT SARG=100401
+```
+
+`D,MM,PHS` at `015610` is the segment latch, and it is loaded from a message operand - which is the
+same fact section 125 arrived at from the other direction: these transfers are SEGMENT-RELATIVE, and
+the segment travels in the message.
+
+### What this hands the other half
+
+If our side declines a `PHYSWR` with `5ERANSWER`, **the real machine would never have produced that
+answer for that MICFU**, so any ND-100 behaviour that follows is behaviour SINTRAN only ever sees
+when a MICFU is missing entirely. And if the ND-100 side is waiting on any answer field other than
+the status halfword, it is waiting for something the microcode does not write.
+
+### Method note
+
+This cost about twenty minutes and needed no run: the `.LABE` cross-reference gave the dispatch
+table's reference list, which answered "can this path reach the decline" before any word was decoded.
+**A label file's REFERENCE column is a call graph** - section 78's mistake was making a call-graph
+claim without consulting one.
+
+## 135. The trap-table index arithmetic is PINNED: `index = trapBit - 5`, dense `[V]` 2026-08-31
+
+Section 133 left this unpinned and named the reason: the string list looked like it was "broken into
+groups by `00` bytes", I could not tie a `(length, pointer)` descriptor array to it, and our own
+numbering has a gap at bit 10 that a dense array would not have. All three of those objections
+dissolve on reading the bytes in order. **The arithmetic is now verified end to end.**
+
+### The `00` bytes are WORD-ALIGNMENT PADDING, not separators
+
+This is an ND-100 program: 16 bits per word, two characters per word. Every string whose length is
+ODD is padded to the word boundary with one `00`. Every string whose length is EVEN has no pad:
+
+```
+    4546  5a 45 52 4f 5c 00        "ZERO\"    5 chars -> 1 pad byte
+    454c  43 41 52 52 59 5c        "CARRY\"   6 chars -> no pad
+    4552  53 49 47 4e 5c 00        "SIGN\"    5 chars -> 1 pad byte
+```
+
+Read as separators, those pads carve the list into meaningless groups and make the array look
+irregular. They are not separators; `\` (0x5C) is the terminator, exactly as section 133 recorded.
+**There is no descriptor array, and there does not need to be one** - the list is scanned forward
+N terminators, which a dense variable-length array is exactly what you would use.
+
+### The gap at bit 10 IS IN THE TABLE, as a one-space placeholder
+
+This was my strongest argument against the arithmetic and it is the strongest evidence FOR it:
+
+```
+    455e  4f 56 45 52 46 4c 4f 57 5c 00     "OVERFLOW\"          index 4 -> bit 9
+    4568  20 00                             " "                  index 5 -> bit 10   <-- BLANK
+    456a  49 4e 56 41 4c 49 44 ...          "INVALID-OPERATION\" index 6 -> bit 11
+```
+
+Bit 10 is unassigned in our `TrapCondition` and in NDIX `trap.h`. The monitor keeps a blank entry in
+its place so the array stays dense and indexable. **The hole is real, the table knows about it, and
+that is why plain subtraction works.**
+
+### Verified against TWO independent sources, all 34 entries
+
+`index = trapBit - 5`, checked name by name against our `CpuND500.Trap.cs` enum AND against the real
+ND-500 Unix `E:\Dev\Ronny\NDIX-C\kernel\MASTER\machine\trap.h`:
+
+```
+    0 ZERO(5)  1 CARRY(6)  2 SIGN(7)  3 FLAG(8)  4 OVERFLOW(9)  5 " "(10 unassigned)
+    6 INVALID-OPERATION(11 IVO)      7 DIVIDE-BY-ZERO(12 DZ)    8 FLOATING-UNDERFLOW(13 FU)
+    9 FLOATING-OVERFLOW(14 FO)      10 BCD-OVERFLOW(15 BO)     11 ILLEGAL-OPERAND-VALUE(16 IOV)
+   12 SINGLE-INSTRUCTION-TRAP(17)   13 BRANCH-TRAP(18)         14 CALL-TRAP(19)
+   15 BREAK-POINT-INSTRUCTION-TRAP(20)                         16 ADDRESS-TRAP-FETCH(21)
+   17 ADDRESS-TRAP-READ(22)         18 ADDRESS-TRAP-WRITE(23)  19 ADDRESS-ZERO-ACCESS(24)
+   20 DESCRIPTOR-RANGE(25 DR)       21 ILLEGAL-INDEX(26 IX)    22 STACK-OVERFLOW(27 STO)
+   23 STACK-UNDERFLOW(28 STU)       24 PROGRAMMED-TRAP(29 PRT)
+   25 DISABLE-PROCESS-SWITCH-TIMEOUT(30 DT)   26 DISABLE-PROCESS-SWITCH-ERROR(31 DE)
+   27 INDEX-SCALING-ERROR(32 XSE)   28 ILLEGAL-INSTRUCTION-CODE(33 IIC)
+   29 ILLEGAL-OPERAND-SPECIFIER(34 IOS)       30 INSTRUCTION-SEQUENCE-ERROR(35 ISE)
+   31 PROTECT-VIOLATION(36 PV)      32 TRAP-HANDLER-MISSING(37 THM)  33 PAGE-FAULT(38 PGF)
+```
+
+Every one agrees. Our engine's trap numbering is correct against the monitor's own table.
+
+### So section 133's conclusion is now VERIFIED, not just firm
+
+The array starts at `ZERO` = bit 5 (BANK2 byte `0x4546`, word `0x22a3` - not `0x22c4`, which lands
+mid-`DIVIDE-BY-ZERO`). What precedes it is the banner `"ND-500/5000 MONITOR  Version J04"` and two
+formatting fragments `" "` and `" / "`, not table entries. With `index = bit - 5` pinned, **a
+rendered trap number of 0 indexes -5. It is below the table and cannot name anything.** It is a field
+the monitor was handed that nobody ever set. (An earlier draft said this "is what `TRAPS posted=0`
+already said" - **struck, see section 136**: that counter was never measured in the capture at issue.
+The claim rests on the table bytes, which is stronger anyway.)
+
+### Two corrections to my own section 133
+
+ - I listed `DISABLE-PROCESS-SWITCH-TIMEOUT` and skipped `INDEX-SCALING-ERROR`,
+   `ILLEGAL-INSTRUCTION-CODE`, `ILLEGAL-OPERAND-SPECIFIER` and `INSTRUCTION-SEQUENCE-ERROR`. **Both**
+   DISABLE-PROCESS-SWITCH entries exist - TIMEOUT at bit 30 and ERROR at bit 31.
+ - The table base was quoted as `22c4`. It is `22a3`.
+
+### The near-miss, and it is a new shape worth naming
+
+Mapping the tail by name against our enum, I got a clean **one-bit shift from bit 31 upward** - our
+`XSE`/`IIC`/`IOS`/`ISE`/`PV`/`THM` each one higher than the monitor's position, with a spurious `DE`
+we appeared to have invented. It looked like a real engine defect and it was completely wrong.
+
+**Cause: I read two NON-ADJACENT hexdumps as if they were continuous.** The first ended at `0x46c0`
+on `"DISABLE-PROCESS-"`; the second began at `0x46e0` on `"DISABLE-PROCESS-"`. Those are two
+DIFFERENT strings - TIMEOUT and ERROR - and the 32 bytes between them were never dumped. One entry
+missing from the middle shifts everything after it by exactly one, which is indistinguishable from an
+off-by-one bug in the thing being measured.
+
+This is not the "wrong object" failure (#19) - the object was right and the values were right. It is
+a **gap in the sampled range read as continuity**. The tell is available for free and I did not use
+it: two consecutive dumps whose addresses do not touch. NDIX `trap.h` settled it in one grep, and
+dumping the 32-byte hole confirmed both strings are present. **When a table decode produces an
+off-by-N, suspect the READ before the subject** - and check that the ranges actually abut.
+
+## 136. ROOT CAUSE (peer's lane): the fixture never attached a CPU before place-domain `[V]` 2026-08-31
+
+The `NOT KNOWN TRAP` split is closed, and neither half's leading hypothesis was the cause. The peer
+found it in their own TEST FIXTURE. Recorded here because both of my carves (sections 134, 135)
+turned out to describe branches that never execute in this failure - which is exactly the outcome
+that has to be written down, or the carves get remembered as "the fix".
+
+### The census that refuted my mechanism and theirs together
+
+Full history of the servicer's messages - 116 entries against a 400-entry ring, so nothing wrapped:
+
+```
+    116 answers, EVERY one N5STA=0003 "understood"
+      0 answers with 5ERANSWER
+      0 DECLINED markers
+      0 PHYSWR / PHYSRD messages - MICFU=0019 was never sent at all
+```
+
+So `TryResolvePhysicalSegmentAddress` and the `5ERANSWER` decline are **not involved**. Section 132's
+suggestion that a floppy-directory domain might produce a segment with no PST entry is refuted by the
+same capture that was meant to confirm it - there is no PHYSWR to decline.
+
+### The mechanism, and it lands where sections 133/135 said it would
+
+The last message before the crash is `MICFU=0013` (23B `3START`, the swapper start), answered
+immediately with `STOPR=0000 NUMPA=0000 MCNO=0000 TRAPN=0000`. In `Nd500MicrocodeServicer`, a start
+TAKEN by a `ProcessHost` returns `false` and writes NO answer - the message stays `WAITING` and the
+process's later stop answers it. An answer line therefore proves `startTaken` was **false**: nothing
+took the start, and it fell through to the generic answer carrying an **all-zero stop record**.
+
+`nd-500-mon` reads that as a stopped process with trap number 0. By the arithmetic pinned in section
+135, `index = 0 - 5 = -5` - below the first entry - so it renders the fall-through text.
+**A field nobody ever set, exactly as predicted, and now with the writer identified.**
+
+### Why nothing took the start
+
+`AttachRealCpuNow()` installs the ProcessHost bridge, and the harness called it only just before RUN,
+on the documented assumption that the real engine is *"only needed from RUN onward"*. That assumption
+is FALSE for place-domain: the monitor loads and STARTS the swapper as part of placement, so a CPU
+has to be present to take the start. Their install fixture never called it. Every other fixture does
+- which is why the ordinary linkage-loader capture runs the swapper fine **on the same pack**, and
+why this reproduced deterministically three times. Structural, not a race, and nothing to do with the
+DIT work.
+
+### The classic-lane check, which is a real finding even though it is not this bug
+
+The peer checked `CONT-STORE-10611` against my B30 result and it agrees. PHYSWR at `011453B`:
+`011460` does segment+segment then `JSR 7771` (PST base + index); `011461` reads the entry via
+`JSR 12026`; `011462`'s `COND,LCZ` is the **loop-counter** test, not a test of the entry's value.
+There is no test of the entry anywhere and no branch to an error handler. PHYSRD ends `011452 / JMP
+10537` and PHYSWR ends `011472 / JMP 10537` - one common tail, the same shape as `MSG_END`.
+
+**So neither generation's microcode has a PHYSWR error exit, and our zero-entry "not present" decline
+is our own invention on BOTH lanes.** Worth keeping.
+
+### Correction to my own message, which the peer caught
+
+I wrote that the conclusion "is what `TRAPS posted=0` already said". **They never reported that** -
+the trap counters did not exist in the build that produced their capture. The phrase is a source
+comment in `Nd500MicrocodeServicer.cs:3306` and a gate line from MY OWN octobus run, and I carried it
+into their context as though it were their measurement. Annotated in place at sections 133 and 135.
+
+Failure-taxonomy note: this is **#19, correct about the wrong object** - the string exists, the
+number is real, and only WHOSE RUN it came from is wrong. It survives every check that verifies the
+value.
+
+### The peer's mirror of my near-miss, and it is the better statement of the rule
+
+They nearly made the same mistake in the opposite direction: `RunDomainUnderRealSintran` dumps the
+servicer log, but their standalone fixture never called it, so their first repeat run **could not
+have answered the question it was launched to answer**. Their words, and they generalise my section
+135 note better than mine did:
+
+> An instrument that exists in a SIBLING path is not an instrument you have.
+
+Same shape as reading two non-adjacent hexdumps as continuous: **the defect was in the READ, not in
+the subject.** Both belong in taxonomy §0 as the "structurally blind instrument" (#8) - one blind
+because it was never wired into this path, one blind because the sampled range had a hole in it.
+
+### Status
+
+Verification run in flight on their side; they are explicitly not claiming a fix until they have read
+the console. Nothing here needs engine code, and neither side wrote any.
+
+## 137. Item 7's "best target" was a degenerate corpus - and under it, one real defect `[V]` 2026-08-31
+
+`ARITHMETIC_rem.json` was picked as item 7's next target on the strength of being the worst file in
+the sweep: **0 match, 200 diverge, 280 unsupported**. Reading the corpus before believing the metric
+changed the question, and then one diagnostic run found a real defect that the metric was hiding.
+
+### The corpus cannot measure REM
+
+```
+    480 vectors,  ALL of them REM BY ZERO
+    480 of 480 expect final ST = 0x1000 (bit 12, DZ) and nothing else
+    224 distinct inputs -> 256 EXACT DUPLICATES (same bytes, same seed, same RAM, same name)
+    one input is repeated 35 times
+    280 are F REM (0xFE 0x58)   -> exactly the Unsupported count
+    200 are D REM (0xFE 0x5C)   -> exactly the Diverge count
+```
+
+**No vector computes an actual remainder.** Fixing this file would turn 480 rows green while proving
+ONE behaviour, and leave REM itself entirely unmeasured. Same generator defect as the SFILLN case in
+section 129 - the generator varied the instruction and not the expectation.
+
+There is a second, quieter problem: `MacroOracleState` carries `Zro/Sgn/Cry/Ovfl/K` and **no DZ
+flag**, so the one thing the corpus asserts is not even in the oracle's comparison set. The file
+cannot adjudicate itself from either side.
+
+### But the engine failure under it is real, and it is not a missing opcode
+
+Both opcodes ARE in the generated dispatch map, from the label file:
+
+```
+    map[65112] = new DispatchEntry(1115, 0, 1);   // 0xFE58  F1 REM  [labe]
+    map[65116] = new DispatchEntry(1118, 0, 5);   // 0xFE5C  D1 REM  [labe]
+```
+
+So the routine is reached and something inside it dies. `RemOracleDiagTests` (new) asks it directly:
+
+```
+    F REM  -> THREW: Operand select D,ALU,REG37 not implemented yet [DEST=31 (0o37)]
+    D REM  -> MICROWORD Z=1   FUNCTIONAL Z=0      (engines differ on Z alone)
+```
+
+### The instrument lied first, and fixing it flipped the diagnosis
+
+The original message said only `Operand select D,ALU,REG37 not implemented yet`. Read literally that
+means the REG37 destination is unimplemented - which **cannot** be true: 253 microwords use
+`D,ALU,REG37`, and `LOADT`, `LOADD`, `STORE` and `STORED` are among them and work today. I was about
+to record "REG37 destination missing", which would have been a confident wrong finding.
+
+Adding the raw select to the message settled it in one run: `[DEST=31 (0o37)]`. **31 IS the ordinary
+macro REG37 port.** It is normally INTERCEPTED UPSTREAM in `CpuND5000`'s dest-bank routing, and for
+F REM it is not intercepted, so it falls through to `OperandRouter`, which has no case 31 because it
+is never supposed to see one.
+
+**So the defect is a MISSING INTERCEPT UPSTREAM, not a missing case in the router** - and the
+"obvious" fix of adding `case 31:` to the router would be actively wrong: it would write some bank
+and stop dying, converting a loud correct failure into silent wrong behaviour. That is precisely the
+trap in the standing rule (*implement the microword, throw and log and die - progress is fields
+IMPLEMENTED, never halts removed*).
+
+Change made: `NotImplemented` in `OperandRouter.cs` now emits
+`[{field}={value} (0o<octal>)]` alongside the mnemonic, with the reasoning in an XML remark.
+**A mnemonic is not an identifier** - several selects render the same text, and the one case where
+that ambiguity mattered is the one case that mattered.
+
+### Correction to my own comment, same session
+
+The first version of that remark said "a different select was the one that failed". The re-run
+refuted it: the select is 31, the same one the working instructions use. The ambiguity was never
+about WHICH SELECT - it was about WHICH LAYER was supposed to handle it. Comment corrected in place
+rather than left to read plausibly and wrong.
+
+### What item 7 should actually say
+
+`ARITHMETIC_rem` is not a divergence to chase; it is a corpus to regenerate, sitting on top of one
+genuine engine defect (the missing F REM dest-bank intercept) and one single-flag divergence (D REM,
+Z only). The 280/200 split is a property of the FILE, not a measure of how broken REM is.
+
+### 137a. Baseline check on the 4 red tests - NOT caused by the message change `[V]` 2026-08-31
+
+The ND-5000 suite runs **755 passed / 4 failed / 3 skipped of 762** with the `NotImplemented` message
+change in. Since that change edits an exception STRING, a test asserting on the text was the obvious
+suspect, so it was checked rather than assumed:
+
+```
+    Entt_TrapFrame_CannotBeDriven_HardFail
+    Rett_TrapReturn_CannotBeDriven_HardFail
+    Trace_OfRealColdBoot_RecordsAddressesLabelsAndRegisterDeltas
+    BothEngines_ProduceTheSameMonitorCall
+```
+
+`git stash push` on `OperandRouter.cs` alone, then re-running exactly those four: **4 failed, 0
+passed** on the untouched tree as well. They are pre-existing and unrelated. Change restored.
+
+Two of the names read like they assert a hard-fail message, which is what made the check necessary -
+`grep` for the literal `"not implemented yet"` across the test folder finds it only in COMMENTS, in
+three files, never in an assertion.
+
+## 138. The peer's fix is VERIFIED, and it closes the trap thread `[V]` 2026-08-31
+
+Their verification run landed: **Passed, 11m28s. "Swapper stopped" 18 -> 0. "NOT KNOWN TRAP" 3 -> 0.**
+So the root cause in section 136 - the fixture never attaching a CPU before place-domain - is
+confirmed by the fix, not merely by the story.
+
+### The trap counters are now measured on their lane, by their instrument
+
+`attempted=0 posted=0 lastTrapNumber=0`. This is the honest version of the number I mis-attributed in
+sections 133/135 and corrected in 136: it is now a real reading from the lane in question rather than
+a source comment plus my own run. **Sections 133/135 are confirmed from the other side** - the
+rendered 0 could not have come from a trap, because none was ever raised.
+
+### The console value our plan item 1B.3 was waiting for
+
+```
+    > Loading Control Store
+    > Loading Swapper
+    > Allocating memory - 7116B pages
+    SWAPPING SPACE NOT AVAILABLE
+```
+
+`> Allocating memory` DOES appear, with **7116B pages**. That was an open value on our side and is
+now measured.
+
+### What remains, and it is install state, not engine
+
+`SWAPPING SPACE NOT AVAILABLE` on the prefixed place-domain, and `NO SUCH DOMAIN` on the unprefixed
+one - the latter genuinely unregistered in the transplanted description file. Both are consistent
+with the bad-install finding in section 126, and neither points at the servicer or the microcode.
+
+### One item deliberately left OPEN by both sides
+
+Our zero-PST-entry decline in `TryResolvePhysicalSegmentAddress`. Section 134 (B30) and the peer's
+`CONT-STORE-10611` check agree that **neither generation's microcode has a PHYSWR error exit**, so
+that decline is our invention and will bite whenever a PST entry legitimately reads zero. It is not
+this bug and not urgent, and it is engine behaviour, so it stays OPEN pending agreement rather than
+being fixed unilaterally. Recorded on their side as plan item 1B.0a.
+
+**No engine code was written by either side on this thread.**
+
+### 138a. The OPEN PST item, stated properly `[OPEN]` 2026-08-31
+
+Recording this here because it was sharpened in a message between lanes and a fact that lives only in
+a message is a fact on its way to being lost.
+
+**The wrong framing:** "neither microcode has a PHYSWR error exit, so our zero-PST-entry decline is
+wrong - remove it."
+
+**The right one:** *no error exit tells us the microcode does not DECLINE; it does not tell us what
+it COMPUTES instead.* Both lanes agree on the negative and neither has measured the positive:
+
+ - B30 (section 134): `MSG_PHYSWR` reaches `MSG_END` on both exits, always `ANSWER`. No test of the
+   PST entry's value anywhere in the body.
+ - classic `CONT-STORE-10611` (peer): `011460` does `JSR 7771` (PST base + index) and `011461` reads
+   the entry via `JSR 12026` - **it reads the entry and then never tests it**. `011462`'s `COND,LCZ`
+   is the loop counter.
+
+So on a zero entry the hardware forms SOME address and writes there. `TryResolvePhysicalSegmentAddress`
+computes `(entry AND 0x3FFF) * 2048 + offset`, which for a zero entry is `0 * 2048 + offset` - a write
+low in physical memory. Whether that is what the hardware does is **unmeasured**.
+
+**The open question is WHAT ADDRESS the hardware forms from a zero entry**, and it is answerable on
+the microword CPU without touching engine code: seed a PST whose entry is zero, run a `PHYSWR`
+through `MSG_31`, and record where `WR,PHYS` lands.
+
+**Do not delete the decline before that is answered.** Removing it without knowing the computed
+address trades a loud wrong behaviour for a silent one, which is strictly worse - the same shape as
+the NO SUCH PAGE zero-fill near-miss and the `case 31:` near-miss in section 137. Neither lane edits
+this alone. Peer's plan item 1B.0a.
+
+## 139. Two of the four red ND-5000 tests were FALSE REDS, both fixed `[V]` 2026-08-31
+
+Suite went **755 passed / 4 failed -> 757 passed / 2 failed** of 762. Neither fix touched engine
+code; both tests were failing for reasons unrelated to their own subject, which is the worst kind of
+red because it teaches the reader to distrust the subject.
+
+### `Trace_OfRealColdBoot_...` asserted a label that does not exist
+
+It required the trace to contain **`INIT_ND5000`**. There is no such label in
+`MICRO-5800-B30.LABE`. The file has `INIT`, `INIT_1..3`, `INIT_ADRP`, `INIT_CLRSTS`, `INIT_FROM17`,
+`INIT_REG`, **`INIT_SAMSON`** and `INIT_SAM_1`. `INIT_SAMSON` is the cold-boot entry on the label
+file's own evidence - **defined at `014517`, referenced from `000000`** - and the trace the test
+prints reaches it on tick 2:
+
+```
+    t=1 CS=000000(MASTER_CLEAR) ... ->014517
+    t=2 CS=014517(INIT_SAMSON)  ...
+    t=3 CS=014520(INIT_SAMSON+1) ...
+```
+
+**The `.LABE` parse this test exists to prove was working the whole time** - `MASTER_CLEAR`,
+`INIT_SAMSON` and `INIT_SAMSON+1` all resolved. Only the expected NAME was wrong. Now asserts
+`INIT_SAMSON`, with the address/reference evidence in the comment so the name is not "corrected"
+back by someone who remembers the old string.
+
+### `BothEngines_ProduceTheSameMonitorCall` compared DECORATION, not the call
+
+It asserted whole-string equality on a bridge log line. The engines **agree on every field that
+describes the call**:
+
+```
+    MON 377B argc=4 ret=0x08008255
+    [0] @0x08012A28=0x00000001 | [1] @0x080240B0=0x00000000
+    [2] @0x080240B4=0x00000000 | [3] @0x0802428C=0x00000000
+```
+
+The functional line simply carries 518 more characters of DIAGNOSTICS around them - `UCODE-ROLE`,
+the first-sighting citation, `SWMSG/SWPFU/SWPST`, `FIFO-SCAN`, `DOORBELL`, `TABLE-A` - because that
+lane runs through the servicer host where those probes are wired; the microword lane has no such
+state and renders bare. 146 characters against 664, and **not one of the extra 518 is a property of
+the MON call.**
+
+Fixed by extracting the semantic fields (`SemanticCall`) - the `MON nnnB argc= ret=` head plus every
+`[k] @0x...=0x...` operand matched by SHAPE rather than position - and comparing those. Both lanes
+now produce byte-identical semantic strings, so **the two engines really do agree**, which is what
+the test was always trying to say.
+
+**The failure message was the expensive part.** It read *"a difference here is a real divergence
+between the two engines, not a test artefact"*. It was exactly a test artefact, and the message
+argued against looking for one. An assertion that swallows a diagnostic string also makes every
+future diagnostic an API change.
+
+### The remaining 2 are DELIBERATE and are not mine to change
+
+`Entt_TrapFrame_CannotBeDriven_HardFail` and `Rett_TrapReturn_CannotBeDriven_HardFail` fail on
+purpose - *"HARD-FAIL per audit - not skipped"*. ENTT (0xBC) and RETT (0x83) need in-trap-handler
+context (`pcb.InsideTrapHandler` + `PendingTrapNumber`/`TrappingPC`/`ResumePC` + `THA`) that only a
+real trap dispatch sets and the oracle cannot seed. Someone chose a permanent red over a skip so the
+gap stays visible.
+
+That is defensible, and it has a cost: **a suite that can never be green cannot signal a NEW
+failure** - which is exactly what happened here, since two genuine false reds sat beside them
+unnoticed. Reversing a deliberate audit decision is not mine to make alone, so it goes to Ronny.
+
+## 140. Trap fixture step 1: the microcode named its own seed set - and NOTHING is unimplemented `[V]` 2026-08-31
+
+Ronny chose "build the trap fixture" over skipping the two `*_CannotBeDriven_HardFail` tests. Step 1
+was to ask the real B30 what `ENTT` and `RETT` actually consult, rather than seeding the microword
+engine from the FUNCTIONAL engine's requirement list. `EnttReadTraceDiagTests` (new) drives each
+routine from its `.LABE` entry with nothing seeded, so every address it touches is a dependency it
+revealed rather than a value we chose.
+
+### Headline: both routines EXECUTE. There is no missing microword.
+
+```
+    ENTT  from CS 0o673   ran 400 ticks, budget exhausted        (no exception)
+    RETT  from CS 0o710   ran 194 ticks, ended "Opcode 0 at P=00000000 has no entry"
+```
+
+RETT's stop is the expected end - it completed the return and then tried to execute at the unseeded
+`P=0`. **Neither routine hit an unimplemented field.** So the microword side needs no new
+implementation for item 6b, only seeding. That is a much smaller job than the hard-fail messages
+implied.
+
+### RETT writes exactly the `struct pcb` trap fields - independent confirmation of the layout
+
+```
+    CS 14436: [000000BB] w1 := 0      pcb_ith    <- CLEARS THE IN-TRAP-HANDLER FLAG
+    CS 14447: [000000BC] w4 := 0      pcb_tos
+    CS 14450: [000000C0] w4 := 0      pcb_ll
+    CS 14451: [000000C4] w4 := 0      pcb_hl
+    CS 14452: [000000B6] w4 := 0      pcb_tha
+    CS 14457: [000000A6] w4 := 0      pcb_mte1
+    CS 14460: [000000AA] w4 := 0      pcb_mte2
+```
+
+Every one is a field start in the layout carved in sections 116/125, and `[0xBB] := 0` is the manual's
+*"clears the trap bit"* (Ref 6.4/13.11) happening in front of us. **This is the layout confirmed from
+a completely different direction** - previously from `pcb.h`, the `LOADCT_*` routines and the
+place-domain write addresses; now from RETT's own stores.
+
+Before those writes, RETT READS a contiguous block at `0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C,
+0x30, 0x34, 0x38, 0x3C, 0x40 ...` - the saved register block it restores, one word each.
+
+### ENTT reads the flag the functional engine keeps in a property
+
+```
+    CS 13742: [000000BB] r1     pcb_ith    the in-trap-handler flag
+    CS 13744: [000000BA] r1     pcb_md
+    CS 13762: [0000009A] r4     pcb_ote2
+```
+
+**This is why the microcode was asked first.** The hard-fail messages list the context as
+`pcb.InsideTrapHandler + PendingTrapNumber/TrappingPC/ResumePC + THA`, which is the FUNCTIONAL
+engine's model - C# properties. The microword engine has no such properties; it reads bytes out of
+the PCB in memory. Seeding it from the functional list would have been seeding one engine from the
+other engine's model, and `pcb_md` (0xBA) - which ENTT reads and the functional list does not mention
+at all - would have been missed.
+
+### The measured seed set for step 2
+
+ - a PCB at a known base, with `pcb_ith` (0xBB) SET, plus `pcb_md` (0xBA) and `pcb_ote2` (0x9A);
+ - `pcb_tha` (0xB6), since RETT restores through it;
+ - a populated saved-register frame at `0x14` upward;
+ - on the functional side the same state expressed as `pcb.InsideTrapHandler`,
+   `pcb.PendingTrapNumber`, `pcb.TrappingPC`, `pcb.ResumePC`, `regs.THA`.
+
+The two sides must be seeded to the SAME machine state through two different doors. That is the real
+content of step 2, and it is now specified by measurement rather than by reading one implementation.
+
+### Honest gap
+
+ENTT exhausted its 400-tick budget rather than terminating, so with a zero PCB it does not complete.
+Whether that is a loop or simply a long routine is **not established** - the budget was a guard
+against a hang, and a guard that fires tells you it fired, not why. Step 2 seeds it properly and
+will answer that as a side effect; until then, no claim either way.
+
+## 141. Trap fixture step 2: the oracle can now seed trap context - ENTT still refuses `[V]`/`[OPEN]` 2026-08-31
+
+`MacroInstructionOracle.TrapSeed` added, and both `*_CannotBeDriven_HardFail` tests are gone,
+replaced by `Entt_EstablishesTrapFrame_BothEnginesAgree` and `Rett_TrapReturn_BothEnginesAgree`
+which actually EXECUTE the instructions. **Both are still red, but they are now red with a
+measurement instead of red with a refusal**, which is the whole point of the change.
+
+### What the seed does
+
+One `TrapSeed` describes the state once and reaches each engine through the door it actually uses:
+ - MICROWORD: PCB bytes into memory - `pcb_ith` (0xBB) := 1, `pcb_md` (0xBA), `pcb_ote2` (0x9A),
+   `pcb_tha` (0xB6), `pcb_mte1` (0xA6) - because that is literally where it reads them (section 140).
+ - FUNCTIONAL: `GetPCB(0).InsideTrapHandler/PendingTrapNumber/TrappingPC/ResumePC` + `regs.THA`.
+
+`pcb_md` is in the seed ONLY because the microcode read it; it appears nowhere in the functional
+engine's model, and a fixture written from `Entt.cs` would have left it zero silently.
+
+### RETT: it RUNS. The failure is the harness, not the instruction.
+
+```
+    Opcode 0 (octal) at P=00000000 has no entry in the reconstructed dispatch map
+```
+
+RETT executed, restored from the frame, and returned to `P=0` because the saved-register block was
+never seeded - then the harness tried to fetch there. The fix is to seed the frame at `0x14` upward
+(the block the read trace showed RETT restoring) with a resume PC pointing at a decodable NOOP.
+**Nothing here suggests a defect in RETT.**
+
+### ENTT: parks in the idle loop, and the likely cause is a POLARITY I have not verified
+
+```
+    macro instruction did not retire within 4096 microwords (parked at CS 16555)
+```
+
+Parking in DUMMY is the microcode's "this is not valid here" path, so ENTT rejected the seeded
+context. The seed is at the right addresses - the unseeded trace read `0x9A/0xBA/0xBB` absolute,
+which is PCB base 0, and that is where the cells are written.
+
+**Leading candidate, explicitly NOT yet verified: `pcb_ith` polarity.** `Entt.cs` requires
+`pcb.InsideTrapHandler` to be TRUE before ENTT will build a frame. The microcode may want the
+opposite - `ith` clear meaning "not yet in a handler, so entering one is legal", with ENTT itself
+being what SETS it. RETT clearing `ith` to 0 on the way out (section 140) is consistent with either
+reading, so it does not settle it.
+
+This is exactly the shape the project rules warn about - an `INVSEQ`-style polarity that reads
+fluently both ways. **It is one bit and it is measurable**: re-run the read trace with `ith` seeded
+1 and then 0, and see which one leaves the DUMMY loop. Do that before touching anything else; do not
+pick the polarity that makes the test pass and call it verified.
+
+### State
+
+Suite: **757 passed / 2 failed / 3 skipped of 762** - the same 2 count as before, now attached to
+tests that execute real instructions. Steps 1 and 2 of item 6b are done; step 3 is the frame seed
+plus the polarity measurement.
+
+## 142. ENTT: three candidate gates REFUTED, and the git history names the real mechanism `[V]`/`[OPEN]` 2026-08-31
+
+Ronny's steer - *"talk to the 500 LLM about this, i think he changed entt"* - was right, and the
+repository history says so. Recording the refutations first because they cost the most.
+
+### The measurement: a 2x2x2 matrix, all eight cells IDENTICAL
+
+ENTT driven as a REAL instruction (opcode bytes at P, normal fetch from the NoopEntry prologue) on
+the microword CPU:
+
+```
+    bytes   BC CF 00 00 00 40 CF 00 00 01 00
+    inputs  pcb_ith in {1,0} x pcb_pia in {absent,set} x pending-call interlock in {absent,armed}
+
+    ALL EIGHT:  48 writes,  ZERO writes into the trap frame at THA+256,
+                parked at CS 0o17461 (ith=1) / 0o17453 (ith=0), never retires in 4096 microwords
+```
+
+Only `ith` changes the park ADDRESS; nothing changes the OUTCOME. **So none of the three is the
+gate.** A probe that returns the same answer for every input has not measured the input - and the
+constant 48 writes across all eight suggests ENTT is not reaching its frame-building path at all.
+
+What it does instead is build a trap record:
+
+```
+    CS 13237: [00000894] w4 := 0000700B     P just past the 11-byte ENTT
+    CS 13241: [00000898] w4 := 00000002
+    CS 13202: [0000089C] w4 := 00000023     0x23 = 35 = ISE (Instruction Sequence Error)
+```
+
+The MICROCODE agrees with `Entt.cs`, which documents "ISE if not in trap handler context".
+
+### The mechanism, from the history rather than from more guessing
+
+`fa0864920` *"ND500: keep the CALL/ENT* sequence interlock across a trap-and-restart"* says it
+outright:
+
+ - **"The save now happens in ENTT"** - ENTT is part of the CALL/ENT* sequence-interlock machinery,
+   saving into a CPU-wide ring keyed on the trap frame address (THA+256).
+ - the ENT* instructions committing after a fault meant **"the retry then raised a false ISE"** -
+   the same 0x23 this probe records.
+ - and it cites the terminal microwords that invalidate the sequence flag:
+   `ENTS_END @004206` and `ENTSN_3 @004254 ... C,SEQ ... F,RETURN INVSEQ`.
+
+So ENTT's legality is gated by the **sequence interlock**, exactly as ENTSN's was - and ENTSN only
+became drivable when the oracle gained `pendingCallReturn`. That is why no amount of PCB seeding
+helps: the gate was never a PCB field.
+
+**But arming the PENDING-CALL form of the interlock did not satisfy it either** (cells 5-8 above).
+So ENTT wants the interlock in the state a **trap dispatch** leaves, which is not the same as the
+state a CALL leaves, and I do not yet know how to express that without running a real trap.
+
+### Two instrument corrections from this round, both mine
+
+ - My first probe entered at the microcode entry (CS 0o673) with no instruction in memory, so ENTT
+   got operands no real fetch would produce. **Both polarities came back with the same idle loop**,
+   which I nearly read as "polarity refuted" when it actually meant "the probe is not measuring".
+ - I printed the trap number by READING `[0x89C]` after the run and got `0x0`. The write log shows
+   `:= 00000023` and then `:= 00000000` later in the same run - **the microcode clears it**. Reading
+   a latch after its consumer cleared it, which is taxonomy #19 for the third time this week. The
+   write log is the truth; a post-hoc read of a transient cell is not.
+
+### Status and what is asked of the other lane
+
+Asked `nd500uc-d4` directly whether they changed ENTT, the ISE path, or the trap-context gate -
+they own the commits above. If the contract moved, my seed set is built against the old one and no
+seeding will satisfy it. **Not touching engine code pending their answer.**
+
+Item 6b step 3 is therefore blocked on a question, not on effort. RETT remains the easy half: it
+executes correctly and only needs its saved register block seeded.
+
+## 143. The ENTT gate is an INTERNAL condition, confirmed on B30 - and section 142 made a category error `[V]` 2026-08-31
+
+### CORRECTION to 142 first
+
+Section 142 said the git history "names the real mechanism" and pointed at `fa0864920`, a change to
+the FUNCTIONAL `CpuND500`. **That reasoning is a category error**: the measurement was made on the
+MICROWORD engine running the real B30, and the microcode wrote the `0x23` itself. No edit to
+`Entt.cs` can move what the microcode does. The peer holds no ENTT edits this session either, so
+Ronny's recollection of an ENTT change is real but belongs to the functional side and is a red
+herring for this fixture.
+
+The interlock IDEA in 142 was right; the provenance was wrong. Corroboration between the two engines
+is not a shared gate that someone could have moved.
+
+### The gate, carved on B30 - `COND,SAVC1`, and it is not addressable from memory
+
+```
+    000673  ENTT       A,ALU,REG37 ... G,OPS READ ADACT ORCON=04      fetch operand 1
+    000674             A,ALU,REG37 ... READ ADACT ORCON=04            fetch operand 2
+    000675             ALU,A+B A,BM10 B,SC7 D,DAC,DPA -> ENTT1        DPA := SC7 + 256
+    014042  ENTT1      ... C,SEQ T,JMP COND,SAVC1 -> ENTT2            THE GATE
+    014043             ... -> TRAP_ISE                                 the refusal
+    014044  ENTT2      ... proceeds (ENTT_REGS @014046 -> SAVEREG)
+```
+
+`ENTT1` tests **`COND,SAVC1`**. True goes to `ENTT2` and the body; false falls through one word to
+**`TRAP_ISE`** - which is the `0x23` = 35 = ISE the probe recorded. `SAVC1` is an INTERNAL saved
+condition, not a PCB field and not a memory cell, so **no seeding of `pcb_ith`, `pcb_pia` or the
+pending-call state can ever set it.** That is exactly why all eight matrix cells came back identical:
+a gate you cannot address from memory looks precisely like a gate you have not found.
+
+### It matches the classic store, in a different encoding
+
+The peer carved `CONT-STORE-10611` independently and found the same shape: ENTT at `000330B` tests
+**`AM#37`**, branching to the body at `011640B` or to `002353B` which ORs a bit into S2 and jumps to
+the trap-entry PROM at `000627B`. `AM#37` is likewise internal - zeroed by the microcode at
+`002346B` beside the CALL bookkeeping. **Our own memory note already said it**: *"AM#37 = the
+CALL-in-flight interlock ... 0 = CALL in flight"*. Another instance of a note we owned naming the
+answer before we measured it.
+
+So both generations gate ENTT on "did I ARRIVE here from a CALL/trap entry sequence", not on any
+stored flag.
+
+### The frame base agrees three ways
+
+B30 `000675` computes `DPA := SC7 + BM10`, and by the octal-bit-position rule `BM10` = bit 8 = 256,
+so the frame is at `SC7 + 256`. The classic body's first word is `AL#7 + BM#10` with `AL#7` the
+trap-vector base - the same `THA + 256`. **The instrument was pointed at the right address**; only
+the gate was wrong. Worth stating plainly, because "no writes at the right address" is easy to
+misfile as "wrong address".
+
+### What this makes step 3
+
+ENTT cannot be seeded into legality; it must be ARRIVED at. The fixture has to drive an instruction
+that genuinely traps, let the microcode take its trap entry and set the condition, and execute ENTT
+as the handler's first instruction. That is a bigger fixture than a seed, and it is the only honest
+one - a `SAVC1` forced from outside would prove nothing about the path SINTRAN actually takes.
+
+RETT is unaffected and remains the easy half.
+
+## 144. RETT drives, and the fixture immediately found ONE real divergence `[V]` 2026-08-31
+
+`Rett_TrapReturn_BothEnginesAgree` now executes RETT on BOTH engines from a seeded trap frame. It is
+red on exactly one difference, which is what a working oracle looks like.
+
+### First, the base had to be measured - both candidates were zero
+
+The original read trace showed RETT restoring from 0x14, 0x18, 0x1C ... and it was tempting to read
+that as "B+20 onward", matching the ENTT layout comment. **But that trace ran with B = 0 AND
+THA = 0**, so "B-relative" and "THA+256-relative" predict identical addresses. Re-run with
+B = 0x2000 and THA = 0x5000:
+
+```
+    CS 14360: [00002014] r4      CS 14361: [00002018] r4      CS 14362: [0000201C] r4
+    ... contiguous to [0000205C]
+```
+
+**B-relative, decisively.** Seeding the frame at THA+256 would have made RETT restore zeros, and
+that would have read as a RETT defect rather than a fixture mistake.
+
+### Then two "divergences" that were MY INSTRUMENT, not the engines
+
+The first run reported three differences, including:
+
+```
+    mem[BB]=00000001!=00000000        pcb_ith
+    mem[B6]=00005000!=00000000        pcb_tha
+```
+
+which reads as "the functional engine fails to clear the trap bit". **It does clear it - in its
+object.** The two engines store this state in different places: the microword engine in the PCB in
+memory, the functional engine in a `ProcessControlBlock` field. After RETT, memory 0xBB holds the
+microword engine's REAL state and only the functional engine's STALE SEED.
+
+**Only a cell BOTH engines write for the same reason can be compared**, and PCB fields are not that.
+Removed from `memCheck` with the reasoning recorded at the call site. This is the dual-storage
+version of the same lesson as the MON-call decoration in section 139: an assertion that compares
+things the two lanes express differently manufactures divergences.
+
+### What is left is ONE genuine divergence, in a register both engines have
+
+```
+    RETT micro B = 0x00002000        (unchanged - did NOT restore B from the frame)
+    RETT functional B = 0x00000000   (restored B from the frame slot, which is zero)
+```
+
+Ref 6.4 / 13.11 describes RETT as restoring the saved block with `arg2 -> P, arg3 -> L, arg4 -> B`,
+which is what the FUNCTIONAL engine did. The microword engine left B alone.
+
+**Not adjudicated, and deliberately not guessed.** The project authority rule puts the real B30 above
+the manual, so "the manual says arg4 -> B" does not settle it. The next step is to carve RETT's
+microwords from `000710` and find whether any of them has a B destination at all - if none does, the
+microword behaviour is correct-by-construction and the functional engine is over-restoring.
+
+P differs by one (0x6001 vs 0x6000) and is EXCLUDED from the semantic diff - that is the known
+prefetch/step-boundary artefact, not a finding.
+
+### Status
+
+Suite: **757 passed / 2 failed / 3 skipped of 762**. The two reds are now
+`Entt_EstablishesTrapFrame_BothEnginesAgree` (blocked on the `SAVC1` gate - must be ARRIVED at, see
+section 143) and `Rett_TrapReturn_BothEnginesAgree` (this one real divergence). Both are red for
+reasons that are understood and written down, which the original hard-fails never were.
+
+## 145. RETT does NOT restore B on the real B30 - carved exhaustively `[V]` 2026-08-31
+
+Section 144 left one divergence: the microword RETT leaves `B` alone, the functional RETT restores it
+from the frame. Ref 6.4 / 13.11 says `arg4 -> B`, which favours the functional engine - but the
+project authority rule puts the real B30 above the manual, so the microcode was asked.
+
+### The question is decidable because B has exactly ONE write port
+
+`OperandRouter.cs` already carries the carve, from the 2026-07-23 B-maintenance fix:
+
+> B is written ONLY through dest 228 (`D,DAC,REG04`) in the whole B30 image (**8 words**);
+> `D,DAC,B` (226) and `D,DAC,SUMB` (227) are NEVER used.
+
+So "does RETT restore B?" reduces to "is any of those 8 words in RETT, or reachable from it?" - a
+question with a finite, checkable answer rather than a judgement.
+
+### All eight B-writers, and where they live
+
+```
+    LOADB           the LOADB instruction
+    000772          LOAD_L path
+    004366          RET_2
+    004407          RET_2
+    004452          RET path
+    LOADCT_B  011135   <- referenced only from 011066, the CNTXTLOAD chain
+    LOADRB_B  011540   <- referenced only from 011425, the LREGBL register-block chain
+    014755          CNTXTLOAD
+```
+
+**RETT occupies `014347` (RETT1) through `014514` (RETT_END). Not one of the eight is in that range**,
+and the two register-block loaders that could plausibly have been called are each referenced from
+exactly one site, neither of them in RETT.
+
+### Two independent confirmations, which is the point
+
+ - **CARVED:** no B write port is executed on the RETT path.
+ - **MEASURED:** in the live oracle run the microword engine's `B` stayed at the seeded `0x2000`
+   while the functional engine's became `0`.
+
+The carve explains the measurement rather than merely agreeing with it, which is the difference
+between corroboration and coincidence.
+
+### So the divergence is real and it is the FUNCTIONAL engine that moves
+
+`CpuND500`'s RETT restores B from the frame slot; the real B30 does not restore B at all. The manual
+text `arg4 -> B` describes the saved BLOCK's layout, and section 140's read trace confirms RETT does
+READ that whole block (`B+0x14` through `B+0x5C`) - it just does not route the B slot to the B
+register. **Reading a slot and installing it are different acts, and the manual sentence does not
+distinguish them.**
+
+### NOT fixed - this is an adjudication, not a bug report
+
+The project rule for a cross-engine divergence is explicit: surface both states with the citation and
+let Ronny call it; do NOT auto-trust either CPU. Both engines are under development and "the
+microcode is authoritative" does not by itself mean the functional engine's behaviour is unwanted -
+it may be deliberately modelling what SINTRAN or NDIX needs. Asked rather than changed.
+
+### 145a. Adjudicated: microword right, functional engine changed `[V]` 2026-08-31
+
+Ronny called it - the real B30 is authoritative, so `Rett.cs` no longer assigns `regs.B = savedB`.
+The READ of `savedB` stays (it is logged, and reading the slot is faithful to the microcode); only
+the assignment is gone, with the eight-writer enumeration recorded at the site so nobody restores it
+from the manual sentence.
+
+**Baseline taken BEFORE the edit, deliberately:** `Emulated.Tests.ND500` was
+**2264 passed / 0 failed / 13 skipped of 2277** - fully green. Any red after the edit is therefore
+attributable, which is the whole reason to measure first rather than after.
+
+**A near-miss worth recording:** the first attempt to apply this patch silently did nothing - the
+file is CRLF and the patch text was LF, so `str.replace` matched nothing. The test run that followed
+reported **the same 2264 passed**, and I nearly read that as "the change is safe". It was the
+BASELINE run a second time, against unmodified code. That is memory note #10 exactly - measuring code
+you are not running - and the only thing that caught it was the patch script asserting its own match
+count and printing the failure. **An edit that reports success without asserting it landed is not an
+edit.** `git diff --stat` afterwards (29 insertions, 2 deletions) is the confirmation that the second
+attempt was real.
+
+## 146. The classic lane RUNS - and its two causes do NOT transfer to the octobus lane `[V]` 2026-08-31
+
+The classic lane reports the linkage loader running for real:
+
+```
+    N500: place-domain (210319H02-XX-01D:FLOPPY-USER)LINKAGE-LOAD-H02
+    > Loading Control Store / > Loading Swapper / > Allocating memory - 7116B pages
+    N500: run
+    ND-Linkage-Loader -  H.02   3. March 1988
+    Nll:
+```
+
+with trap counters `attempted=62 posted=62 lastTrapNumber=38` (page fault), 2092 messages and 64
+starts - a system servicing real faults, not the all-zero placeholder of this morning.
+
+### Their two causes, and I CHECKED rather than assumed
+
+ 1. the harness attached no ND-500 CPU before PLACE-DOMAIN (placement loads AND STARTS the swapper);
+ 2. a `DEFINE-SWAP-FILE` **definition does not survive a cold start** - the pack carried the swap
+    FILE, the DEFINITION was what was missing, and their harness cold-starts every run.
+
+**Neither applies to the octobus lane, verified in our own harness rather than reasoned about:**
+
+ - `Nd100SintranNd5000OctobusBootHarnessTests.cs:368` calls `AttachNd5000Cpu` in SETUP, and the boot
+   to `SINTRAN III RUNNING` is at line 1534 - the CPU is attached long before any command.
+ - `define-swap-file` and `place-domain` already run in ONE monitor session here (the comment at
+   line 2157 records the earlier shape that exited between them, and why it was changed).
+
+So **their fix does not explain our `> Loading Swapper` stall**, and it must not be filed as though
+it does. The temptation to adopt a neighbouring lane's root cause is exactly the shape that produced
+the `NOT KNOWN TRAP` false convergence in section 132.
+
+### A retraction that touches our record
+
+Their install document had called the 5SWAP protect violation *"a pre-existing emulator-side
+defect"*. It is **no longer reproducible**, and both causes were outside the emulator. Our own table
+at line 526 describes that trap as dying in a *"known, carved way"*, which a later reader would take
+as an understood ENGINE defect. **Annotated in place** with the correction: the address and the trap
+are still correctly measured; treating them as a property of the engine is what was wrong.
+
+### Their negative-result correction, which is our taxonomy in someone else's words
+
+The `nd500-apps` skill asserted *"No vendor install sheet exists for the linkage loader (210319) -
+all 290 Installation-Description sheets searched."* Both halves honest, conclusion false: the search
+covered ONE SET, and *"not in that set"* hardened into *"does not exist"*. The install document
+exists, and so does the installer program on the floppy - one `@LIST-FILES` of the media would have
+shown it. **A recorded negative must name the sets it searched.** Same family as RULE #0b's "a search
+that finds nothing is evidence about your pattern".
+
+### Two instrument traps from their day, both worth carrying
+
+ - **`LIST-DOMAIN` at the `Nll:` prompt describes the description file THE LOADER IS USING** - the
+   floppy it was placed from - not the pack being repaired. It printed byte-identical lists before
+   and after `COPY-DOMAIN` in two runs, and nearly became "the copy registered it". Reading the
+   exported image with `ndfs` settled it. This is failure #19 again: right value, wrong object.
+ - **A probe placed BEFORE its own preconditions measures the setup, not the subject.** Theirs ran
+   with no CPU and no swap file and faithfully reproduced two known defects while looking exactly
+   like a fact about the pack.
+
+Nothing here needs action from this lane, and the PST zero-entry item stays open and untouched.
+
+### 145b. PROCESS FAILURE: shared engine code changed while a peer had a run in flight `[V]` 2026-08-31
+
+`Rett.cs` lives in `Emulated.HW`, which BOTH lanes execute. It was edited at 16:35; the classic lane
+built at 16:53 and was told at ~17:05. **The warning went out after the change had already been
+picked up, and the correct order was to ask BEFORE touching it.**
+
+Cost: their in-flight run was meant to be a clean repaired-pack comparison against the morning's
+baseline, and it now carries an engine change that had never executed on that lane. A real cost to
+someone else's measurement, not a hypothetical one.
+
+**What was applied and what was missed.** Shared-tree hygiene here has two halves - stage only your
+own files, and coordinate before touching shared code. The staging half was applied; the
+coordination half, which is the one that matters when a peer has a run going, was not. Adjudication
+by Ronny covered WHETHER to make the change, not WHEN.
+
+**Asymmetry the confound creates, worth stating because it decides how to read the result:** if their
+run still reaches `Nll:`, that IS good evidence - 62 posted traps with `lastTrapNumber=38` is a real
+fault-servicing workload on the other engine, worth more than one hand-built frame. If it REGRESSES,
+the result is ambiguous, because the repaired pack and the engine change moved together. **A pass is
+informative; a fail is not**, and a fail must not be read as "RETT broke it" without an isolation
+run. Reverting the single assignment is a one-line experiment and stands offered.
+
+### And an instrument note against this session
+
+The background suite runs `... | Select-String ... | Select-Object -Last 12`, which **buffers the
+entire output until the process exits**. The log file is therefore empty for the whole run, and
+"still working" is indistinguishable from "hung" by looking at it. Not a wrong measurement - a
+progress instrument with no progress in it, which cannot report until it no longer needs to. Four
+reads of an empty file is the tell.
+
+## 147. The RETT change is RED - the carve holds and the change still broke 12 tests `[V]` 2026-08-31
+
+```
+    BEFORE   Emulated.Tests.ND500   2264 passed / 0 failed / 13 skipped of 2277
+    AFTER    (regs.B = savedB removed)  2252 passed / 12 FAILED / 13 skipped
+```
+
+Attributable, because the baseline was taken BEFORE the edit. **Reverted** - known-bad code in a
+shared tree outranks a diagnostic run - and the change is parked as a patch rather than discarded.
+
+### The carve was INDEPENDENTLY RE-DERIVED and it survives
+
+The classic lane enumerated `D,B` writers on `CONT-STORE-10611`: **twelve**, not eight - a different
+image, a different encoding, a different count, no shared prior carve. RETT there is dispatch entry
+`000337B` with its body at `011737`, and the nearest writer `011730` is SEVEN WORDS EARLIER, in a
+block that ends `011736/ JMP 2255`. They read `011737-011775` word by word: the body swaps
+`AL#17/AM#14..AM#17` into `AM#30..AM#34` and straight back, and contains no `D,B` at all.
+
+**So on both generations the hardware has no path to restore B in RETT.** That claim stands.
+
+### Two facts that only matter together
+
+The carve is right AND the change broke twelve tests. That kills two of my four candidates
+(the enumeration is not wrong; "not in RETT's range" is not wrong) and leaves the fourth:
+
+> **the functional engine's B restore is COMPENSATING for something genuinely missing elsewhere.**
+
+Which would make the carve correct and the change **premature** - a different repair from reverting
+and forgetting. The twelve failures would then be pointing at the missing thing, not at RETT. The
+first name to surface was `Ents_PendingCall_SurvivesPageFaultTrapAndRett`, which is about the
+CALL/ENT sequence interlock surviving a page-fault trap - the same interlock as `fa0864920`. That is
+a lead, not a finding: **the run that produced it straddled the revert, so I cannot say which tree it
+built against, and it has been stopped rather than quoted.**
+
+### A NEW taxonomy entry, and it is not one of the nine
+
+The peer's words, and they are the sharpest thing produced today:
+
+> **Agreement is only worth something when the two sources have DIFFERENT blind spots. Mine had
+> yours.**
+
+Their re-derivation checked the link I was MOST confident about - the address-range step - and left
+untouched the three I had listed as suspect: the provenance of the eight-writer count, whether B30's
+RETT leaves its `.LABE` span, and "implausible" standing in for "enumerated". **Two confirmations of
+one step is not two confirmations.** Every existing taxonomy entry is about one instrument lying;
+this is about two instruments agreeing for a reason unrelated to the truth of the claim.
+
+And their `011730` point is the concrete warning: seven words before the entry is close enough that
+an address-range argument flips on a small error in the span. My B30 argument rested on exactly that
+comparison. **Read the words, do not compare the ranges.**
+
+### The line worth keeping
+
+*A structural argument feels decisive in a way an agreeing run does not, and that is precisely what
+made me stop looking.* The arguments that END a search are the ones that most need a second,
+differently-blind measurement.
+
+### Process
+
+Two coordination failures today, in opposite directions, both mine to avoid next time: shared code
+edited while a peer had a run in flight, and then reverted while their reply saying "do not revert"
+was in transit. The peer killed their run (it also held `D:\rc-bin\out` and would have blocked a
+clean rebuild). Tree is at HEAD; **no further `Emulated.HW` edits until their clean run lands.**
+
+## 148. Why removing RETT's B restore breaks things: the hardware restores B via LREGBL, not RETT `[D]` 2026-08-31
+
+Found read-only, while waiting for the coordination window - no shared-tree access needed. Graded
+`[D]` because the account is assembled from three sources that each check out, but the twelve names
+are not yet captured.
+
+### The one confirmed failing test is NOT a "manual says arg4 -> B" test
+
+`TestND500_EntsPendingCallSurvivesTrap.cs` (3 tests). Its subject is the CALL/ENT* sequence
+interlock surviving a trap, and its own header states the microcode oracle plainly:
+
+> the interlock is REAL hardware (microword `C,SEQ` / `INVSEQ`; CALL @000646 + CALLG @000652 set it;
+> ENTD @000660 -> `INS_SEQ_ERR` @003141 reads `IDU,STS`) so the check must NOT be deleted.
+
+It seeds `regs.B = OldB`, runs CALL -> ENTS -> page fault -> trap -> handler -> RETT -> retried ENTS,
+and asserts `regs.B == NewB` - *"ENTS must have switched B to the new frame"*. **B must be correct
+after the trap return for the retried ENTS to build the right frame.**
+
+So this falls on the peer's stronger branch, not the weak one: it depends on B being right AFTER a
+trap return, rather than asserting `arg4 -> B` directly. Twelve tests of that shape would be twelve
+dependencies, not one belief counted twelve times. (Still to confirm across all twelve names.)
+
+### And the missing restore path was in the enumeration all along
+
+Of the eight B-writers on B30, one is **`LOADRB_B` @011540, referenced from `011425` - the LREGBL
+register-block-load chain.** I had dismissed that as "not reachable from RETT", which is TRUE and
+beside the point.
+
+`fa0864920`'s own text says where the real trap return goes:
+
+> under NDIX the restore never runs at all: `machine/locore.c` trapex ends every kernel trap handler
+> with **`lregbl $CNTXMASK,r3`**, not RETT.
+
+**That is the answer.** On real hardware the handler restores the register block - B included - with
+an explicit `LREGBL`, which HAS a B write port. RETT does not need one and does not have one. The
+two facts fit together instead of contradicting:
+
+```
+    RETT      restores P, L, status, trap flag ... and NOT B   (no write port - carved, twice)
+    LREGBL    restores the register block INCLUDING B          (LOADRB_B @011540)
+```
+
+### So the change was CORRECT ABOUT RETT AND PREMATURE AS A CHANGE
+
+Our functional engine's tests return through RETT alone and never model a handler doing an `LREGBL`.
+Removing RETT's B assignment therefore leaves B unrestored on the only path those tests have. The
+assignment was **compensating for an unmodelled `LREGBL` restore** - which is the fourth hypothesis,
+now with a named mechanism rather than a shrug.
+
+### What this makes the actual repair
+
+Not "put the assignment back and forget", and not "remove it and fix twelve tests". The question is
+whether our trap-return path should model the handler's register-block load. Until it does, RETT's B
+assignment is load-bearing scaffolding and **must stay** - with a comment saying so, because the next
+person to carve the microcode will reach exactly the same "RETT has no B port" conclusion and remove
+it again.
+
+**That comment is the deliverable from this whole episode**, more than the code change either way.
+
+### 148a. Corroborated on the classic image, and THIS time on a different link `[V]`/`[D]` 2026-08-31
+
+On `CONT-STORE-10611`, B's write port at `010425` is not a standalone instruction. It sits inside a
+computed-index REGISTER-WRITE DISPATCH TABLE entered by `JMPREL`:
+
+```
+    010421/ JMPREL ;                                    <- relative jump on a computed index
+    010423/ ALU,ADIR A,AM#20 D,DP   JMP 10460 ;
+    010424/ ALU,ADIR A,AM#20 D,L    POPRET ;
+    010425/ ALU,ADIR A,AM#20 D,B    POPRET ;            <- B
+    010426/ ALU,ADIR A,AM#20 D,R    POPRET ;
+    010427/ ALU,ADIR A,AM#20 D,X#0  POPRET ;
+    010430/ ALU,ADIR A,AM#20 D,X#1  POPRET ;
+```
+
+with `010412/010413/010416/010417` doing the same for `AM#15`, `AM#14`, `AM#11`, `AL#11`.
+
+**`[V]`**: a contiguous run of single-word "write `AM#20` into register N, then `POPRET`" entries
+covering L, B, R, X0, X1, entered by `JMPREL`.
+**`[D]`**: that this table is what a register-block restore drives, indexed by register number. No
+caller has been traced from a classic trap handler, so the mechanism is strongly indicated rather
+than carved end to end.
+
+**Why this corroboration counts and the previous one did not.** The earlier classic-side check
+re-derived the ADDRESS-RANGE step - the link this lane was most confident about - and was recorded as
+independent when it was not. This one checks a DIFFERENT question: whether B has a generic
+register-load path distinct from RETT. Different image, different link, genuinely different blind
+spot.
+
+### The comment that is the actual deliverable
+
+The peer's wording, adopted, because it names the correct-but-insufficient argument explicitly:
+
+> **DO NOT DELETE** on the strength of *"RETT has no B write port"* - that is TRUE and NOT
+> SUFFICIENT. Real hardware restores B via `LREGBL` in the handler, which our tests do not model, so
+> this assignment stands in for that until they do.
+
+A comment that only asserts the conclusion gets deleted by the next person who proves the premise.
+A comment that names the premise AND says why it is insufficient is the only kind that survives
+someone who has just proved it - and two of us proved it independently within hours today.
+
+### Counting caution to apply to the names
+
+Three of the twelve failures live in one file. **Count FILES as well as tests** before treating
+twelve as twelve independent pieces of evidence - clustered failures are one dependency observed
+repeatedly, which is the same shape as "one belief counted twelve times" in a different disguise.
+
+## 149. All twelve names, and they refute the weak reading `[V]` 2026-08-31
+
+Window taken and closed. **Provenance checked as agreed: `Rett.cs` 17:02:18, `Emulated.HW.dll`
+17:03:00** - the binary was built AFTER the source edit, so this run measured the patched code. Both
+of us had already been burned once by a binary that did not contain what its source did.
+
+```
+    Ents_PendingCall_SurvivesPageFaultTrapAndRett
+    Test_NCA06_Exit_Command            Test_NCA06_Help_Command
+    CompileHelloMode_ProducesTheSameNrfAsTheCEmulator
+    LinkHelloMode_ProducesTheSameDomAsTheCEmulator
+    CpuStat_DecodesOurMachineIdentityCorrectly
+    SystemTool_CPU_STAT   SystemTool_CAT_500   SystemTool_NC_CCompiler
+    NC_LoadAndShowPrompt  NC_SendHelpCommand   NC_SendHelpCommandTwice
+```
+
+### FIVE files, not one - the counting caution mattered
+
+```
+    TestND500_EntsPendingCallSurvivesTrap.cs   1
+    TestDOMExecution_MonitorCalls.cs           3
+    TestMON_CompilePath.cs                     2
+    TestMON_RealProgramRun.cs                  3
+    TestNC_InteractiveInput.cs                 3
+```
+
+**Only ONE is a trap-semantics test. The other eleven are REAL PROGRAM EXECUTION** - the NC-A06 C
+compiler failing to reach its prompt or answer HELP, CPU-STAT, CAT-500, and the byte-exact compile
+AND link against the C emulator (3m42s and 4m12s runs). **Not one asserts `arg4 -> B`.**
+
+So the "one belief counted twelve times" alternative is REFUTED rather than merely unlikely. They
+break because after a trap return B is wrong and the retried ENTS builds the wrong frame - exactly
+what an unmodelled `LREGBL` predicts, which turns section 148 from `[D]` to strongly evidenced.
+
+### What is in the tree
+
+`regs.B = savedB;` restored at line 248 with a 37-line comment above it. **Behaviour identical to
+HEAD**; the build is green. The comment leads with the trigger rather than the conclusion:
+
+> *DO NOT DELETE THIS ON THE STRENGTH OF "RETT HAS NO B WRITE PORT" - that statement is TRUE, and it
+> is NOT SUFFICIENT.*
+
+then carries both enumerations (8 writers on B30 with RETT's span, 12 on classic with the body read
+word by word), the `trapex`/`lregbl` quote, the classic `JMPREL` register-write table, the
+2264 -> 2252/12 measurement with the five-file breakdown, and the actual repair: **model the
+handler's register-block load, and only then remove this.**
+
+### Two taxonomy rows from today, both where every individual step was correct
+
+ - **AGREEMENT WITHOUT INDEPENDENT BLIND SPOTS.** Two sources confirming the same LINK is one
+   confirmation. The classic-lane re-derivation checked the address-range step - the one this lane
+   was most confident about - and was nearly recorded as independent corroboration of the whole
+   chain.
+ - **RIGHT ANSWER, WRONG QUESTION.** *"Can RETT reach `LOADRB_B`?"* - no, correctly - terminated a
+   search whose real question was *"what restores B on the trap-return path?"* - `LREGBL`, in the
+   handler. **A correct answer to the wrong question is more dangerous than a wrong answer, because
+   it closes the file.**
+
+And the line this episode turned on: *a structural argument feels decisive in a way an agreeing run
+does not, and that is precisely what made me stop looking.*
+
+### 149a. Two qualifiers worth more than the finding `[V]` 2026-08-31
+
+**The tell for RIGHT ANSWER, WRONG QUESTION is that the answer arrives CLEANLY AND EARLY.** A messy
+answer keeps you looking; a clean one closes the file. Both of today's instances fit: *"can RETT reach
+LOADRB_B"* answered no immediately, and the classic lane's *"does the repaired pack resolve the
+loader"* returned a clean `NOT KNOWN TRAP` from a probe sitting upstream of its own preconditions -
+answering a different question perfectly. **Suspicion should rise, not fall, when a hard question
+resolves quickly.**
+
+**The counting caution was REFUTED, and the asymmetry is the lesson.** The warning was that three
+tests in one file might mean fewer independent failures than twelve. It came out five files with
+eleven end-to-end program runs - stronger than the raw number, not weaker. **Counting files was cheap
+and could only improve the answer whichever way it fell.** That is the profile of a check worth
+running by default: near-zero cost, and informative in both directions.
+
+**Why the comment had to name the premise.** Two agents, two images, independently proved *"RETT has
+no B write port"* within hours - both correctly - and BOTH concluded the assignment should go. A
+comment asserting only the conclusion would be read by the next person as something they had just
+disproved. **We are the evidence that a competent reader will be right about the wrong thing here.**
+
+**Scope note for the eleven:** they are the classic lane's vendor-program path - NC-A06, CPU-STAT,
+CAT-500, byte-exact compile and link. Had the removal gone in quietly, those failures would have
+surfaced later alongside a repaired pack and a fresh install, and the install would have taken the
+blame. The near-miss cost was not this lane's.
+
+---
+
+## 150. ENTT was refused by EVERY path, and the cause was two fields that answered instead of throwing `[V]` 2026-08-31
+
+**Result: ENTT now builds the trap-handler frame when arrived at through a real trap. ND-5000 suite
+765 passed / 0 failed (was 757 with 2 permanently red).**
+
+### What was measured, in the order it was measured
+
+Section 143 established that ENTT's gate is `COND,SAVC1` at `ENTT1` @`014042` and that no PCB seed
+can set it. What it did NOT establish is *what does*. A microword PATH trace answered that in one
+run - and note the shape, because the write trace could never have: a refusal writes a trap record
+and nothing else, so the addresses it touches are identical whatever refused. **The branch ADDRESS
+is the only thing that names the gate, and it names it by construction.**
+
+```
+    673 -> 674 -> 675 -> 14042 -> 14043 -> 12666 (TRAP_ISE)      SavedCond1 = 0
+```
+
+which is exactly what the raw listing predicts:
+
+```
+  014042 ENTT1  ALU,A+B A,BM10 B,SC6 D,DAC,DPA C,SEQ T,JMP COND,SAVC1 TBC,NEXT -> ENTT2 014044
+  014043         ALU,XOR A,BM00 B,X1 T,JMP COND,MSEXO TBC,NEXT -> TRAP_ISE
+  014044 ENTT2  ALU,XOR EXUC ... TBC,NEXT (no T,JMP - falls to 014045; ADDR=DUMMY is the SNEAK)
+  014045         ALU,A A,IAC,L B,X1 T,JMP -> ENTT_REGS 014046      the frame build
+```
+
+**An ENTT outside a trap handler raising ISE is CORRECT.** The opcode-dispatch entry at `000673`
+exists to catch exactly that. The legal path is a different one.
+
+### The legal path, and it was in the .LABE the whole time
+
+`TRAP_START` @`014031`, reached from `014016`:
+
+```
+  014031 TRAP_START  read pcb_tha
+  014032              READ the handler entry            <- reads THA + trapNumber*4
+  014033              D,IAC,P  + test          -> zero entry falls out to TRAP_ERR 014017
+  014034 -> DIS_IC 014657
+  014035
+  014036              G,TOOPS -> ENA_IC 014656          <- LOOK at the handler's 1st instruction
+  014037              C,SEQ T,JMP F,RETURN COND,ENTT
+  014040              T,JMP CSAVE COND,ENTT             <- THE ONLY CSAVE OF THE ENTT CONDITION
+  014041              G,COOPS -> (dispatch) -> ENTT 000673 -> 674 -> 675 -> ENTT1 014042
+```
+
+So the gate is armed by the trap machinery LOOKING at the handler's first instruction and saving
+"yes, it is an ENTT". Seeding was never going to work; arriving was always the only route.
+
+### Defect 1 - four conditions that answered `false`
+
+`Conditions.cs` had `COND,CALL` (60), `COND,ENTM` (61), `COND,ENTT` (62) and `COND,JUMPG` (63)
+falling through to a shared `return false`. All four are one-line manual entries, ND-05.022.1
+chapter 8 (echoed by `manual/mnemonics.md`):
+
+```
+  470 COND,CALL    MACROINSTR. IS CALL      0xC3
+  471 COND,ENTM    MACROINSTR. IS ENTM      0xDF
+  472 COND,ENTT    MACROINSTR. IS ENTT      0xBC
+  473 COND,JUMPG   MACROINSTR. IS JUMPG     0xB4
+```
+
+and ND-05.020.01:2432 says how the hardware answers them: *"G,TOOPS is used to test if the target
+instruction is ENTT, ENTM, etc., and it only needs IMAP information."* A decode of the instruction
+register, not a latch. New field `Registers.InstrOpcode`, published in `FetchAndDispatch` beside
+`InstrRin`/`InstrDt`.
+
+`COND,ENTER` (32) is DELIBERATELY still false and is the one place a guess would be worse than the
+gap: `manual/MICROCODE-FIELDS.md` says "ENTF/ENTM/ENTT instruction", ND-05.022.1 says "CHECK FOR
+ENT- INSTRUCTIONS", and the two readings disagree about ENTS/ENTSN/ENTB/ENTD. Its four siblings
+could be implemented precisely because each of their manual lines names ONE instruction. `[OPEN]`
+
+### Defect 2 - G,TOOPS dispatched to the instruction it was only supposed to look at
+
+`CpuND5000.cs` had `case 14: // G,TOOPS ... [D: same]` sharing `instructionFetch = true` with
+`G,OOPS`. With that, `014036` jumped straight into `000673` and **skipped `014037` and `014040`
+entirely** - so the CSAVE never ran and the gate could not be armed even with `COND,ENTT`
+implemented. Fixed with `PeekInstructionForTest()`: publish the opcode, do NOT dispatch, do NOT
+advance P. P must not advance because `014041`'s `G,COOPS` re-fetches the SAME instruction for real
+- that is how control reaches ENTT's own entry with `SAVC1` already saved.
+
+Path after both fixes:
+
+```
+  14031 -> 14032 -> 14033 -> 14034 -> 14657 -> 14035 -> 14036 -> 14656 -> 14037 -> 14040
+        -> 14041 -> 673 -> 674 -> 675 -> 14042 -> 14044 -> 14045 -> 14046 ENTT_REGS -> ...
+```
+
+### Three facts the machine handed over on the way
+
+ 1. **`pcb_tha` (0xB6) points at a TABLE, not at a handler.** `TRAP_START` reads
+    `THA + trapNumber*4` - measured `CS 14032: [0000508C]` with THA `0x5000` and ISE trap `0x23`.
+    A zero entry drops to `TRAP_ERR`. That is ND-05.020.01:3222's *"THM, trap handler missing ...
+    when no ENTT instruction, or an ENTT instruction with bad operands, is found as a trap handler
+    entry"*, seen from the microcode side.
+ 2. **`pcb_ote1` 0x96 / `pcb_ote2` 0x9A are the own-trap-enable words**, and the search picks the
+    word by trap number (ISE = 35 read `0x9A`). With them zero the trap is routed to the
+    ACCP/mailbox region instead - "no local handler, tell the ND-100" - which is why TRAP_START was
+    never reached and looked unreachable.
+ 3. The handler's first instruction must BE an ENTT, because that is literally what `014036`
+    through `014040` test and save.
+
+### The method note, and it is the transferable part
+
+**An unimplemented field that returns a PLAUSIBLE answer is invisible to a throw-site inventory.**
+Section 4's 25-site list is an inventory of code that ADMITS it is missing. A `return false` and an
+`[D: same]` alias admit nothing: they answer, execution continues, and the feature silently does not
+work. Every ENTT in the image was refused and **no throw, no failing test and no sweep divergence
+said so** - the sweep could not, because ENTT is unreachable from the corpus, which is exactly the
+condition that hides this class.
+
+The tell that started it was not an error. It was a path trace showing a branch take the same arm
+regardless of input - the same signature as the 2x2x2 matrix in section 143 returning eight
+identical results. **A probe that gives one answer for every input has not measured the input**;
+what section 143 could not say is whether that meant "none of these three is the gate" or "the gate
+is not reachable from here at all". It was the second.
+
+### Tests
+
+ - `EnttReadTraceDiagTests.Entt_WhichMicrowordRefuses_PathTrace` - the refusing word names itself.
+ - `EnttReadTraceDiagTests.TrapFind_DoesItEverReachTrapStart` - the arrival requirements, measured.
+ - `CallManualCoverageTests.Entt_ArrivesThroughTheTrapPath_AndBuildsTheFrame` - replaces the
+   seed-and-compare version, which could never pass. Asserts exactly ONE TRAP_ISE (a second means
+   the handler's own ENTT was refused and the trap re-entered itself), that `ENTT_REGS` is reached,
+   and that `SavedCond1 == 1`.
+ - `CallManualCoverageTests.Rett_TrapReturn_BothEnginesAgree` - now pins the section 149 divergence
+   to its exact shape (`Diff == "B=00000000!=00002000"`) instead of failing on it, so it fires when
+   either engine's B behaviour changes, including when `LREGBL` lands.
+
+**A CONSTANT-ANSWER SWEEP IS THE OBVIOUS NEXT PASS** and is not scheduled: grep `Conditions.cs` and
+the GET/DEST switches for arms that fall through to a literal or to another arm, and check each
+against its manual line. Five in one pass here.
+
+## 151. The constant-answer sweep, done: three reclock strobes were writing the bus into P/SP/NPC `[V]` 2026-08-31
+
+Section 150 ended by naming a sweep and not scheduling it. This is that sweep, run to the end.
+
+**The DEST switch was the dirty one.** `Conditions.cs` came out clean; `OperandRouter.cs` had five
+destinations carrying "treated as a plain X load `[D]`", each of which wrote the microword's own
+data-bus value into a register. ND-05.022.1 ch.8 gives every one of them a FIXED SOURCE instead:
+
+```
+  197 D,IAC,SUML     SUM IS TRANSFERRED TO IAC Y REGISTER    0 sites  -> left as-is, [OPEN]
+  205 D,IAC,CLKNPC   LA -> NPC                               0 sites
+  206 D,IAC,CLKP     NPC -> P                                1 site   0o4465
+  207 D,IAC,CLKSP    P -> SP                                 2 sites  0o11535, 0o14407
+  227 D,DAC,SUMB     SUM IS TRANSFERRED TO DAC B REGISTER    0 sites  -> left as-is
+```
+
+**COUNT FIRST. It halved the work.** Three of the five never occur in the B30 image at all - the
+manual line alone would have had us implement all five, and three of those implementations would
+have been unfalsifiable forever. Sweep:
+`MicrowordDecodeTests.ConstantAnswerDestinations_HowManyB30WordsUseThem`.
+
+**What proves the manual right at the two live sites is the MICROCODE, not the manual.** 0o11535
+decodes as `ALU,XOR A,BM00 B,X1 D,IAC,CLKSP`, and `XOR BM00,X1` is this project's own documented
+NO-OP FILLER - the word that exists only to time the one-word condition delay. A word whose ALU
+result is timing filler cannot be storing that result, so the destination must ignore the bus. We
+were writing filler into SP. 0o4465 says the same thing independently: `XOR A,IAC,L B,SC14` into P,
+and an XOR of L with SC14 is not a program counter.
+
+**Both live sites sit in code the open RETT/B divergence depends on** - 0o11535 is inside the
+`LREGBL` register-block loader (beside `LOADRB_P` / `LOAD_NEW_P` / `LOADRB_L` / `LOADRB_B`) and
+0o14407 is inside RETT just past `RETT_NPLBR` - so this was measured, not assumed:
+
+| suite | before | after |
+|---|---|---|
+| `CPU.ND5000` | 765 / 0 | **766 / 0** |
+| `Emulated.Tests.ND500` | 2264 / 0 (13 skipped) | **2264 / 0 (13 skipped)**, 4 m 29 s |
+
+Baseline held exactly on both, so the change is a strict improvement and the RETT/B divergence is
+NOT explained by these strobes. That is a real narrowing: `LREGBL` remains the candidate, but its
+CLKSP is now correct and still does not move B.
+
+**Free corroboration.** `D,DAC,SUMB` and `D,DAC,B` BOTH having zero sites is a third independent
+confirmation of section 145 - B's only live write port on this image is destination 228.
+
+**THE CLASS IS NOW CLOSED, and the negative is the point.** A grep for `[D: same]` over
+`CPU.ND5000/src` returns only the two lines that DOCUMENT the G,OOPS/G,TOOPS pair, and
+`ReadA`/`ReadB`/`Conditions.cs`/`Alu.cs`/`Sequencer.cs` hold no bare `return 0` arm standing in for
+an unimplemented select. Every remaining unimplemented field THROWS - so a throw-site inventory is
+once again a true inventory of them, which it demonstrably was not before this sweep.
+
+**The method note, which is the transferable part.** The tell that started this was never a throw
+and never a red test: it was a microword PATH TRACE showing a branch take the SAME arm regardless
+of its input. An unimplemented field that returns a plausible answer is invisible to every
+instrument we own except that one. Both section 150 defects and all three strobes here have the
+identical shape, and none of the five would have been found by counting throws.
+
+## 152. Why `place-domain` says NO SUCH DOMAIN: the DESCRIPTION-FILE and the pack list DIFFERENT domains `[V]` 2026-08-31
+
+Item 1 was written up as *"the pack is installed wrong - `DESCRIPTION-FILE:DESC` is LED's floppy file
+copied unchanged"*. That is the right neighbourhood and the wrong object. Decoded from the bytes.
+
+**Provenance first.** The file read here is `E:\Dev\Ronny\ND5000UC\DESCRIPTION-FILE.DESC`, and it is
+byte-identical to the copy inside the pack - both sha256
+`e6a58724b763a8644180bf4432f071058dc051c55ca481a45b6db92216b59c9a`, the second extracted from
+`D:\DOMS-CSFIX.IMG` for the comparison. So this is the live file, not a stale export.
+
+**Three tables, 22528 bytes, and almost all of it empty:**
+
+```
+0x0000  header, 0x0001 then 0xFF filler
+0x0100  DOMAIN table, 56-byte entries          - exactly TWO entries
+0x0800  file/device table, 0x800 stride        - three slots, only the first named
+0x4000  SEGMENT table, 192-byte entries        - exactly TWO entries
+```
+
+**The domain table is HEALTHY.** Both entries are well formed, apostrophe-terminated, and the
+LED-B03 one is not a floppy path at all:
+
+```
+0x0100  0000 4000  "SCRATCH-DOMAIN'"   ... +0x26 = 0800 0004
+0x0138  0000 40C0  "LED-B03'"          ... +0x1E = 0800 0004 , +0x26 = 0806 011C
+```
+
+Entry layout `[V]` by the two entries agreeing field for field: +0x00 zero, +0x02 flags, +0x04..+0x19
+name (22 bytes), +0x1A = 0xFF, +0x1C = 0x4000, then 8-byte descriptor slots at +0x1E and +0x26, and
+0x0002 at +0x32/+0x36. That the two slots are PSEG and DSEG is `[D]` - inferred from SCRATCH-DOMAIN
+having only the +0x26 slot filled while LED-B03 has both.
+
+**The SEGMENT table at 0x4000 is where the floppy actually is**, and it carries a fully qualified
+SINTRAN reference, `(USER)FILE`:
+
+```
+0x4000  (211160B03-XX-01D:FLOPPY-USER)SCRATCH-SEG-01'
+0x40C0  (211160B03-XX-01D:FLOPPY-USER)LED-B03'
+```
+
+**THE ACTUAL DEFECT, and it is sharper than "installed wrong":** the DESCRIPTION-FILE registers two
+domains whose segments live on a floppy user that is not on this pack - and the eight domains whose
+files ARE on the pack are **not registered at all**. Set the two lists side by side:
+
+| registered in DESCRIPTION-FILE | has a `:DOM` file on the pack |
+|---|---|
+| `SCRATCH-DOMAIN` -> `(...FLOPPY-USER)SCRATCH-SEG-01` | no |
+| `LED-B03` -> `(...FLOPPY-USER)LED-B03` | no |
+| — | `(SYSTEM)CPU-STAT:DOM`, `NC-A06`, `PLANC-500-G00`, `CAT-CAT5-B06`, `CONVERT-DOM-A03`, `LED-FORTRAN-A01`, `CODE-COVERAGE`, `AUTOMAKE-500-C00` |
+
+**The intersection is EMPTY.** Every domain SINTRAN knows about is missing its files; every domain
+whose files are present is invisible to SINTRAN. That is exactly the recipe document's observation
+that a pack "answers `NO SUCH DOMAIN` for a domain whose segments are plainly present", now with a
+cause instead of a symptom - and it means `place-domain CPU-STAT` cannot work on this pack no matter
+what the octobus lane does.
+
+**What this rules OUT, which is the useful half.** The blocker is not the octobus transport, not the
+microcode, not the swapper and not `place-domain` itself. It is one file's contents. Anything
+measured against `place-domain` on this pack before the registration is fixed is measuring the
+registration.
+
+**Next, and NOT yet done:** register a present domain. The proper route is SINTRAN's own
+`ENTER-DIRECTORY` / `COPY-DOMAIN` / `DEFINE-STANDARD-DOMAIN`, driven on the live machine - writing
+these tables by hand would be guessing at the `[D]` descriptor fields, and section 145's lesson
+applies: a hand-built structure that merely looks right is the thing that survives every check.
+
+### 152a. CORRECTION to 152 — the empty intersection is real, the conclusion drawn from it is NOT `[V]` 2026-08-31
+
+Section 152 ended: *"it means `place-domain CPU-STAT` cannot work on this pack no matter what the
+octobus lane does"*. **That is wrong, and a run on the very pack the bytes were read from says so.**
+
+Measured, `D:\DOMS-CSFIX.IMG`, `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture`, passing:
+
+```
+place-domain cpu-stat
+> Loading Control Store
+> Loading Swapper
+[after PLACE-DOMAIN] startSeen=1 startMicfu=23B startTaken=True ansMON=377B
+                     PC=0x08008255 stopMode=WAIT  micfu[1B:73 12B:1 23B:1 24B:1 31B:13]
+```
+
+`place-domain cpu-stat` does **not** answer `NO SUCH DOMAIN`. It loads the control store, loads the
+swapper, the swapper STARTS and answers a MON 377B, and the ND-5000 then sits in `WAIT`. The whole
+command runs. Nothing in the transcript refuses the name.
+
+**What survives from 152 and what does not.** The BYTES are unchanged and still `[V]`: the domain
+table holds exactly `SCRATCH-DOMAIN` and `LED-B03`, the segment table carries the
+`(211160B03-XX-01D:FLOPPY-USER)` prefix, the pack's eight `:DOM` files appear in neither, and the
+file read was sha256-identical to the pack's own copy. **What was wrong was the INFERENCE**: that
+absence from that table is what produces `NO SUCH DOMAIN`. It is not - or at least not on its own.
+
+**This is the "correct about the wrong object" shape.** Every check I ran verified the VALUE (the
+decode is right, it reproduces, it matches the pack by hash) and none of them tested what the value
+GOVERNS. A byte-exact reading of a structure says nothing about which code consults it, and the
+question "what reads this?" is the one I skipped - the same miss as reading a mailbox header as
+`extblk[0]`.
+
+**And it lines up with what PLAN.md already said, which I should have weighed first.**
+ND-60.136.04A ch.11: the `(directory:user)` prefix is *not consulted until the `:PSEG`/`:DSEG` are
+opened*, so a file-copied domain RESOLVES and fails LATER at file open. The observed run is exactly
+that - full resolution, swapper started, then quiet with nothing to page in. The document predicted
+the behaviour I then contradicted.
+
+**Still open, and now stated as a question rather than an answer:** what actually gates
+`NO SUCH DOMAIN`, and where do the eight present `:DOM` files get resolved from if not this table.
+Answer it by finding the reader, not by re-reading the bytes.
+
+### 152b. SECOND CORRECTION — "the intersection is empty" was a GREP ARTEFACT, and the original PLAN.md text was right `[V]` 2026-08-31
+
+152 claimed the DESCRIPTION-FILE's two registered domains have no files on the pack. **They have all
+four of their files.** Measured on `D:\DOMS-CSFIX.IMG`:
+
+```
+  [0071] (SYSTEM)LED-B03:PSEG;1            223695 bytes   110 pages
+  [0072] (SYSTEM)LED-B03:DSEG;1            394525 bytes   193 pages
+  [0073] (SYSTEM)SCRATCH-SEG-01:PSEG;1          5 bytes     1 pages
+  [0074] (SYSTEM)SCRATCH-SEG-01:DSEG;1       1029 bytes     1 pages
+```
+
+`SCRATCH-DOMAIN -> SCRATCH-SEG-01` and `LED-B03 -> LED-B03` both resolve to files that are present.
+The intersection is not empty; it is complete.
+
+**How the false finding was manufactured, because the mechanism matters more than the fact.** I
+listed the pack filtering on `:DOM`, saw neither name, and wrote "registered but no files". A domain
+does not have to be a `:DOM` file - a `:PSEG`/`:DSEG` pair is the other, older form, and it is the
+form these two use. **RULE #0b exactly: a search that finds nothing is evidence about the PATTERN,
+not about the data.** The pattern came from an assumption ("a domain means a .DOM"), so the zero
+result proved nothing at all - and it read as a crisp, tabulated finding.
+
+**Consequence: the ORIGINAL PLAN.md text was right and my "sharpening" made it worse.** The defect
+is what it always said - ND-30.003.007:4607, the stored segment names still carry
+`(211160B03-XX-01D:FLOPPY-USER)` while the files actually live under `(SYSTEM)` on this pack, so they
+resolve to a user that is not there, and only at `:PSEG`/`:DSEG` OPEN time (ND-60.136.04A ch.11).
+`COPY-DOMAIN` rewrites those names; `@COPY-FILE` does not. The observed run agrees: full resolution,
+swapper started, then quiet with nothing to page in.
+
+**What is left standing from 152:** the table offsets and entry layout, the two domain names, the two
+segment names, the floppy prefix, and the sha256 match to the pack's own copy. All still `[V]`.
+Everything I concluded ON TOP of those bytes has now been wrong twice.
+
+**The pattern across 152 / 152a / 152b, worth more than the finding.** Same bytes, three readings,
+two wrong. Both errors were inferences about what the data MEANS, never about what it SAYS, and both
+survived re-reading the bytes because re-reading confirms the part that was already right. The two
+questions that would have caught them are not "is this value correct" but **"what reads this?"**
+(152a) and **"what else could this thing be called?"** (152b). Neither is answerable by looking at
+the structure again, which is the only check I kept running.
+
+## 153. `COPY-DOMAIN is needed` vs `COPY-DOMAIN is not needed` - the tree asserts both `[V]` 2026-08-31
+
+Chasing item 1's fix, two settled-sounding statements turned up that cannot both be the whole truth.
+Neither is a guess; both are written as conclusions, in the tree, by earlier work.
+
+**Claim A - `PLAN.md`, item 1 "Next":** the pack is installed wrong; the stored names still carry
+`(211160B03-XX-01D:FLOPPY-USER)`; ND-30.003.007:4607 says *"The description file still contains the
+definitions valid for the user the domain is copied from. This must be corrected."*
+**"`COPY-DOMAIN` rewrites those names; `@COPY-FILE` cannot."**
+
+**Claim B - `Nd100SintranNd5000OctobusBootHarnessTests.cs:2630`, marked MEASURED 2026-08-01:** after
+four plain `@COPY-FILE`s, `LIST-DOMAIN` answers
+
+```
+    Domain no.   0: SCRATCH-DOMAIN
+    Domain no.   1: LINKAGE-LOAD-H02.......................SA:   26000006721
+```
+
+*"The monitor reads the copied description file on its NEW user and reports the domain WITH a start
+address, so the floppy's description file does not hard-code its own directory the way the earlier
+note feared. **COPY-DOMAIN is not needed.**"*
+
+**They are not actually about the same event, and the harness comment says so four lines earlier:**
+*"LIST-DOMAIN reads the description file only ... Starting it is the stronger proof but needs the
+swapper, so a stall here is expected on this pack and is NOT evidence against the copy."*
+
+So what B establishes is that the DESCRIPTION FILE **PARSES** on a new user and enumerates a domain
+with a start address. What A is about is the `:PSEG`/`:DSEG` **OPEN**, which ND-60.136.04A ch.11 puts
+strictly later - the `(directory:user)` prefix is *not consulted until the segments are opened*. B
+never reached that point, because reaching it needs a working swapper, which that pack did not have.
+
+**Therefore: B does not refute A, and A does not predict B's failure.** The reconciled position is
+that both are true of their own stage, and **the question A actually raises has never been measured
+on any pack** - nobody has yet watched a file-copied domain get as far as opening its segments.
+
+**Two process notes, because this cost a tick to untangle:**
+
+ - **A conclusion sentence outlived its own qualifier.** "COPY-DOMAIN is not needed" is four lines
+   below "starting it is the stronger proof", by the same author in the same commit. The qualifier
+   is the load-bearing half and it is the half that does not get quoted. This is the octobus skill's
+   trap 1 (status headers in this tree lie) in its most benign form - nobody was careless, the
+   summary line just travels better than the caveat.
+ - **`COPY-DOMAIN` is a LINKAGE-LOADER command, not a SINTRAN or ND-500-monitor one** -
+   `@LINKAGE-LOADER / COPY-DOMAIN <source with (dir:user)> "<dest>" / EXIT`
+   (`Nd100SintranNd500BootHarnessTests.cs:1421`). That is why it is absent from
+   `SINTRAN-Commands.md`, which is complete for the commands it covers. Do not record the reference
+   as having a hole. And `DEFINE-STANDARD-DOMAIN` is **not** a registration mechanism at all - it
+   populates the reentrant subsystem table so a name resolves without the monitor, and it requires
+   *"an already loaded domain"*. Item 1's proposed
+   `ENTER-DIRECTORY`/`COPY-DOMAIN`/`DEFINE-STANDARD-DOMAIN` fixture names three commands doing three
+   unrelated jobs.
+
+**A fixture already exists and should be reused, not rebuilt:** the octobus harness has COPY-DOMAIN
+call sites at lines 2057, 2346 and a full manual-copy ladder ending at 2650, including
+`define-swap-file`, `list-domain` and `define-standard-domain`. Starting from scratch here would
+have repeated all of it.
+
+## 154. The stall is UPSTREAM of the domain: correct names and stale names give a bit-identical result `[V]` 2026-08-31
+
+Section 153 established that nobody had ever watched a domain with stale `(dir:user)` segment names
+get as far as OPENING those segments. `D:\DOMS-CSFIX.IMG` can reach the stage and carries the exact
+specimen, so the experiment was run directly - same test, same pack, same windows, only the domain
+name changed (via the new `RETROCORE_ND5000_DOMAIN` knob).
+
+**The two domains, chosen to differ in precisely the property under test:**
+
+| domain | DESCRIPTION-FILE segment names | files on pack |
+|---|---|---|
+| `cpu-stat` | not registered | `(SYSTEM)CPU-STAT:DOM`, 19 pages |
+| `LED-B03` | `(211160B03-XX-01D:FLOPPY-USER)LED-B03` - STALE | `(SYSTEM)LED-B03:PSEG` 110 pg + `:DSEG` 193 pg |
+
+**Result - the machine cannot tell them apart:**
+
+```
+cpu-stat : PC=0x08008255 stopMode=WAIT startSeen=1 startMicfu=23B startTaken=True ansMON=377B THA=0
+LED-B03  : PC=0x08008255 stopMode=WAIT startSeen=1 startMicfu=23B startTaken=True ansMON=377B THA=0
+```
+
+Identical PC, identical stop mode, identical swapper handover, identical MON answer, identical
+`THA`. The only differing field is the watchdog tally (`micfu[1B:73` vs `1B:30`), which counts
+elapsed time and nothing else - the windows differed. Both consoles end the same way, with no error
+of any kind:
+
+```
+ND-5000: place-domain <name>
+> Loading Control Store
+> Loading Swapper
+<silence>
+```
+
+No `NO SUCH DOMAIN`, no file-open error, no trap. The stale prefix produces no observable effect
+whatsoever.
+
+**CONCLUSION, and it redirects item 1.** The stall is strictly UPSTREAM of anything domain-specific:
+the bring-up never reaches the stage at which a segment name could matter. The stale
+`(211160B03-XX-01D:FLOPPY-USER)` records may well be a real defect - ND-30.003.007:4607 says they
+are - but **they cannot be what is blocking us now**, and correcting them would not change this
+outcome. Item 1's standing framing ("THE PACK IS INSTALLED WRONG. Fix that before measuring
+place-domain again") has the order backwards.
+
+**Why this is a real measurement and not another null result.** The instrument DISCRIMINATES on the
+thing it is supposed to discriminate on - two domains that differ in exactly one property - and
+returns the same answer for both. That is the same tell that found the ENTT bugs in section 150: a
+branch taking the same arm regardless of its input. Here it is the desired outcome rather than a
+defect, because it localises the fault upstream of the branch.
+
+**What the transcript points at instead, sitting above every command in both runs:**
+
+```
+ND-5000: (first line after @nd-500, before any command is typed)
+ND-5000 timeout:      ACCP was terminated; Microprogram has stopped
+```
+
+That is the known upstream bug, and it is present in the runs that were called working. Per the
+standing rule - fix known bugs before hunting features, because a feature may never work while a bug
+upstream of it eats the result - **that line is the next thing to work, not the DESCRIPTION-FILE.**
+
+## 155. The ACCP termination message fires BEFORE the control store is loaded, once, and never again `[V]` 2026-08-31
+
+Section 154 named `ND-5000 timeout: ACCP was terminated; Microprogram has stopped` as the next thing
+to work. Before instrumenting anything, the emitting condition was read from the NPL source and the
+message's position in the transcript measured. Both say the same thing, and it is not what the
+standing note assumes.
+
+**The emitting condition, `RP-P2-N500.NPL` @127642 - read, not derived:**
+
+```
+127642   IF X:=WATCHDOG=TMRXQ THEN
+127646      CALL RN5STATUS
+127647      IF A><ANSWER THEN
+127652         T:=5MBBANK; X:=MAILINK; *AAX X5BRK; LDATX   % Microprogram break?
+127656         IF A><0 GO 5TMRA
+127657         0=:TMR
+127660  N5ABORT:  N5TIMOUT
+127663         CALL RSTARTALL; GO TMRET
+```
+
+So it prints when the outstanding WATCHDOG message's `N5STA` is not `ANSWER` **and** `X5BRK` is zero
+(a non-zero `X5BRK` is a microprogram BREAK and routes elsewhere, to `5TMRA`). It is a statement
+about one unanswered watchdog, nothing more.
+
+**Where it lands, measured in the console dump:**
+
+```
+  line 30   @nd-500
+  line 33   ND-5000 timeout:  ACCP was terminated; Microprogram has stopped
+  line 35   ND-5000: define-swap-file
+  line 38   ND-5000: place-domain LED-B03
+  line 40   > Loading Control Store
+  line 45   > Loading Swapper
+```
+
+**ONE occurrence, and it precedes the control-store download.** It never recurs afterwards, and the
+watchdog is answered normally from then on - the same run records `answers=70 inserted=70
+skipped[notInit=0 full=0 noHeader=0]` and thirty-odd `3RMICV` round trips.
+
+**Reading: at the moment it prints, the statement is TRUE.** No microprogram had been loaded yet -
+the store is downloaded later, by `place-domain` - so there was nothing to answer the watchdog, and
+`X5BRK` was legitimately zero. SINTRAN detected a stopped microprogram, said so, and called
+`RSTARTALL`. The classic ND-500 lane reaches the same place by a different route: `RSTA5` bit 9
+`5CLOST` -> `ECSLOAD 2032B` -> "Loading Control Store".
+
+**Therefore the standing framing needs qualifying.** This line has been carried as a known bug
+stepped over in every run including the working ones. It is better described as **a true report at
+monitor entry that self-clears**, and it is NOT evidence of a defect on its own. What would be a
+defect is the same message appearing AFTER a successful control-store load, or recurring - neither
+happens here.
+
+**What is NOT established, and must not be glossed:** whether real ND hardware also prints this on
+entering `@ND-500` before any store is loaded. Nothing measured here says it does; the argument is
+only that our machine's message is consistent with its own state and with the NPL condition. Until
+a real-machine transcript settles it, treat "this message is normal at entry" as `[D]`, not `[V]`.
+
+**Consequence for 154's conclusion.** 154 correctly showed the stall is upstream of the domain, and
+correctly pointed here next. But this line is not the upstream fault - it is a symptom of the
+ordering (monitor entered before any store exists), and it clears. The stall after
+`> Loading Swapper` remains unexplained, and the search for it should NOT start from this message.
+
+## 156. The hang has ONE location and it is the same for both domains - identifying it is [OPEN] `[V] location, [OPEN] identity`
+
+The harness samples ND-100 `(PC,PIL)` while a monitor command is outstanding, precisely so a command
+that never returns can be named rather than guessed at. Both runs from section 154 agree:
+
+```
+place-domain cpu-stat : 2759 samples, 104 distinct   place-domain LED-B03 : 1006 samples, 72 distinct
+  PC=0x000012C2 pil=0  x543                            PC=0x000012C5 pil=0  x199
+  PC=0x000012C3 pil=0  x520                            PC=0x000012C6 pil=0  x191
+  PC=0x000012C4 pil=0  x500                            PC=0x000012C4 pil=0  x187
+  PC=0x000012C5 pil=0  x526                            PC=0x000012C3 pil=0  x177
+  PC=0x000012C6 pil=0  x516                            PC=0x000012C2 pil=0  x174
+  (next entry: PC=0x00004726 pil=1 x4)                 (next entry: PC=0x00007E79 pil=1 x4)
+```
+
+**`[V]` FACTS.** Five CONSECUTIVE words, `0x12C2..0x12C6` (octal `011302..011306`), at **PIL 0**,
+holding ~92-94% of all samples in both runs, with roughly EQUAL counts across the five - the
+signature of a straight-line body executed over and over, branching back at the end. Everything else
+is PIL 1 noise at 2-4 samples. The location is identical for both domains, which is independent
+corroboration of 154: whatever this is, it does not depend on which domain was asked for.
+
+**`[OPEN]` WHAT IT IS. A wrong identification was nearly published here - recording the wrong turn.**
+`0o11302` resolves in `nd-500-mon-j04.prog.asm` (the ND-500 monitor program, which does run at PIL 0,
+so the hypothesis was reasonable) to:
+
+```
+011302  170544   SAA 144
+011303  144151   SWAP CLD SA DD
+011304  050151   LDT 151
+011305  032011   STF ,X 11
+011306  024150   LDD 150
+```
+
+**That is floating-point straight-line code with NO backward branch, so those five words cannot be a
+spin loop.** The disassembly is `-b 0`, i.e. listing addresses, and a listing address is not a linked
+address - the same trap as taxonomy #13. Either the program's load base is not 0, or the hot loop is
+not in this program at all. **Do not record `011302` as the hang site.**
+
+**How to close it, cheapest first:**
+
+ 1. Get the LOAD BASE of the running image and re-resolve `0x12C2`; a base-relative match to real
+    loop-shaped code (a compare and a backward jump) is the confirmation to insist on.
+ 2. Failing that, dump the ND-100 words at `0x12C2..0x12C6` from the live run and disassemble THOSE.
+    That needs no base and no listing - it is the actual executing code.
+ 3. The shape to expect is a poll: load a cell, test it, branch back. Whatever cell it loads is the
+    thing that never changes, and THAT is the real question.
+
+**Accept nothing that does not disassemble to a loop.** The one check that catches a wrong base is
+free: the code at a spin site must contain a backward branch. The FP sequence above fails it on
+sight, which is the only reason this is an `[OPEN]` and not a published answer.
+
+## 157. The hang loop READS NOTHING - it cannot be polling for the answer `[V] code, [D] reading`
+
+Section 156 refused to name the hang site from a listing address and specified the fix: dump the
+LIVE ND-100 words, which needs no load base. `DumpHangPcHistogram` now does that. Result, straight
+out of `_machine.mem.ReadMemory32W` while `place-domain` was outstanding:
+
+```
+    0x12C1  0xD00D
+    0x12C2  0xCC77   <- hottest   = 0o146167   RADD CLD ST DX
+    0x12C3  0xB500               = 0o132400   JNC 0            (X:=X+1, jump to SELF while X negative)
+    0x12C4  0xCD01               = 0o146401   RADD AD1 0 DD    (D := D + 1)
+    0x12C5  0xCE6D               = 0o147155   RADD ADC CLD SA DA
+    0x12C6  0xA8FC               = 0o124374   JMP -4   -> 0x12C2
+    0x12C7  0x0000
+```
+
+**156's own falsification test PASSES: there IS a backward branch.** `0o124374` renders as `JMP -4`
+in the project's existing disassembly (`115205 124374 JMP -4 ; -> 115201`), and `-4` from `0x12C6`
+lands exactly on `0x12C2`, the hottest sample. Every opcode above is decoded from how the real
+disassembler renders that same octal word elsewhere in the corpus, not from recollection: `0o132400`
+appears four times as `JNC 0`, `0o146401` as `RADD AD1 0 DD`.
+
+So the five equal-count samples are one 5-word loop, and the equality is explained: the inner
+`JNC 0` falls straight through (X non-negative), so each of the five words executes about once per
+pass. A `JNC` spinning on X would have dominated the histogram instead - it does not.
+
+**THE FINDING `[V]`: the body is REGISTER-ONLY.** Three `RADD` register-to-register operations, one
+`JNC` (which touches only X), one `JMP`. **No memory reference. No IOX. Nothing is read.**
+
+**THE READING `[D]`: a loop that reads nothing cannot observe anything.** It cannot be polling the
+mailbox, a status word, or a device - there is no load to poll with. Its only possible exits are the
+`JNC` condition on X and an **interrupt**. Since it never exits, either the counter never reaches its
+limit, or the interrupt never arrives. The shape - an X-counted inner delay inside a D-counted outer
+one - is a two-level DELAY loop, which on this architecture is what code runs while waiting to be
+interrupted.
+
+**That makes the next measurement sharp, and it is NOT "why does place-domain hang".** The ND-500
+answer path and the interrupt are separate things: the microcode writes the answer AND raises level
+12. This run shows the answer side working - `MON answer delivery: answers=70 inserted=70
+skipped[notInit=0 full=0 noHeader=0]`, `startTaken=True`, `ansMON=377B`. **What has never been
+checked is whether the corresponding level-12 interrupt is actually raised to the ND-100.** An answer
+written with no interrupt would produce exactly this: a satisfied mailbox, and an ND-100 spinning in
+a delay loop that reads nothing and is never woken.
+
+**Do not treat that as established.** It is the leading hypothesis and it fits every number in hand;
+it has not been measured. The check is to count level-12 interrupt raises on the octobus path against
+the 70 delivered answers, and the two numbers must be compared - a single count would be
+unfalsifiable on its own (taxonomy #7).
+
+## 158. REFUTED: interrupts ARE delivered throughout the hang - and the PC sampler was showing the idle loop `[V]`
+
+Section 157 proposed that the ND-100 sits in a register-only delay loop because the level-13
+interrupt announcing an answer never arrives. **Measured, and it is wrong.**
+
+Counters were snapshotted at command entry so the delta covers the STALLED WINDOW ONLY:
+
+```
+DURING `place-domain cpu-stat` :  raises=1599  delivered=286  whileDisabled=733
+DURING `run`                   :  raises=0     delivered=0    whileDisabled=0
+run-cumulative (uninterpretable): raises=1645  delivered=294  whileDisabled=754
+```
+
+**286 interrupts were delivered to the ND-100 while the command was hung.** The interrupt path is
+alive and busy for the whole stall, roughly 1.4 deliveries a second. The ND-100 is being woken
+constantly, servicing each one, and returning. 157's account is dead.
+
+**A free corroboration in the second row.** `run` shows `raises=0 delivered=0` - literally no octobus
+activity at all. That independently confirms the earlier reading that `run=STALL` is an ARTEFACT:
+`place-domain` never returned a prompt, so `run` was typed into a monitor that was not listening and
+no command was ever processed. Two instruments, same conclusion, arrived at separately.
+
+**THE INSTRUMENT LESSON, which is the valuable part.** The five-word loop at `0x12C2..0x12C6` ends in
+an UNCONDITIONAL `JMP -4` and reads nothing, so it has no exit at all - and yet the machine is
+demonstrably alive and servicing 286 interrupts. A loop with no exit, at PIL 0, in a live system, is
+**the idle loop**: SINTRAN has no runnable process, so it idles; interrupts fire, get serviced, and
+return to it because the thing that would run next is still blocked.
+
+If that reading holds, the PC histogram never pointed at the bug. Its own comment says *"a hung
+monitor command is a SINTRAN routine that never returns, and the only question worth asking is WHICH
+one"* - but when the monitor program is BLOCKED rather than SPINNING, the sampler catches the idle
+loop and names nothing. It reports a location with total confidence and ~93% of samples either way,
+so nothing about the output distinguishes the two cases. **A sampler that cannot tell "spinning here"
+from "idle because something else is blocked" is answering a different question than the one asked
+of it** - and unlike a wrong number, this one looks exactly like a right one.
+
+**THE DISCRIMINATING TEST, cheap and not yet run:** print the histogram for a SUCCESSFUL command as
+well as a stalled one. If `0x12C2` is equally hot while commands are completing normally, it is the
+idle loop and every conclusion drawn from its address is void. If it is hot ONLY during the stall,
+it is a real spin and the address means something. The histogram currently prints only on stall
+(`if (done >= 0) return;`), which is exactly why this was never visible.
+
+**Status of the hang: OPEN, and further from an answer than section 156 suggested.** What is now
+established is narrower but solid: the ND-100 is ALIVE and interrupted throughout; the answer path
+delivers (`answers=74 inserted=74`); the swapper started and answered MON 377B; the ND-5000 sits in
+`WAIT`. Nobody is failing to signal anybody. Something is waiting for work that is never queued.
+
+## 159. CONFIRMED: `0x12C2..0x12C6` is the IDLE LOOP. Sections 156/157 localised nothing `[V]`
+
+The control case from 158 was run - the histogram now prints for COMPLETED commands too:
+
+```
+`set-avail`      [COMPLETED - control case]:   1 sample    PC=0x000012C3 pil=0
+`swap-file:data` [COMPLETED - control case]:   1 sample    PC=0x000012C3 pil=0
+`place-domain cpu-stat`  [STALLED]:  889 samples, 70 distinct   0x12C2..0x12C6 pil=0 ~=93%
+`run`                    [STALLED]:  918 samples, 46 distinct   0x12C2..0x12C6 pil=0 ~=93%
+```
+
+Commands that COMPLETE sample into the same loop. On its own that is weak - one sample each, because
+those commands finish almost immediately.
+
+**The decisive row is `run`, and it needs no new measurement.** Section 158 established from the
+interrupt counters that `run` saw `raises=0 delivered=0` - literally no octobus activity - because
+`place-domain` never returned a prompt and `run` was typed into a monitor that was not listening. So
+during `run` **nothing was asked of the machine at all**. And its histogram is the same five words at
+the same ~93% concentration as `place-domain`'s.
+
+**A window in which demonstrably nothing was happening produces a profile identical to the "hang".**
+Therefore the profile is what the machine looks like when IDLE, not a signature of anything being
+stuck. `0x12C2..0x12C6` is SINTRAN's idle loop, which is also why it is a five-word register-only
+sequence ending in an unconditional `JMP -4` with no exit and no load - exactly what an idle loop is.
+
+**What this VOIDS, stated plainly:**
+
+ - **156** - "the hang has ONE location, identical for both domains". True and meaningless: the
+   location is where the ND-100 always is when it has nothing to run.
+ - **157** - the decode is right (the words really are those instructions, `JMP -4` really does
+   target `0x12C2`), but every INFERENCE from it is void. It is not a delay loop waiting for an
+   interrupt; it is idle. The hypothesis 158 refuted was built on a foundation that had already
+   collapsed.
+ - The `_hangPcSamples` instrument's own promise - *"a hung monitor command is a SINTRAN routine that
+   never returns, and the only question worth asking is WHICH one"* - **only holds when the monitor
+   SPINS.** When it is BLOCKED, the sampler shows the idle loop with total confidence and names
+   nothing. Two hypotheses and three instrument builds went into that gap.
+
+**The lesson is a specific, checkable one.** A profiler answers "where was the CPU", and that is only
+the same question as "what is stuck" if the stuck thing is RUNNING. Before reading any PC histogram
+as a culprit, run it over a window where nothing is wrong - if the profile is the same, the profile
+is about the machine's resting state, not about the fault. That control cost one line
+(`if (done >= 0) return;` was suppressing it) and would have saved sections 156 and 157 entirely.
+
+**Where the hang investigation actually stands.** Nothing found so far names it. What is solid:
+the ND-100 is alive and interrupted throughout (286 deliveries during the stall); answers are
+delivered (`74/74`); the swapper started, answered MON 377B and idles; the ND-5000 sits in `WAIT`;
+and the ND-100 is IDLE, not spinning. Every participant is healthy and waiting. **The question is
+therefore not "who is stuck" but "what work should have been queued and was not" - and the PC
+sampler is structurally incapable of answering that.**
+
+## 160. Everyone is parked in an ND-100-OWNED wait state - and the MICFU trace disagrees with the MICFU census `[V]`
+
+Following 159's reframing ("what work should have been queued and was not"), the mailbox chain walk
+answers it more directly than any CPU-side instrument, because it is UNCAPPED and labels which SIDE
+owns each state:
+
+```
+chain nodes visited: 217, not-answered: 153 (TAKEN-pending-stop: 2), served: 64
+  @0x0042BE30 lastMICFU=0o0  : free=66        <- NEVER CHANGED for the whole run
+  @0x00428E30 lastMICFU=0o5  : ToNd500=15 ANSWER=14 SWPWAIT(nd100)=1  SWPPING(nd100)=34
+  @0x0042C130 lastMICFU=0o1  : ToNd500=49 ANSWER=2
+  @0x00428D30 lastMICFU=0o23 : ToNd500=2  ANSWER=2  PSWWAIT(nd100)=32
+```
+
+**The two nodes that matter end up in states the ND-100 owns, not us.** The `3START` node (`0o23`)
+spends 32 samples in **PSWWAIT**; the swapper node (`0o5`) spends 34 in **SWPPING** and one in
+**SWPWAIT**. Both were served and answered first (`ANSWER=2` and `ANSWER=14`). Nothing is queued to
+the ND-500 because, from the mailbox's point of view, the ND-500 has already done its part and the
+ND-100 has not taken the next step.
+
+That is the same conclusion 159 reached from the other end, by an independent instrument: every
+participant is healthy, everything is waiting on the ND-100 side. **The question is now specific
+enough to answer from the NPL sources rather than by running anything: what ND-100-side condition
+clears `PSWWAIT` and `SWPPING`, and why is it not met.**
+
+**A CORRECTION MADE MID-ANALYSIS, worth recording.** Reading the raw hop lines first
+(`N5STA=0006`, `N5STA=0007`) I took them for undocumented states outside the documented set
+{free=0, ToNd500=1, WAITING=2, ANSWER=3, 5ERANSWER=4} and was about to write up "two nodes parked in
+unknown states that nobody ever services". The histogram above names them: 6 and 7 are
+`SWPPING(nd100)` and `SWPWAIT(nd100)` - ordinary ND-100-owned wait states, correctly skipped by a
+walk that only serves `ToNd500(1)`. **The raw view and the labelled view of the SAME data supported
+opposite stories**, and the raw one came first because it was nearer the top of the dump.
+
+**AN INSTRUMENT DISAGREEMENT, unresolved - do not build on either until it is settled `[OPEN]`.**
+The MICFU census in the state line reports `micfu[1B:26 12B:1 23B:1 24B:1 31B:13]`, i.e. one `3START`
+(23B) and one `3MONCO` (24B). The servicer MICFU **trace** over the same run contains only
+`0x01` x50, `0x0A` x1, `0x19` x13 - **no `3START` and no `3MONCO` at all** - and 50 watchdogs where
+the census counts 26. Two instruments over one run disagree about both WHICH functions ran and HOW
+MANY. At least one is windowed differently than its heading claims. Any argument about the ORDER of
+`3START` against the twelve DIT writes runs through the trace, so that argument cannot be made yet -
+which matters, because that ordering is exactly what would explain the next item.
+
+**Consequence for the THA fix, measured today.** `StartProcessFromContextBlock` now fills a zero
+`THA` from the DIT (`if (regs.THA == 0 && regs.DitConfigured) LoadTrapConfigFromDIT(...)`, commit
+5005b4a55), and the run above still reports **`THA=0x00000000`**. So the stated falsification -
+*"THA must be non-zero after a completed 3START"* - **FAILS with the fix in the binary.** Either
+`DitConfigured` is false, or the DIT still reads zero at start time because the twelve writes land
+AFTER `3START`. Settling that needs the trace/census disagreement resolved first.
+
+## 161. Why the THA fix is inert on this lane: the octobus DIT has NO declared base, deliberately `[V]`
+
+Section 160 recorded a failed falsification - `StartProcessFromContextBlock` now fills a zero `THA`
+from the DIT (commit 5005b4a55) and the run still reports `THA=0x00000000`. The cause needed no run
+to find; it is written down in `ND100Machine.ND5000.cs` at the attach site:
+
+> *"NO DIT BASE IS DECLARED HERE, AND THAT IS DELIBERATE. A previous version of this method called
+> `cpu.DeclareDitBase(0)` ... The LAYOUT half of that is confirmed four ways and stands. The BASE
+> half was wrong: PHYSRD/PHYSWR (30B/31B) are SEGMENT-RELATIVE, so those addresses are OFFSETS
+> INSIDE A PHYSICAL SEGMENT, not physical addresses ... Declaring 0 measured THA=0 a second time."*
+
+So on the octobus lane nothing ever sets `regs.DitConfigured`, and the new guard is
+`if (regs.THA == 0 && regs.DitConfigured)`. **The condition is false, the load never runs, and THA
+stays zero.** The fix is not wrong - it is correct and INERT here, for a reason already carved and
+already written down. That is the third time a change has landed on this lane and changed nothing
+because it was hooked to a path this lane does not take (section 121 hooked the same load to
+cross-domain CALL; the same shape again).
+
+**The twelve writes are at PCB offsets `0x96..0xC7` of a SEGMENT, not of physical memory.** The
+resolution is in the servicer already - `TryResolvePhysicalSegmentAddress`:
+
+```
+    physicalByteAddress = (PST[segment] AND 0x3FFF) * 2048 + offsetInSegment
+```
+
+with the segment carried in `MSWMC` and the offset in `N500A`. So the DIT base is knowable, but only
+from a live message - which is precisely why it cannot be declared at attach time.
+
+**THE NEXT ACTION, and it follows the CORRECTION (section 125) rather than the mistake (115):**
+resolve the DIT base at `3START` from the PST using the segment the start message names, then declare
+it with `DeclareDitBase` - **never `SetupDIT`**, which zeroes every 256-byte PCB and would erase the
+twelve fields SINTRAN had just written, reproducing `THA=0` and reading as "the fix did nothing"
+rather than as a new bug. That hazard is already pinned by
+`TestND500_DitBaseZeroIsAValidBase.DeclaringTheBase_DoesNotEraseATableTheGuestWrote`.
+
+**Falsification, unchanged and now reachable:** `THA` must be non-zero after a completed `3START`.
+The ordering question from 160 still has to be answered first - if the twelve DIT writes arrive
+AFTER `3START`, no base resolution at start time can help and the load has to happen later. The
+order-faithful MICFU log added this session is what answers it; it is built but has not yet produced
+a run, because the shared tree was locked by another session's test at the time.
+
+## 162. `THA=0` IS SINTRAN'S OWN VALUE. The whole THA hunt had a false premise `[V]` 2026-09-01
+
+**Measured.** The servicer's copy-diagnostic ring, which records every octobus block copy with its
+operands AND the 32-bit word actually moved, holds exactly thirteen entries for a complete run
+(cap is 512, so nothing was truncated - the copy family ran thirteen times, full stop):
+
+```
+ 0  WR a=0x4200BC b=0x42CC00 n=4 data=0x00000000     tos
+ 1  WR a=0x4200C0 b=0x42CC00 n=4 data=0x00000000     ll
+ 2  WR a=0x4200C4 b=0x42CC00 n=4 data=0x00000000     hl
+ 3  WR a=0x4200B6 b=0x42CC00 n=4 data=0x00000000     THA
+ 4  WR a=0x420096 b=0x42CC00 n=4 data=0x00000000     ote1
+ 5  WR a=0x42009A b=0x42CC00 n=4 data=0x00000000     ote2
+ 6  WR a=0x42009E b=0x42CC00 n=4 data=0x00000000     cte1
+ 7  WR a=0x4200A2 b=0x42CC00 n=4 data=0x00000000     cte2
+ 8  WR a=0x4200A6 b=0x42CC00 n=4 data=0x00000000     mte1
+ 9  WR a=0x4200AA b=0x42CC00 n=4 data=0x00000000     mte2
+10  WR a=0x4200AE b=0x42CC00 n=4 data=0x00000000     temm1
+11  WR a=0x4200B2 b=0x42CC00 n=4 data=0x00000000     temm2
+12  WR a=0x4200A6 b=0x42CC00 n=4 data=0x00000000     mte1 again
+```
+
+**Every one of the thirteen writes carries ZERO**, including the one at `0x4200B6`, which is
+ND-500 physical `0xB6` = the PCB's `tha` field. `data` is read back from the DESTINATION after the
+copy, so it is the value that landed, not a guess about the source.
+
+So `THA == 0` after a completed `3START` is **the guest's own value, faithfully delivered**. The
+falsification stated in `PLAN.md` - *"THA should be non-zero after a completed 3START"* - was never
+a valid test. It asserted a value SINTRAN does not write.
+
+### Why the addressing is trustworthy here
+
+Both sides of the copy resolve the same way (`Nd500AddressBase + addr`). The ND-500 side is
+independently corroborated: the thirteen `a` addresses land EXACTLY on the documented trap-config
+layout - `96 9A 9E A2 A6 AA AE B2 B6 BC C0 C4` - which is a twelve-way coincidence if the rule were
+wrong. The `b` side uses the identical rule, so a zero read there is a zero in the buffer.
+
+### There are NO read-backs
+
+The ring holds thirteen `WR` and zero `RD`. The `octobus-nd5000` skill's line *"start-swapper
+performs a write-then-read-back VERIFY of 13 words ... which COMPLETES AND PASSES"* does not match
+this run: nothing reads them back. Whatever that sentence measured, it was not this sequence.
+Treat the "verify" framing as unconfirmed.
+
+### What the three wrong turns cost, recorded so they are not repeated
+
+The DIT-base work itself is correct and is now live - but it took three wrong placements, and all
+three are the SAME mistake, which is the thing worth keeping:
+
+1. **Instrumented the classic `PHYSWR` arm** of the MICFU switch. Measured `pwSeen=0` while the
+   census counted `31B:13`. The generation split at the top of that case routes the whole copy
+   family to `PerformOctobusBlockCopy`; the segment-relative PST-walking code below it is the
+   CLASSIC ND-500 path only.
+2. **Put the declaration in `OnStartProcess`.** Measured `ditCfg=False` with the guard satisfied.
+   The servicer calls `OnStartProcessND5000` (`Nd500MicrocodeServicer.cs:3192` ->
+   `Nd500CpuProcessBridge.cs:777`); `OnStartProcess` is the classic twin and is DECLINED on this
+   lane - the bridge's own header says so.
+3. **Guarded on `ObservedDitBase != 0`.** The correct base on this lane IS zero, so the guard
+   skipped in exactly the case it was written to serve. Guard on the write COUNT.
+
+**THE PATTERN: in this servicer/bridge pair every ND-5000 path has a classic ND-500 twin sitting
+next to it, and the classic one reads like the only one.** Before instrumenting or editing any
+handler here, confirm which of the two the octobus lane actually executes.
+
+### What IS fixed, stated exactly
+
+`DitConfigured` was `false` for the whole life of an octobus run, so every `ReadDIT_*` returned 0
+and logged a warning. It is now `true`, learned from the thirteen trap-config writes and declared
+in the start path the lane really takes (`ditW=13`, `ditCfg=True`, `DITBASE=0x00000000`). That is a
+real gap closed. **It does not change `THA`, and it does not move the stall.** Reporting it as
+progress on the hang would be false.
+
+### Where this leaves the hang
+
+Nowhere new. Section 159 still stands: every participant is healthy and parked, and the open
+question is what work should have been QUEUED and was not. `THA` is now removed from the candidate
+list - it is not a defect.
