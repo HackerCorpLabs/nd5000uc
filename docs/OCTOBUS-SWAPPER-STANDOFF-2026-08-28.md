@@ -16034,3 +16034,63 @@ Two of those lines are worth a look immediately and were never commented on here
 watch is armed on reads as zeros through this probe's addressing. That is either a probe using the
 wrong address space (likely - `MAPPING pil=14 D-space/APT` is on the line above) or something much
 more interesting, and nobody has said which.
+
+## 236 - the all-zero code dump explained, and it INVALIDATES 234's CNVWADR verdict
+
+235 flagged `LNEWSWAP code words at 0x0000BB38` and `0x0000BBB8` reading all zeros as unexplained.
+Cause found by reading the probe rather than re-running it.
+
+The probe resolves a mapping and prints which one it found:
+
+```
+----- CNVWADR patch probe (octobus-shortbringup) MAPPING pil=14 D-space/APT (MNCTAB anchor: 6/6) -----
+```
+
+**D-space/APT.** Its reader is `Rv(w) => nd100.Dbg_ReadVirtualWord(w, foundApt, foundPil)`, and
+`Dbg_ReadVirtualWord`'s own parameter doc is explicit: *"useAPT: True for D-space (APT), false for
+I-space (PT)"*. So every read on that line goes through the DATA page table.
+
+That is correct for `NSAMSON`, `N5CPU`, `5MBBANK`, `5FPMAILBOX`, `ADRZERO` - all data, all returning
+plausible values, with `ADRZERO = 0x0840` validating the convention.
+
+It is WRONG for `NNC24 @ 0o145171`, `NNC06 @ 0o134051` and the `LNEWSWAP` words at `0o135470` /
+`0o135670`. **Those are CODE**, and on separate I/D they live in I-space. Read through APT they
+returned `0x0000` - and crucially **not** `"unmapped"`, which the probe distinguishes. A mapped read
+of the wrong page table produced a plausible zero.
+
+### Two conclusions built on that zero
+
+1. **234's "CNVWADR is not patched out" is UNSAFE and is hereby withdrawn.** The test was
+   `NNC24/NNC06 == 0xA803 ? patched : not patched`, and both read `0x0000` from the wrong page table.
+   `0x0000` is not evidence of "not `0xA803`" when the read never reached the code. **Hypothesis 8
+   (section 7.6.9, `CNVWADR` stamped out when `NSAMSON = 0`) is RE-OPENED** - though note `NSAMSON`
+   itself reads `0x0004` from the correct space, which argues against the patch having been applied.
+   The point is that the SITE READ proves nothing either way and must be redone.
+2. 235's "unexplained all-zeros" is explained: same cause, same line, same wrong page table.
+
+**One wrong page table, two wrong conclusions, in the same printed line as four correct ones.** The
+line looked uniformly authoritative because every field rendered identically - address, equals sign,
+hex value. Nothing marked which fields the mapping was actually valid for.
+
+### Fix
+
+`RvCode(w) => Dbg_ReadVirtualWord(w, false, foundPil)` for code, and the probe now prints **both
+spaces** for the `CNVWADR` sites:
+
+```
+----- CNVWADR sites BOTH SPACES (tag) NNC24@0o145171 I-space=... D-space=...
+      | NNC06@0o134051 I-space=... D-space=... -----
+```
+
+so the reading is self-validating. A code address that is zero in one space and an instruction in the
+other says which space is right; **a probe that cannot show a non-zero instruction in EITHER space
+has not earned the right to be quoted.** The `LNEWSWAP` word dump now reads I-space too.
+`E:\Dev\Repos\Ronny\RetroCore\Emulated.Tests\ND100\Nd100SintranNd5000OctobusBootHarnessTests.cs`.
+
+### The rule
+
+**A probe must read each address in the space that address lives in, and say which space it used.**
+Data and code are different address spaces on this machine; a single reader used for both is wrong
+for one of them and silent about it. Related to trap #22 (fold the address the way the subject does)
+and to 219d's "read physical memory where paged memory was needed" - the same family, one level up:
+not the wrong arithmetic, the wrong TABLE.
