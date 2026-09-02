@@ -6,7 +6,7 @@
 
 ---
 
-## TASK LIST — 3 tasks, 0 done, 1 in progress, 2 open
+## TASK LIST — 3 tasks, 1 done, 1 in progress, 1 open
 
 | # | Task | State | Next action |
 |---|---|---|---|
