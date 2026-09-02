@@ -17100,3 +17100,54 @@ Candidates exist - the swapper re-paging the page that holds the variable during
 is an obvious one, given `31B` transfers are running - but **none of them should be written down
 as the cause before the watch names it.** The point of the watch is that it cannot be fooled by
 which candidate sounds best.
+
+## 255. NAMED: THE GUEST CLEARS IT, BECAUSE THE SWAPPER RESTARTS FROM ITS ENTRY POINT. [V]+[D]
+
+The watch named the writer in one run, exactly as it did on the ND-100 side in section 241.
+
+```
+  ----- ND-500 phys watch @0x0004D8B4 (3 writers) -----
+  [w4] phys 0x0004D8B4 := 0x00000000  P=0x080081B8      <- the GUEST zeroes it
+  [w4] phys 0x0004D8B4 := 0x00008E30  P=0x08000004      <- our write-back, correct
+  [w4] phys 0x0004D8B4 := 0x00000000  P=0x080081B8      <- the GUEST zeroes it AGAIN
+```
+
+`WritePhysical32` from the CPU's own execution path - not the servicer, not the bridge, not the
+octobus station. **Nothing in the answer path is at fault**, which the previous six sections had
+already established one link at a time; this closes it by naming the actual writer.
+
+### Why the guest clears it - the P values give it away [D]
+
+From the same run's bridge log:
+
+```
+  CONTEXT SAVE   X5CPU=0  P=0x08008255   (monitor-call stop)     <- saved the MON return address
+  CONTEXT SWITCH X5CPU=-1 -> 0  (P=0x08000004 PS=3 CED=0 ...)    <- loaded the ENTRY POINT
+```
+
+The save records `0x08008255`, the address after the `CALLG` - correct. The load brings back
+`0x08000004`, **the process entry point**. And the zeroing PC `0x080081B8` sits early in the
+program, before the `MON 377B` site at `0x08008255`.
+
+That is consistent, on every observation we have, with **the swapper being restarted from the
+beginning instead of resumed after its monitor call**:
+
+ - it re-runs its own initialisation, which zeroes `SWPINFO` (`P=0x080081B8`);
+ - it then reaches `MON 377B` again and asks the identical question with identical arguments -
+   which is exactly what the ledger shows, twice, byte for byte;
+ - `argv[2]` is `0` every time because the program cleared it moments earlier;
+ - and it can never progress, because each answer is discarded by the next restart.
+
+It also explains the one thing the workload caveat (247a) could not: why our lane makes so few
+calls. It is not doing less work - **it is doing the same first step over and over.**
+
+Marked `[D]`, not `[V]`: the P values and the zeroing PC support this reading, but "the context
+load supplies the entry point rather than the saved P" has not itself been measured. That is the
+next and hopefully last measurement.
+
+### Next
+
+**Print, at context-load time, where P comes from**: the value in the saved context block, the
+value actually loaded into `regs.P`, and the PCB offset it was read from. If the load is taking
+`0x08000004` from a PCB field that was never updated with the saved `0x08008255`, that is the
+defect, and it sits in the context save/load pair - a region this hunt has not touched at all.
