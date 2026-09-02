@@ -16145,3 +16145,56 @@ Note for 235's benefit: its "two valid conventions, not a bug" reading is now do
 does address a real message when interpreted as a window offset, but nothing in SINTRAN was shown to
 interpret it that way - and `A` being zeroed by a routine whose job is to APPLY the bank is not what
 a second valid convention looks like.
+
+## 238 - I-space works: sites NOT patched (for real this time), and LNEWSWAP's address CONFIRMED
+
+run236, with code read through I-space as 236 required:
+
+```
+----- CNVWADR sites BOTH SPACES  NNC24@0o145171 I-space=0xD986 D-space=0x0000
+                               | NNC06@0o134051 I-space=0xD986 D-space=0x0000 -----
+----- LNEWSWAP code words at 0x0000BB38 (raw listing) -----
+   C435 A80C F219 C435 A809 F209 C435 A806 F215 C435 A803
+----- LNEWSWAP code words at 0x0000BBB8 (listing + 0o200) -----
+   5223 5A23 F744 C6C2 C401 A87E D985 621E DDFA CC4F 187B
+```
+
+**The probe now has its positive control**: I-space returns varied non-zero instruction words where
+D-space returns zeros, which confirms 236's diagnosis and makes these reads quotable.
+
+### 1. The CNVWADR sites are NOT patched - and this time the read is valid
+
+Both sites hold `0xD986`, not the `124003B` = `0xA803` stamp. **Section 7.6.9 is dead.** It was
+wrongly declared dead in 234 on a D-space read, re-opened in 236, and is now properly closed. Both
+sites holding the SAME word is consistent with both being the same macro expansion.
+
+Note the near-miss: `0xA803` DOES appear in the run, at `0o135472` in the raw-listing window, as
+ordinary code. Had the probe been aimed one window over, the patch test would have "fired" on an
+instruction that has nothing to do with the patch.
+
+### 2. LNEWSWAP is at listing + 0o200, confirmed by DECODING, not by assertion
+
+The `+0o200` window decodes exactly as the source says it should:
+
+| word | octal | instruction | NPL line at `135470` |
+|---|---|---|---|
+| `5223` | `0o51043` | `LDT` disp `0o1043` | `T:=5MBBANK` |
+| `5A23` | `0o55043` | `LDX` disp `0o1043` | `X:=SWMSG` |
+| `F744` | `0o173504` | `AAX` disp **`0o104`** | `*AAX HSWPI` |
+| `C6C2` | `0o143302` | `LDD T,X` | `LDDTX` |
+
+Three independent confirmations in four words: the relocation is real, the PC-watch arms at `0xBBB8`
+/`0xBBBE` are on the right instructions, and **`AAX`'s displacement `0o104` confirms `HSWPI = 0o104`
+from the instruction stream** - matching the six symbol files, with no symbol table involved.
+
+The raw-listing window by contrast is a regular repeating `C435 A80x F2xx` triple, i.e. a table, not
+a prologue - exactly the discrimination the probe's author built it to make.
+
+### 3. What this leaves
+
+`CNVWADR` is genuinely entered, is not stubbed, and genuinely returns `A = 0` where the classic lane
+gets the bank (237). So the anomaly is inside the routine, or in what the routine reads. run238 dumps
+`CNVWADR`'s body at `0o055160` and both call sites in context, in I-space.
+
+**Do not theorise about what `CNVWADR` does before that dump lands.** Every hypothesis in this file
+formed ahead of the measurement has been wrong, and the routine is now directly readable.
