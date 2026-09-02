@@ -15019,3 +15019,43 @@ storing instruction.
 `MACM-1718K-loaded-image.bin` is in the carver's `re\` folder. Every attempt tonight to reason about
 this code from the NPL listing has needed a correction; the linked image is the artifact that
 actually runs.
+
+## 219b - The `pc=` in the writes log is NOT a reliable writer, and our code says so already
+
+Before building on *"`pc=135673B` zeroes SWPINFO"*, I read what fills that field.
+`NDBusOctobus.Nd100WriteContext()` takes the **static** `CpuND100.DiagCurrentPC`, and the comment
+directly beneath it - written in an earlier session - describes my exact situation:
+
+> *"The PC alone is NOT enough to name a writer, and reading it as though it were produces a
+> confident wrong answer. Measured 2026-08-29: the top entry in the PC histogram was ST0PSYS+0o50,
+> which is a poll loop executing LDATX - a READ - yet it stood at the head of a WRITE log with
+> 166,430 writes against it."*
+
+**A READ instruction at the head of a write log.** That is precisely what I have: a zero-write
+attributed to a PC whose listing shows `LDDTX`. The previous session hit this shape, wrote it down,
+and I walked into it anyway - **the third time tonight a file we own already contained the answer.**
+
+**What survives the doubt:** the thread tag. Those zero-writes carry `thr=15`, the SAME thread as
+the `STDTX` at `pc=134057B` that stores the correct value - and that one is certainly an ND-100
+instruction. So **the ND-100 instruction loop is the writer**; it is the PC *within* it that cannot
+be trusted to a word.
+
+**What is therefore still `[V]`:**
+
+```
+  the cell 0x428DB8..BB is written 00 00 8E 30 by SINTRAN, correctly
+  it is then zeroed, 4 bytes, by the ND-100, twice, each time before LNEWSWAP's gate reads it
+  5ACTSWAPPER restores 8E 30 in between
+```
+
+**What is NOT established:** which instruction does the zeroing. `pc=135673B` is a lead, not a name.
+
+**And the linked image cannot settle it either.** `MACM-1718K-loaded-image.bin` is **31,352 bytes =
+15,676 words**, so it stops long before `0o135673` (48,059). It is an extract, not the full linked
+image - worth recording, because "read it from the loaded image" sounds like a plan right up until
+you check the file size.
+
+**NEXT: dump the guest's OWN memory at linked `0o135670`-`0o135676` at the end of a run and
+disassemble those words.** That names the instruction from the bytes that actually execute, and it
+independently tests the `+0o200` mapping for this specific line - which every other reasoning route
+tonight has needed a correction on.
