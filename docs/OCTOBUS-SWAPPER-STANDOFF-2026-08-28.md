@@ -14926,3 +14926,48 @@ of trace on each side answers it.
 **Worth recording about the shape of this:** eleven rounds, every one of which measured the guest,
 and the guest was right every time. The instrument kept pointing at SINTRAN because that is what it
 could see. **A PC watch can only ever indict the code it watches.**
+
+## 219 - ROOT CAUSE. Our `LDDTX` WRITES, and our `STDTX` stores the wrong value `[V]`
+
+No new run. The never-evicted writes log
+(`retrocore-nd5000-octobus\sintran-octobus-mpm-writes-octobus-shortbringup.txt`, 340 MB, already on
+disk and already enabled in the harness) carries every write to the contested double word with its
+`pc` and `pil`:
+
+```
+  5383121  W 0x00428DB8=0x0000  pc=134057B pil=2   <- SWMESS  STDTX, high half
+  5383123  W 0x00428DBA=0x008E  pc=134057B pil=2   <- SWMESS  STDTX, low half
+  5389947  W 0x00428DB8=0x0000  pc=135673B pil=12  <- LNEWSWAP's own LOAD line, writing
+  5389949  W 0x00428DBA=0x0000  pc=135673B pil=12  <-   ... and zeroing the low half
+  (then the gate at 0o135674 reads D=0)
+  5390005  W 0x00428DBA=0x008E  pc=145210B pil=12  <- 5ACTSWAPPER, same wrong value
+```
+
+**DEFECT 1 - the double store writes the wrong value.** At `pc=134057B` the `D` register holds
+`0o107060` = **`0x8E30`** (measured by the PC watch in round 11). The word that reaches memory is
+**`0x008E`**. `0x8E30 >> 8 = 0x8E`, so the low half is landing shifted, or the double is being
+assembled from the wrong halves. It reproduces at a second, independent site - `pc=145210B` in
+`5ACTSWAPPER` writes `0x008E` too - so it is the instruction, not one call site.
+
+**DEFECT 2 - and this one is sufficient on its own.** `pc=135673B` is inside `LNEWSWAP`'s
+`T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX` - **a LOAD line - and our emulator performs a WRITE of
+`0x0000` to both halves from it.** The very next instruction, `0o135674 IF D><0`, then reads the
+zero it just wrote. That is exactly the `D=0` measured at both gates, and it explains why the value
+survives nothing no matter when it is written.
+
+**So the swapper stall is ours, in the ND-100 CPU's double-word memory instructions**, not in
+SINTRAN and not in the octobus protocol. Every guest actor was right the whole time.
+
+**The instrument that answered it had been ON since before this investigation started.** The harness
+sets `TraceMpmWrites = true` at line 401 and writes a never-evicted per-write log with `pc` and
+`pil` on every entry. Eleven PC-watch rounds asked "which code runs"; one grep of a log already on
+disk answered "what does it write, and from where".
+
+**And the near-miss worth recording.** The in-memory MPM ring reported `[262144 accesses]` against
+`MPM_RING_LEN = 262144` - **full, therefore wrapped** - and in it no write of `0x8E30` appears. Read
+naively that says "the store never reached shared memory", which is a conclusion about ring
+eviction. The never-evicted file says the store DID reach it, with the wrong value. **A full ring
+and an absence look exactly like proof.**
+
+**NEXT:** read the ND-100 `LDDTX`/`STDTX` implementation. Two questions, in order - why does the
+load path write at all, and why does the store put `0x008E` where `0x8E30` belongs.
