@@ -15084,3 +15084,37 @@ to get wrong.
    this file's wrong-turns list** ("heredoc quoting failures (twice) - write patch scripts with the
    Write tool"), which I then walked into by using a heredoc anyway. Patch scripts are now written
    with the Write tool, no shell escaping in the path at all.
+
+## 219d - The code dump is all zeros, which means I read the wrong ADDRESS SPACE
+
+`run217.log`, the dump on a line this fixture provably reaches:
+
+```
+  LNEWSWAP code words at 0x0000BB38 (raw listing)      all eleven words = 0x0000
+  LNEWSWAP code words at 0x0000BBB8 (listing + 0o200)  all eleven words = 0x0000
+```
+
+**Round 8 recorded two PC hits at `0xBBB8`.** Code executes there, so its memory cannot be empty.
+`_machine.mem.ReadMemory32W(w << 1, false)` reads **physical** memory at physical word `w`; SINTRAN's
+code at PC `0xBBB8` lives in a **paged** segment, so the two are different cells that happen to share
+a number.
+
+> **An all-zero dump from a region that demonstrably executes means the wrong address space was
+> read, not that the memory is empty.** Real code is never eleven zero words. The tell is in the
+> data; nothing about the call site or the build would have shown it.
+
+**And it re-opens something I had quietly assumed.** `thr=15` was taken as proof that "the ND-100
+instruction loop is the writer" (219b). The thread tag proves only that the write happened **on that
+thread** - and OUR OWN C# runs on it too, inside IOX handlers, device callbacks and the octobus
+station's mailbox work. **A guest instruction and our emulator servicing a device are the same
+thread.** So the zeroing of `0x428DB8` may be our code clearing a message block, in which case no
+amount of guest disassembly would ever have shown it.
+
+**NEXT, and it is the cheaper question anyway:** capture the **C# stack** at the write site for that
+one address. `ND100Memory`'s write path already has an address-gated diagnostic hook
+(`PortAWriteCaptureEnabled`), so the shape exists. A managed stack names the writer outright -
+guest-instruction path or emulator path - and if it is ours, that is the fix site.
+
+**Decoding the guest was the wrong instrument for this question**, and two runs went into it. The
+question was never "which ND-100 instruction" - it was "what code zeroes this cell", and only one of
+those two possibilities is an ND-100 instruction at all.
