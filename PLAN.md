@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | in progress | Trace `LNEWSWAP`'s served-process branch (`135476` on) to the point it parks instead of restarting the requester. Standoffs 200-204. |
+| T1 | The octobus `place-domain` swapper stall | in progress | `LNEWSWAP`'s first gate `135474 IF D><0` reads `SWMSG.SWPINFO` as zero although the store lands and reads back. The apparent instrument contradiction is CLOSED (standoff 226 - the RAM watch was folded to a different cell; fixed, commit `e1f385654`). run226 is the first run whose object-level watch actually sees the cell: read its `RAM-OBJECT writers` block and name what clears the byte. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
