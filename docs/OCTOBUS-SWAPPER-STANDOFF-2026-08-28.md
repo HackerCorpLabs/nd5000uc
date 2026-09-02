@@ -16531,3 +16531,22 @@ calls and stops; the classic swapper makes 187 and finishes.** [OPEN]
 Next is not another probe. It is to read the octobus log's own record of what happened AFTER the
 second answer - the ACCP exchange trace and the micfu census are already in it - and say what the
 machine did instead of making a third call.
+
+## 244. THE FIRST SUPPRESSION RUN NEVER RAN THE SUBJECT. THE HARNESS CAUGHT IT. [V]
+
+Recorded so the numbering has no silent gap. run244 was launched without
+`RETROCORE_ND5000_PACK`, so it mounted a pack with no `(SYSTEM)SWAP-FILE:DATA`. The harness
+refused to let that read as a result:
+
+> WRONG PACK, not a machine failure: `(SYSTEM)SWAP-FILE:DATA` is not on the mounted image, so
+> nothing below this line exercises the bring-up at all.
+
+That guard is doing exactly the job the instrument-failure taxonomy asks for: **a run that never
+exercised the subject produces output that looks like a measurement**, and only an explicit check
+can tell the two apart. Without it I would have had a log full of plausible numbers describing a
+machine that never booted.
+
+Re-launched as run245 with `RETROCORE_ND5000_PACK=D:\DOMS-CSFIX.IMG` (verified present, 78,643,200
+bytes) and `RETROCORE_ND5000_WATCH=lnewswap`. Note for comparability: run245 uses the DEFAULT
+timeout scale, not a shortened one - a longer timeout can only reduce false stalls, and the
+question being asked ("does it get past two demand-page calls") is not sensitive to it.
