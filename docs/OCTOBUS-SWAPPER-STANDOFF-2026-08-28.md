@@ -14568,3 +14568,55 @@ module - they are unrelated - so that route is closed and something else is need
 `0x3B66` being hot is compatible with SOCTO being the octobus driver AND with `035546` being a
 constant that happens to collide with busy resident code. I wrote the conclusion before checking
 which - after spending the whole night recording that exact mistake.
+
+## 212 - THE CONTROL ARM IS AT THE WRONG ADDRESS, and has been since an earlier session `[V]`
+
+`5ACTSWAPPER`'s entry in `MP-P2-N500.NPL`:
+
+```
+  2857:144762   5ACTSWAPPER: A:=L=:"LREG"
+  2858:144764          CALL SLOCK; 0/\0
+```
+
+**`0o144762`. The arm says `0o145162`** - `0o200` words past it, in the tail of the routine before
+**`XTER500`** ("terminate/stop nd-500"), which begins at `0o145165`.
+
+```
+  correct  0o144762 = 0xC9F2
+  armed    0o145162 = 0xCA72
+  error    0o200 words
+```
+
+The label came from an earlier session and its comment even records a previous fix to it - *"0xC672
+was my arithmetic slip - 0o145162 is 0xCA72"*. **The hex conversion was corrected; the octal address
+itself was never checked against the listing.** Fixing the second step of a derivation is not
+checking the first.
+
+**What this retracts:**
+
+```
+  211  "the control HOLDS, 5ACTSWAPPER really runs"   -> WITHDRAWN. I validated the interior of a
+                                                         routine that is not 5ACTSWAPPER.
+  190, 199  "the wake path RAN - 5ACTSWAPPER executed twice"  -> back to [OPEN]. Both rest on this arm.
+  210  the suspicion that the arm was bad            -> was RIGHT. I tested it and got the wrong answer.
+```
+
+**AND THE `[OPEN]` FROM 211 IS NOW EXPLAINED.** `L=134355o` and `L=136240o` pointed at `WHILE D><-1`
+and a spot beside `GO NXTMSG`, matching no `CALL 5ACTSWAPPER` - because **the code being sampled was
+never 5ACTSWAPPER**. The anomaly was the symptom; I filed it as a puzzle about what `L` means and
+left the obvious reading unexamined. `L` was telling the truth about a routine I had misidentified.
+
+**THE INSTRUMENT LESSON, and it is a new one:**
+
+> **Testing an arm's INTERIOR using offsets from the same unverified BASE cannot detect a wrong
+> base.** 211 armed `base+2`, `base+4`, `base+7`, `base+13` - real offsets read from the listing,
+> applied to a base that was wrong - and five consecutive hot PCs came back and read as vindication.
+> The test was structurally incapable of finding the defect it was designed to look for.
+> **Verify the BASE against the source text; only then is the interior worth arming.**
+
+The `X=0o43430` "semantic match" that made the arm look right stays unexplained and must not be used
+as evidence for anything until the corrected arm reports.
+
+**Round 7 arms `0o144762` and its real interior.** If the corrected arm is hot, 190/199 are restored
+on a sound footing. If it is cold, `5ACTSWAPPER` never ran and the standoff's shape changes
+substantially - the ping would be posted with nothing ever acting on it.
