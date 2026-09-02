@@ -15591,3 +15591,65 @@ absence *in the instrument*. **An absence is only as wide as the instrument that
   the restart and fall back to a canned answer when it does not. **Settle it with
   `MonitorCallRestartsSeen` vs `MonitorCallRestartsTaken` before touching the layout**, because if
   this call should never have been answered locally, the layout is the wrong thing to fix.
+
+## 229 - it is NOT the forwarding path; the collision is the arg-slot layout, and SWPINFO is a POINTER
+
+run229 added the ledger 228 asked for. Both questions it was built to separate are answered.
+
+```
+----- MON RESTARTS: Seen=1 Taken=1 gap=0 -----
+----- MON-ANSWER LEDGER (call, argc, target message): 2 -----
+  MON 00FF argc=4 msgBase=0x00428D30  <== reaches slot k=2 (msgBase+0x88)
+  MON 00FF argc=4 msgBase=0x00428D30  <== reaches slot k=2 (msgBase+0x88)
+```
+
+**`gap=0`.** The one restart in the run was SEEN and TAKEN, so the conditional-forward path is not
+silently declining anything. `Seen > Taken` is the tell for a MON call we answered instead of
+forwarding, and it does not fire. **The forwarding hypothesis from 228 is dead - do not re-open it.**
+
+**`MON 0x00FF` is MON 377B**, the swapper's own demand-page call, and it happens exactly twice with
+**argc=4** - matching the two `0x8E` stores and the two zero reads, one for one.
+
+`msgBase = 0x428D30` is SWMSG, the swapper's own activation message, which is the CORRECT target under
+answer-in-place (the microcode answers the process's own message). So the target is right, the
+forwarding is right, and what is left is the LAYOUT.
+
+### SWPINFO is a pointer, and its offset is hard symbol evidence
+
+`HSWPI=000104` appears in **six** symbol files across three SINTRAN versions - `N500-SYMBOLS.SYMB`
+(K03/L07/M06), `N5000-SYMBOLS`, `RTLO-SYMBOLS`, `SYMBOL-1-LIST`. Not derived, not inferred:
+`SWMSG.SWPINFO` is at word `0o104` = byte `0x88`, and `0x428D30 + 0x88 = 0x428DB8`. It is 32 bits, so
+it occupies `0x428DB8..0x428DBB` - exactly the k=2 argument-value slot (`msgBase + 0x80 + 8`, two
+words).
+
+And it is a POINTER, not a flag. From `MP-P2-N500.NPL`:
+
+```
+133654   X:=SWMSG; T:=5MBBANK; *AAX HSWPI; STDTX      % MMESSAGE=:SWMSG.SWPINFO
+135470   T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX      % AD:=X.SWPINFO      <- LNEWSWAP entry
+135601   T:=5MBBANK; *MICFU@3 LDATX                   % D:=SWMSG.SWPINFO.MICFUNC
+```
+
+It STORES a message address (`MMESSAGE`), and later code dereferences fields THROUGH it
+(`.MICFUNC`, `.N5STATUS`, `.SPFLAG`). The measured value is `0x00008E30` = MPM-relative
+`0x428E30` = **the requester's ping message**. So the mechanism end to end is: SINTRAN parks the
+request address in `SWMSG.SWPINFO`, `LNEWSWAP` gates `IF D><0` on it, and our MON-answer writes zero
+over the pointer. The swapper then correctly concludes there is nothing to do.
+
+### The three candidates that remain, in the order they should be settled
+
+1. **Is `0o100+2k` the right home for MON argument VALUES at all?** `CLAUDE.md` warns the neighbouring
+   "answer result block at 40B-47B" has **no symbol evidence** and that the `FUNCS ,X 40+` stores are
+   frame-relative. Against that, `HSWPI=0o104` is symbol-hard and OCCUPIED. Two of our own sources
+   disagree and the symbol wins. **Most likely defect.**
+2. **Does MON 377B really carry 4 arguments?** `argc` comes from our CPU. If the real call passes
+   fewer than 3, slots k=2/k=3 are never written on real hardware and no collision exists there -
+   which would move the defect to argument counting, not to the layout. Cheap to carve, and it
+   changes which fix is correct.
+3. **Is the value block supposed to be written into the MESSAGE at all**, or into PROCESS memory? The
+   servicer's own comment at `Nd500MicrocodeServicer.cs:3242` says the write-back mask means "the
+   32-bit address @0o40+2k gets the 32-bit value @0o100+2k **written into PROCESS memory**" - which
+   describes reading a pair out of the message, not writing a pair into it.
+
+**Nothing is being changed on this evidence.** Each candidate implies a different edit, and picking
+one now would be exactly the plausible-looking guess this file exists to prevent.
