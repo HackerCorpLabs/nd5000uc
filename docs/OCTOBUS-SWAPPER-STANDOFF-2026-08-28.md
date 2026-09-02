@@ -16300,3 +16300,73 @@ shift of SIX. Those cannot both describe the same executed instruction. So eithe
 report `A` and `D` at each, which distinguishes the two cases directly. Writing the contradiction
 down rather than resolving it by preference is the whole point - the last three times this file
 picked the reading that fit the story, the story was wrong.
+
+## 240. CNVWADR IS CORRECT. 0x8E30 IS THE ANSWER, NOT A TRUNCATED 0x428E30. [V]
+
+run239 armed the PC watch on the conversion site itself and on the two words after it, and
+printed A and D at each. That settles §239a's shift-count contradiction and kills hypothesis
+#10 ("the high half of the converted address is lost").
+
+Measured, one run, NNC06 @ linked `0o134051` (PIL=2, X=0o43430 = 0x4718):
+
+```
+ 0o134051  A=0o41    D=0o43430   <- before the SAD
+ 0o134052  A=0o4121  D=0o143000  <- after it
+ 0o134053  A=0o21    D=0o143000
+ 0o134054  A=0o0     D=0o107060  <- the STORE, value 0x8E30
+```
+
+Decoded against the I-space words already dumped in the same run
+(`0xB829=0xD986  0xB82A=0x6A44  0xB82B=0xDDFB`):
+
+| addr | word | octal | instruction | effect on the linked 32-bit AD |
+|---|---|---|---|---|
+| `0o134051` | `0xD986` | `0o154606` | `SAD` left 6 | `0x0021_4718` -> `0x0851_C600` |
+| `0o134052` | `0x6A44` | `0o065104` | `SUB I ,0o104` | A `0x851` -> `0x11`, i.e. minus `0x0840_0000` |
+| `0o134053` | `0xDDFB` | `0o156773` | `SAD` ZIN right 5 | `0x0011_C600` -> `0x0000_8E30` |
+
+Every step reproduces the measured registers bit for bit. The net function is
+
+```
+    result = ((wordAddr << 6) - (5MBBANK << 22)) >> 5
+           = (wordAddr - 5MBBANK * 65536) * 2
+```
+
+i.e. **subtract the MPM base, then convert words to bytes.** `5MBBANK = 0o41 = 33` and
+33 * 65536 words = `0x420000` bytes = ADRZERO. So for the ping message at ND-100 physical
+`0x428E30`:  `0x428E30 - 0x420000 = 0x8E30`.
+
+**`0x8E30` is the ND-500-side physical byte address of that message and is exactly right.**
+The `<<6` exists only to give the subtraction room; +6 then -5 is a net *1 word-to-byte
+scale. Nothing is lost anywhere.
+
+### What this retires
+
+ - Hypothesis #10 (`SAD` drops the high half) - dead. Our `SAD` was already refuted by code
+   reading in §239a; now the site is refuted by measurement too.
+ - §239a's "the measured D is X shifted by ONE, but the word says SIX" - **both halves of that
+   were mine, not the machine's.** The shift IS six. I read the stored value two words
+   downstream and back-derived a shift from it, which folds three instructions into one and
+   can only produce a wrong count. The lesson is §235's, again: read the site, not a
+   consequence of the site.
+ - The whole framing that the harness header's `swpInfo=0x00008E30` next to `swMsg=0x00428D30`
+   showed a truncation. **They are two different address spaces printed side by side** - one
+   ND-100 physical, one ND-500 physical - and I treated the difference as damage for eleven
+   sections. This is the same shape as [[nd5000-monanswer-overwrites-swpinfo]], which had
+   already recorded that the SWPINFO cell is NORMAL.
+
+### Where the run actually stands (same log, existing probes, nothing new added)
+
+```
+msgs=81  micfu[1B:65  12B:1  23B:1  24B:1  31B:13]  restarts=1/1
+startSeen=1 startMicfu=23B startTaken=True  ansMON=377B  ansArgc=4
+PC=0x08008255 stopMode=WAIT
+MON-ANSWER LEDGER: 2 entries, both MON 00FF argc=4 msgBase=0x00428D30 N5STA=2
+```
+
+ - The 13 `31B` transfers are **not** page-ins. The copy log shows them writing 4 bytes of
+   zero each over ND-500 physical `0x96..0xC4` - that is the documented start-swapper
+   write-then-read-back verify block, and it completes.
+ - `restarts=1/1` - `Seen == Taken`, so the one `3MONCO` was genuinely forwarded, not faked.
+ - **The octobus swapper issues only TWO MON 377B calls and then waits. The classic lane
+   issues 78.** That gap, not the address conversion, is the live question. [OPEN]

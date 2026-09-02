@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **open - aim was wrong since 218** | The SWPINFO cell is entirely NORMAL: value correct (`0x8E30` addresses a real message as an MPM-window byte offset), overwrite normal (classic does it 157x), `5MBBANK=0x21` correct, `CNVWADR` not patched, `5FPMAILBOX=0x851` allocated. **8 hypotheses dead.** **NEXT: STOP ADDING INSTRUMENTS - read run231's existing probe dump top to bottom and write down what each says before hypothesising.** Unexplained: `LNEWSWAP code words at 0x0000BB38 and 0x0000BBB8 both read ALL ZEROS`. Standoffs 232-235. |
+| T1 | The octobus `place-domain` swapper stall | **open - the write/read disagreement is the whole defect** | `CNVWADR` is now VERIFIED CORRECT byte-exact (standoff 240): `(wordAddr - 5MBBANK*65536)*2`, so `0x8E30` is the right ND-500-side address and the value SINTRAN stores is sound. **9 hypotheses dead.** The cell is `swMsg+0o104 words` = ND-100 physical `0x428DB8` = `HSWPI`/`5DP3` - which is ALSO MON argument value slot k=2, and the MON-ANSWER LEDGER records both 377B answers landing on it. NEXT: put a single SEQUENCE COUNTER on that one cell and print, in order, SINTRAN's store, our MON-answer write, and the LDDTX read - **on BOTH lanes**. Section 231 tried to settle ordering with call COUNTS, which cannot see order at all. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
@@ -22,9 +22,11 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: INSTRUMENT THE EMULATOR, NOT THE GUEST.** Log the PHYSICAL address and bank that our
-`STDTX` at linked `0o134060` and our `LDDTX` at linked `0o135670` each resolve to, and compare them.
-One trace line on each side. Standoff **218**.
+**NEXT: ORDER THE THREE ACCESSES TO ONE CELL, ON BOTH LANES.** ND-100 physical `0x428DB8`
+(= `swMsg + 0o104 words` = `HSWPI` = `5DP3` = MON argument value slot k=2) is written by SINTRAN,
+written again by our MON 377B answer, and read back as zero. Stamp each of those three with a single
+monotonic counter and print them in sequence. Counts cannot answer an ordering question - section 231
+tried and got a wrong verdict. Standoffs **218**, **240**.
 
 **THE STALL IS LOCATED, AND IT IS OURS `[V]` (2026-09-02, rounds 7-11).** SINTRAN writes `0x8E30`
 into word `0o43334` and later reads **zero** out of the same word:
