@@ -17151,3 +17151,49 @@ next and hopefully last measurement.
 value actually loaded into `regs.P`, and the PCB offset it was read from. If the load is taking
 `0x08000004` from a PCB field that was never updated with the saved `0x08008255`, that is the
 defect, and it sits in the context save/load pair - a region this hunt has not touched at all.
+
+## 256. THE MECHANISM, FROM THE LOG'S OWN ORDERING: A SILENTLY SKIPPED CONTEXT SAVE. [V]+[D]
+
+The bridge log, in order, needs no new run to read:
+
+```
+  MON 377B argc=4 ret=0x08008255 ... X5CPU=-1          <- bridge does NOT know a process is loaded
+  CONTEXT SWITCH X5CPU=-1 -> 0 (P=0x08000004 ...)      <- loads the ENTRY POINT
+  RESTART write-back: @0x080240B4:=0x00008E30          <- correct, and pointless
+```
+
+`SaveLoadedProcessContextOnStop` opens with `if (_loadedX5Cpu < 0) return;`. At the first
+`MON 377B` that field is `-1`, so **the save is skipped and the `CALLG` return address
+`0x08008255` is discarded** - without a word in any log. `SwitchToProcessIfNeeded` then loads P
+from process 0's context block, which still holds the entry point `0x08000004`.
+
+That completes the chain to section 255's measurement: the guest resumes at its entry, re-runs
+initialisation, zeroes `SWPINFO` at `0x080081B8`, reaches `MON 377B` again with identical
+arguments, and no answer can ever survive.
+
+**The guard itself is correct** - you cannot save a context you do not know you hold. The defect
+is that nothing told the bridge process 0 was loaded.
+
+### The narrow question left
+
+`_loadedX5Cpu` is assigned in exactly two places: `NoteLoadedProcess` (one caller, on the 3START
+path) and the end of a successful `SwitchToProcessIfNeeded`. It is never reset to `-1` after
+construction. So `NoteLoadedProcess` was **never called** - yet the harness header reports
+`startSeen=1 startMicfu=23B startTaken=True`.
+
+**"The start path ran" and "the bridge knows a process is loaded" have been the same assumption
+all along, and they are not the same thing.** `[D]` - which of the two is false is not yet
+measured.
+
+Two lines added, both making an invisible thing visible rather than changing behaviour:
+
+ - `CONTEXT SAVE SKIPPED - no loaded process ... regs.PC=0x... IS BEING DISCARDED`
+ - `PROCESS START recorded: _loadedX5Cpu := n`
+
+If run256 shows the skip line but no start line, the 3START path never reached
+`NoteLoadedProcess` and the fix belongs there. If it shows both, something between them is
+losing it, and the bridge instance identity is the next thing to check.
+
+Note what this makes of the counters: `startTaken=True` is TRUE and was never a lie - it reports
+that the servicer accepted the start. It simply does not report whether the bridge recorded it,
+and I read it as if it did for several sections.
