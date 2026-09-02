@@ -14776,3 +14776,49 @@ happened. It arms `0o135474` rather than `0o135476`, because at that instruction
 **Note what the counts could never have shown.** Eight rounds of hot/cold got the break to one
 instruction; the remaining question is purely about sequence, and no count answers it. The
 instrument has to change shape, not just aim.
+
+## 216 - ORDERING IS REFUTED. The write is FIRST, correct, and the gate still reads zero `[V]`
+
+`run213.log`, read chronologically from the per-hit register log:
+
+```
+  1  SWMESS marks requester SWPPING  @0o134045  X=43430o   (the ping node)
+  2  SWPINFO WRITE                   @0o134054  D=107060o  (= 0x8E30, the ping node address)
+  3  SWMESS stamps 3START            @0o134061  X=43230o   (SWMSG)
+  4  5ACTSWAPPER #1
+  5  LNEWSWAP #1  -> THE GATE        @0o135674  D=0   X=43334o
+  6  SWPD4 park #1
+  7  5ACTSWAPPER #2, LNEWSWAP #2 -> THE GATE    D=0 again
+  8  SWPD4 park #2
+```
+
+**The write comes FIRST and it stores the RIGHT value.** `D=0o107060` is exactly the `0x8E30` the
+end-of-run dump reports as `swpInfo`. So `SWPINFO` is written correctly, before the swapper ever
+asks - **and the gate still reads zero.**
+
+**205's ordering hypothesis is REFUTED, by the measurement designed to test it.** Worth stating
+plainly: it was my own prediction, it was specific, and the run said no. The `[MON PATH]` note's
+phrase *"LNEWSWAP with nothing to do"* describes the symptom correctly and its implied cause -
+nothing was posted - is wrong. Something was posted, first, with the right value.
+
+**So the value is being ERASED between the write and the read.** `MP-P2-N500` has exactly two
+zeroing writers of the field:
+
+```
+  0o135551  LNEWSWAP's own error arm      - measured 0 hits (round 8). Not this.
+  0o136057  X:=SWMSG; *AAX HSWPI; STZTX   - the EMPTY path.
+```
+
+**And the emulator already knew about the second one.** `Nd500CpuProcessBridge.cs` carries this in a
+comment, written in an earlier session: *"SINTRAN had taken the EMPTY path (SWMSG HSWPI:=0,
+SWPIN:=0 at MP-P2-N500.NPL:136057-136062)"*. That is the exact pair of instructions, cited by line,
+sitting in our own source tree while I spent nine rounds finding my way to it.
+
+**Round 10 arms `0o136057` and `0o136062` plus the `EMPTY` label above them.** Their position in the
+chronological log settles whether the value is erased before the swapper asks - and if so, what
+drives control to `EMPTY` that early.
+
+**Second time tonight the answer was already written in a file I own** (the first was the `+0o200`
+relocation, thirty lines above the arms I kept editing). Both were comments left by earlier sessions
+recording exactly the thing I then rediscovered the hard way. **Grep the emulator's own comments for
+a routine name before instrumenting it** - our tree is a source, not just the subject.
