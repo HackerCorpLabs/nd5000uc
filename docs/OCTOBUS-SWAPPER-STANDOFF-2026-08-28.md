@@ -16695,3 +16695,52 @@ where writing zeros was the defect. In both bridges `values[k]` is *derived from
 so a zero address always implied a placeholder value. No path loses a value it actually had.
 
 run247 measures the guard with the probe switch OFF.
+
+## 247. THE ADDRESS-ZERO GUARD DID NOT FIX IT. SECTION 246's ROOT CAUSE IS REFUTED. [V]
+
+run247 (address-zero guard, probe switch OFF, 15.9 min - comparable to run239's 15.75):
+
+```
+  ----- `place-domain cpu-stat` (STALL) -----
+  MON-ANSWER LEDGER: 2      micfu[1B:100 12B:1 23B:1 24B:1 31B:13]   restarts=1/1
+  THE GATE  hit#1 PIL=12 A=0o D=0o        <- still reads zero
+  0x428DBA zeroed 6 times, written 0x8E 4 times
+```
+
+Unchanged from run239 in every way that matters. And the stack trace of a remaining zero write
+names `Nd500MicrocodeServicer.cs:3798` - **the value-write line, which is the one the guard
+protects**. It executed, therefore `a != 0`.
+
+**So slot 2 carries a real operand address, and section 246's root cause is wrong.**
+
+### Where the wrong inference came from
+
+I read this comment in `Nd500CpuProcessBridge.cs`:
+
+> Measured: the swapper calls MON 377B with operands at `0x080240B0`/`0x080240B4` ...
+
+saw two addresses named against `argCount=4`, and concluded slots 2-3 must have `addr == 0`. That
+is an inference from prose describing *some* call, not a measurement of *this* call. The `argv`
+trace I added showed VALUES (`1,0,0,0`) and I let those zeros stand in for absent addresses - but a
+value of zero read from a real address looks identical to a placeholder for a missing one. **That
+is the exact distinction section 246a said the guard was designed around, and I then failed to
+measure the very field the guard keys on.**
+
+The guard itself stays: writing a placeholder into a slot that has no operand address is wrong on
+its own terms, and it is documented as such. But it is recorded here as **changing nothing
+measurable on this path** - `msgs` 81 -> 116 and `1B` 65 -> 100 only track wall-clock. Nobody
+should later read it as the fix.
+
+### What is now established, and what the next measurement must be
+
+`HSWPI` genuinely IS the parameter-3 return cell (242, `[V]`), SINTRAN genuinely stages its live
+pointer there (241, `[V]`), our answer genuinely overwrites it (241, `[V]`), that overwrite is
+genuinely what stalls the run (245, `[V]`) - **and the classic lane genuinely does the same thing
+187 times and completes (243, `[V]`).** All five hold simultaneously, so the difference is not in
+any of them.
+
+**Next: print the argument ADDRESSES, not the values.** `argv` shows what we write; it has never
+shown where the operands came from. Run BOTH lanes and compare the address lists for `MON 377B`.
+If the classic lane's slot-2 address differs from the octobus lane's - or if one lane resolves an
+address the other leaves at 0 - that is the difference, and it is upstream in the bridge, not in
+the answer loop. Do not touch the answer loop again without that comparison in hand.
