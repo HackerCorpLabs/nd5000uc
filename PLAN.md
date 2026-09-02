@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **REFRAMED - the SWPINFO overwrite is NORMAL** | Classic lane (WORKS) overwrites `SWPINFO` 157x on MON 377B with the same `N5STA=2`, so the whole 218-231 framing was wrong. Real difference found: the stored (bank,address) is `0x00210718` classic vs `0x00008E30` octobus - **bank half ZERO on octobus**, and the two are not even the same kind of address. **Next: carve `CNVWADR` (`*NNC06` @133651) and `5MBBANK` on both lanes.** Standoff 232. |
+| T1 | The octobus `place-domain` swapper stall | **REFRAMED - chasing the zero bank** | `SWPINFO` carries a 32-bit ND-100 WORD address (classic `0x210718` = byte `0x420E30`); octobus holds `0x00008E30`, an MPM-relative BYTE offset with bank=0. Carved: bank half IS `5MBBANK`, derived at `XMSINIT` (`RP-P2-N500.NPL:131133`) from `5FPMAILBOX`, the page `5GBUFF` allocates (`5P-P2-MON60.NPL:027104`). **Next: read resident `5FPMA`=0o111102 and `5NPMA`=0o111103 at end of run on BOTH lanes.** Do not patch `CNVWADR` - it is downstream. Standoffs 232-233. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
