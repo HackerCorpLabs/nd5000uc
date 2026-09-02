@@ -15431,3 +15431,63 @@ the rest of the machine names and do its own folding.
 Note also that 225's own standing rule ("an exact-address watch that reports nothing is reporting
 about the address, not about the traffic - widen first") was CORRECT and pointed straight at this,
 and the widening to `span 4` still could not reach it, because the error was 0x20000 wide, not 4.
+
+## 227 - the byte is never erased before the gate reads it; the writes are not in the window
+
+Decoding run222's cell probe IN ORDER (not searching it) changes what the question is. All 13
+records, one run, one bank:
+
+```
+R  0x00428DBA=0x0000 bank=#24129389 pc=61CE pil=0
+W  0x00428DBA=0x0000 bank=#24129389 pc=61CF pil=0
+RB 0x00428DBA->0x00  bank=#24129389 pc=61CF
+W  0x00428DBA=0x0000 bank=#24129389 pc=B2C6 pil=1
+RB 0x00428DBA->0x00  bank=#24129389 pc=B2C6
+W  0x00428DBA=0x008E bank=#24129389 pc=B82F pil=2     <- the value arrives
+RB 0x00428DBA->0x8E  bank=#24129389 pc=B82F           <- and LANDS
+R  0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12    <- LNEWSWAP's gate reads ZERO
+W  0x00428DBA=0x008E bank=#24129389 pc=CA88 pil=12
+RB 0x00428DBA->0x8E  bank=#24129389 pc=CA88           <- lands AGAIN
+R  0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12    <- gate reads ZERO AGAIN
+W  0x00428DBA=0x0000 bank=#24129389 pc=BCB3 pil=12
+RB 0x00428DBA->0x00  bank=#24129389 pc=BCB3
+```
+
+`pc=BBBB pil=12` is `LNEWSWAP`'s gate (the watch arms sit at `0xBBB8`/`0xBBBE`).
+
+**The three zeroing writes are all OUTSIDE the two windows that matter.** `61CF` and `B2C6` are
+before the value ever arrives; `BCB3` is after the gate has already read zero twice and parked. So
+the framing carried since 218 - "SINTRAN writes 8E30 and something zeroes it before the gate" - is
+WRONG. Between `RB ->0x8E` and the gate's `R =0x0000` there is **no write of any kind on the
+ND-100 path**, and the cell is proven to hold `0x8E` at the start of each window.
+
+### What that leaves
+
+Same object (`bank=#24129389` on every record, including both zero reads), same address, two
+different answers, no recorded write between them. Only an UNRECORDED write can do that, so the
+question is now "which writer is invisible to an ND-100-side probe", not "which writer erases it".
+
+Two ways to be invisible, both checked by reading:
+
+- **Direct array access, bypassing the `RAM.Write`/`WriteFast` hooks.** `RAM.ClearMemory` and
+  `RAM.Load` write `memory[i]` directly and WOULD be invisible. Neither touches this bank: the only
+  ND `ClearMemory` call is `NDBusND500IF.cs:1200`, which is the **3022** card, not the octobus, and
+  no `Load` reaches the octobus `DeviceRAM` outside the Ethernet tests. `RAM.RawData` has no ND user
+  at all. **Closed.**
+- **Port B** - the ND-5000 CPU or the octobus station writing the shared RAM directly. These DO go
+  through `RAM.Write` (`MpmBackedMicroMemory.Write` calls `_mpm.Write`), so they are invisible to
+  every ND-100-side instrument but VISIBLE to the object-level watch. **This is the remaining
+  candidate**, and run226 - the first run whose watch is folded onto the actual cell (226) - either
+  names it with a managed stack or rules it out.
+
+Also eliminated properly, not by a count of past hits: `TryOverrideMpmRead` replaces the value
+BEFORE the probe records it, so it could have produced a false `R =0x0000`. It cannot here - it
+returns false unless `_ducsActive && HaveControlStore`, fires only inside the parameter block at
+`_ducsR25BaseByte` (`0x420800`), and never yields zero.
+
+### Method note
+
+This came out of reading 13 lines in order, and those 13 lines were sitting in run222's log while
+219-225 argued about instruments. **RULE #0b again**: the ordering was the whole answer and no search
+would have surfaced it, because the informative fact is an ABSENCE BETWEEN two events - which you can
+only see once the events are laid out in sequence.
