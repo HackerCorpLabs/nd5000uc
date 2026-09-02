@@ -16480,3 +16480,54 @@ the write order; it is not yet measured.
     whether 78 answers there produce 78 restarts.
  2. If classic is 1:1 and octobus is 2:1, the question becomes why our ND-500 CPU issued a second
     `CALLG` MON while stopped. Do NOT suppress the second write to hide it.
+
+## 243. THE CLASSIC LANE DOES THE IDENTICAL OVERWRITE 187 TIMES AND WORKS. §242 IS REFUTED. [V]
+
+The comparison run finished (`Nd500_LedFortran_UnderRealSintran_RealCpu_Capture`, passed, 9.0 min).
+Classic-lane ledger:
+
+```
+[MON-ANSWER LEDGER after RUN LEDFORTRAN] 187 answered
+   MON 00FF argc=4 msgBase=0x00420D30 N5STA=2 SWPINFO=0x00210718  <== reaches slot k=2 (msgBase+0x88)
+   ... 186 more, argc=4 throughout (one argc=7)
+```
+
+Point by point against the octobus lane:
+
+| | octobus | classic |
+|---|---|---|
+| `MON 377B` answers | **2** | **187** |
+| `argc` | 4 | **4** |
+| target message | `0x00428D30` | `0x00420D30` |
+| reaches value slot k=2 (`+0x88`) | yes | **yes, all 187** |
+| `SWPINFO` at answer time | `0x00008E30` | `0x00210718` |
+
+**`argc` is identical, and the classic lane lands on the same `HSWPI` cell 187 times and still
+completes.** So the overwrite is harmless and §242's derivation - "a second MON call is arriving
+while the first is being serviced" - does not survive: the classic lane would have to be doing the
+same thing 187 times over.
+
+I marked §242 `[D]` and said the classic run would decide it. It did, against me. Recording that
+plainly rather than reshaping the theory to fit.
+
+### One thing the comparison DID settle, cleanly
+
+The two `SWPINFO` values are the same address in different frames, which independently re-confirms
+§240:
+
+ - classic `0x00210718` is an ND-100 **word** address; `0x210718 * 2 = 0x420E30` = the classic
+   requester node.
+ - octobus `0x00008E30` is the ND-500-relative **byte** offset; `0x8E30 + 0x420000 = 0x428E30` =
+   the octobus requester node.
+
+Both are right. `CNVWADR` is doing exactly the conversion §240 measured.
+
+### What is actually left
+
+Everything about the cell, the slots, the conversion and the overwrite is now measured correct on
+both lanes. The difference is blunt and unexplained: **the octobus swapper makes two demand-page
+calls and stops; the classic swapper makes 187 and finishes.** [OPEN]
+
+Next is not another probe. It is to read the octobus log's own record of what happened AFTER the
+second answer - the ACCP exchange trace and the micfu census are already in it - and say what the
+machine did instead of making a third call.
