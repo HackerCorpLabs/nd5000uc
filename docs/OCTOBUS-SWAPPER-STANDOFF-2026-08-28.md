@@ -16768,3 +16768,46 @@ survivable, not about how many times each lane calls. Section 243's conclusion s
 
 When run248's address lists arrive, compare them **per call**, not in aggregate - a difference in
 the slot-2 address on a single `MON 377B` is the signal; the number of calls is not.
+
+## 248. ALL FOUR OPERANDS ARE REAL. THE ZEROS ARE UNINITIALISED OUTPUT PARAMETERS. [V]
+
+run248, octobus lane (16.3 min), the field never printed before:
+
+```
+  MON 00FF argc=4  addr[0]=08012A28 1=080240B0 2=080240B4 3=0802428C
+                   argv[0]=00000001 1=00000000 2=00000000 3=00000000
+```
+
+**Every slot has a real operand address.** Nothing is missing, so section 246's whole premise is
+gone for good, and the address-zero guard can never fire on this call. The comment that misled me
+named `0x080240B0`/`0x080240B4` - those are slots **1 and 2**, not 0 and 1, and there are two more
+besides.
+
+The zeros are therefore genuine reads: three ND-500 variables that hold 0 at call time. The
+natural reading is that they are **by-reference OUTPUT parameters** - the program passes addresses
+of variables meant to RECEIVE results, so their value going out is meaningless. Writing 0 into the
+value slots is then correct marshalling of a meaningless input, not a bug in the answer loop.
+
+Which sharpens the contradiction to a single question about ORDER:
+
+ - The microcode builds the stop record (addresses + current values) when the `CALLG` traps.
+ - SINTRAN then services it, and `LNEWSWAP` reads `SWPINFO` at `HSWPI` = word `0o104` = the
+   parameter-3 slot the stop record just wrote.
+
+If both are true of real hardware, `LNEWSWAP` would always read parameter 3's outgoing value, not
+a staged pointer - which cannot be how the machine works. So one of these is wrong, and the two
+candidates are now concrete:
+
+ 1. **Order.** Our stop record is written AFTER SINTRAN stages `SWPINFO`, where the hardware writes
+    it BEFORE. The RAM watch order (`store 0x8E30` -> `zero`) is consistent with this.
+ 2. **Message identity.** `ResolveMessageForRunningProcess` returns `swMsg` (`0x428D30`) for this
+    call. If the calling process's message is NOT `SWMSG`, then writing parameters there tramples
+    the swapper's own control block, and the defect is the resolution, not the write.
+
+Candidate 2 is testable without any new instrument: the classic lane's address list is already
+being captured in the same run. **If classic's `MON 377B` shows the SAME four operand addresses
+but a DIFFERENT `msgBase` relationship, candidate 2 is it.** Section 243 recorded classic's
+`msgBase=0x00420D30`, which is that lane's `swMsg` - so if classic also answers onto its own
+`swMsg` and survives, candidate 2 falls and order is what remains.
+
+Waiting on the classic lane rather than guessing between them.
