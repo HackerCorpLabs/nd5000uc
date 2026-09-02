@@ -16912,3 +16912,28 @@ log, and a populated log.
 whether the octobus lane never reaches it, reaches it with empty arrays, or reaches it and faults
 is **not yet measured** - the three look identical from outside and the run in flight is the first
 instrument that can tell them apart.
+
+## 251. THE SAME ZERO, A THIRD TIME, FOR A THIRD REASON. [V]
+
+run250 printed no write-back log either - and not because the write-back is dead. The block I
+added in section 250 sits beside the `OUTCOME:` report, and **`OUTCOME:` never appears in this
+test's output at all**: that report belongs to a DIFFERENT test method. I assumed the reporting
+path was shared and did not check. RULE #0.
+
+So `RESTART write-back` has now come back empty three times, for three unrelated reasons:
+
+ 1. the log existed but the harness printed it only inside a conditional that never fired (250);
+ 2. the printer I added lives in a method this test does not run (251);
+ 3. and the thing I actually want to know - whether the write-back runs - is *still unmeasured*.
+
+**All three produce a byte-identical zero.** That is the whole lesson of the instrument-failure
+taxonomy in one cell: an absence is evidence about the instrument until proven otherwise, and it
+can be about a DIFFERENT part of the instrument each time you look.
+
+Fixed by putting the dump in `ReportCopyLog()`, chosen for one reason only: **its output
+(`----- servicer copy-family log: 13 transfers -----`) is visibly present in the run being
+debugged**, so the printer is known-reached before it is trusted. The dump also distinguishes
+"no bridge attached" from "bridge attached, log genuinely empty" from a populated log, so the next
+zero, if there is one, will say which kind it is.
+
+No claim is made here about the write-back. run251 is the first run that can support one.
