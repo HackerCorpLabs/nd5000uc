@@ -16937,3 +16937,59 @@ debugged**, so the printer is known-reached before it is trusted. The dump also 
 zero, if there is one, will say which kind it is.
 
 No claim is made here about the write-back. run251 is the first run that can support one.
+
+## 252. THE WRITE-BACK RUNS, WRITES THE RIGHT VALUE, AND THE VALUE DOES NOT STICK. [V]
+
+First interpretable octobus write-back log (run251, 15.9 min, printer verified reached):
+
+```
+  MON 377B argc=4 ret=0x08008255  UCODE-ROLE=Forwarded  X5CPU=-1
+        [2] @0x080240B4=0x00000000        <- call 1, empty (same as classic's call 1)
+  CONTEXT SWITCH X5CPU=-1 -> 0 (P=0x08000004 PS=3 CED=0 B=0x00000000 R=0x00000000)
+  RESTART write-back: @0x080240B0:=0x00000005 @0x080240B4:=0x00008E30
+  RESTART K=0 FUNCV=0x00000000 SWPST=0x0005  mask@0o12=0x0006
+  MON 377B argc=4 ret=0x08008255  UCODE-ROLE=Forwarded  X5CPU=0
+        [2] @0x080240B4=0x00000000        <- call 2, STILL empty
+```
+
+Three things are now settled, and two of them clear code I had suspected:
+
+ 1. **`ApplyRestartWriteBack` DOES run on this lane.** All three earlier zeros were the
+    instrument (250, 251). It is not skipped, not empty, not declined.
+ 2. **SINTRAN answers CORRECTLY.** It returns `0x00008E30` for `0x080240B4` - the octobus-frame
+    swapper pointer, exactly the value section 240 proved `CNVWADR` produces. `mask@0o12=0x0006`
+    is the `NUMPA` write-back mask naming parameters 2 and 3, precisely as the reference's
+    section 2333 says the swapper path does. **The ND-100 side is behaving perfectly.**
+ 3. **The store does not stick.** We write `0x00008E30` into `0x080240B4` and the very next
+    `MON 377B` reads `0x00000000` from that same address.
+
+So it is not a missing write-back, not a wrong value, and not a SINTRAN problem. **The write lands
+somewhere the ND-500 program does not read.**
+
+### The prime suspect, and the log already points at it
+
+Note the order: **call 1 is made with `X5CPU=-1` - no process loaded** - and the CONTEXT SWITCH to
+process 0 happens *after* it, immediately before the write-back. `OnMonitorCall` captures each
+operand's PHYSICAL address at call time (`_writeBackPhysical`, resolved "while the caller is still
+mapped"), and `ApplyRestartWriteBack` prefers that captured target over re-translating:
+
+```csharp
+    if (TryGetCapturedWriteBackTarget(writeBackAddresses[k], out uint physical))
+        cpu.WritePhysicalWord32ForInspection(physical, writeBackValues[k]);
+    else
+        cpu.WriteVirtualMemory32(writeBackAddresses[k], writeBackValues[k]);
+```
+
+**If the capture happened under `X5CPU=-1`, the physical address it cached is not the one process 0
+reads.** The bridge's own comment describes exactly this hazard for a different case (a domain
+mapped at write-back time); the measured case here is the mirror image - captured with NO process
+mapped, applied after one is switched in.
+
+`[D]` until measured. The measurement is small and specific: **print, per operand, the captured
+physical address AND the address the CURRENT mapping resolves, at write-back time.** If they
+differ, that is the defect and the fix is to re-resolve after the context switch rather than
+prefer a capture taken in another context.
+
+Do not "fix" it by dropping the capture - the capture exists because of a real fault documented
+above `_writeBackLogical`. The two cases have to be told apart, which is what the comparison print
+is for.
