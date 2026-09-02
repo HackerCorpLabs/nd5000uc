@@ -16811,3 +16811,54 @@ but a DIFFERENT `msgBase` relationship, candidate 2 is it.** Section 243 recorde
 `swMsg` and survives, candidate 2 falls and order is what remains.
 
 Waiting on the classic lane rather than guessing between them.
+
+## 249. THE LANES DIFFER IN ONE MEASURED VALUE: THE ND-500 VARIABLE AT 0x080240B4. [V]
+
+Both lanes, same run, same `MON 377B`, same four operand addresses:
+
+```
+  addr[0]=08012A28 1=080240B0 2=080240B4 3=0802428C     <- IDENTICAL on both lanes
+
+  classic  argv[0]=00000001 1=00000000 2=00210718 3=0000000C   (also 0D, FFFFFFFF)
+  octobus  argv[0]=00000001 1=00000000 2=00000000 3=00000000
+```
+
+`0x00210718` is the classic lane's own `SWPINFO` value (section 243). **So the ND-500 variable at
+`0x080240B4` HOLDS the swapper pointer on the classic lane and reads ZERO on the octobus lane.**
+Parameter 4 differs the same way: classic cycles `0x0C`/`0x0D`/`0xFFFFFFFF`, octobus is always 0.
+
+### What this settles
+
+Both candidates from section 248 are dead:
+
+ - **Message identity - dead.** Classic answers onto its own `swMsg` (`msgBase=0x00420D30`), lands
+   on slot k=2 exactly as we do, and completes. Same relationship, opposite outcome.
+ - **Order - dead.** If ordering were the defect, classic would show a destroyed cell too. It never
+   does; it writes back the value that is already there.
+
+The overwrite is harmless on classic for a simple reason I could not see until the values were
+printed: **classic writes `0x00210718` over `0x00210718`.** Ours writes `0` over `0x8E30`. The
+answer loop, the slot layout, the ordering and the address resolution are all correct on both
+lanes - and have been for nine sections. Parameter 3 is an INPUT the program carries, not an
+uninitialised output as section 248 supposed, and section 248's "output parameter" reading is
+withdrawn.
+
+### The defect, restated where it actually lives
+
+**The octobus lane's ND-500 process never gets `0x080240B4` populated.** The answer loop then
+faithfully marshals that zero, and SINTRAN reads it back as "no process is being served".
+
+The first place to look is the restart write-back, and the bridge already documents the hazard in
+`Nd500CpuProcessBridge.cs` above `_writeBackLogical`:
+
+> SINTRAN echoes these same operand addresses back in the restart record, and
+> `ApplyRestartWriteBack` then stores into them - but by that time the CPU may be running a
+> DIFFERENT process ... the store faults, the trap is declined ... and the run dies.
+
+That is exactly the mechanism that would leave `0x080240B4` at zero, and the octobus lane's
+`restarts=1/1` against classic's 187 answers is consistent with the write-back path being
+exercised almost not at all here.
+
+**Next: instrument `ApplyRestartWriteBack` on the octobus lane** - count attempts, successes and
+declines, and print the target address of each. Do not change the answer loop; it has now been
+measured correct four separate ways.
