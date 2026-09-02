@@ -14867,3 +14867,62 @@ answer.
 **Three hypotheses offered, two already refuted by measurement.** Recording that as the shape of the
 night rather than as a complaint: each was specific enough to die, which is the only reason the
 third is worth testing.
+
+## 218 - SAME CELL, WRITTEN THEN READ AS ZERO. The defect is on OUR side `[V]`
+
+`run215.log`. The store walked word by word, `X` read at each:
+
+```
+  w0 @0o134054  X=43430o   leftover from the SWPPING line above
+  w1 @0o134055  X=43230o   X:=SWMSG executed - SWMSG really is 43230o
+  w2 @0o134056  X=43230o
+  w3 @0o134057  X=43334o   AAX HSWPI applied: 43230o + 0o104
+  w4 @0o134060  X=43334o   the STDTX lands HERE, with D=107060o (0x8E30)
+  ---
+  GATE @0o135674  X=43334o  D=0
+```
+
+**The store address and the gate address are the SAME: `0o43334`.** SINTRAN writes `0x8E30` into
+that word and later reads zero out of it, with nothing in between - the two zeroing writers were
+measured running afterwards (217) and the write precedes both reads (216).
+
+**All three hypotheses I raised are now refuted by measurement:**
+
+```
+  ORDERING   (205)  write precedes both LNEWSWAP calls          - dead
+  ERASURE    (216)  both zeroing writers run after both calls   - dead
+  WRONG CELL (217)  store and load resolve to the same 0o43334  - dead
+```
+
+**Resolving the cell moves the question off SINTRAN entirely:**
+
+```
+  word 0o43334  ->  byte 0x8DB8 in the MPM window  ->  ND-100 physical 0x428DB8
+  swMsg base    =   0x428D30,  so this is swMsg + 0x88 = +0o104 words. Consistent.
+```
+
+That address is **inside the 5MPM shared window** - the memory the octobus station and the ND-100
+both map. So a write at `PIL=2` and a read at `PIL=12` of the same shared cell are disagreeing, and
+**that is our emulator's behaviour, not SINTRAN's logic.** Every actor in the guest has now been
+measured doing the right thing in the right order.
+
+**Two candidates, both on our side, and they need different fixes:**
+
+```
+  ROUTING   the store lands in ND-100 local RAM while the load comes from the octobus DeviceRAM
+            (or the reverse) - ND100Memory.FindMemoryBank's MPM window decision.
+  PAGING    the ND-100 maps virtual addresses through a page table selected by LEVEL. The write is
+            PIL=2 and the read PIL=12, so the same 16-bit word address can resolve to different
+            physical cells. Both sites do set T:=5MBBANK first, which is what should make them
+            agree - so if they disagree, our handling of the bank register on STDTX vs LDDTX is
+            the suspect.
+```
+
+**NEXT, and it is not another PC watch.** The PC watch has taken this as far as it can: it reports
+virtual addresses and cannot see where they land. Instrument the emulator - log the PHYSICAL address
+and bank our `STDTX` at `0o134060` and our `LDDTX` at `0o135670` each resolve, and compare. One line
+of trace on each side answers it.
+
+**Worth recording about the shape of this:** eleven rounds, every one of which measured the guest,
+and the guest was right every time. The instrument kept pointing at SINTRAN because that is what it
+could see. **A PC watch can only ever indict the code it watches.**
