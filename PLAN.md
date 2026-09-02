@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | in progress | `LNEWSWAP`'s first gate `135474 IF D><0` reads `SWMSG.SWPINFO` as zero although the store lands and reads back. The apparent instrument contradiction is CLOSED (standoff 226 - the RAM watch was folded to a different cell; fixed, commit `e1f385654`). run226 is the first run whose object-level watch actually sees the cell: read its `RAM-OBJECT writers` block and name what clears the byte. |
+| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED 2026-09-02** | `Nd500MicrocodeServicer.AnswerMonitorCallStopLocked`'s arg-value slot `msgBase+0x80+4k` for k=2 IS the swapper's `SWPINFO` (`swMsg+0x88`), so answering a 3+-arg MON call into `swMsg` zeroes it and `LNEWSWAP`'s gate parks. Standoff 228. **Next: settle whether that MON call should have been FORWARDED at all** - compare `MonitorCallRestartsSeen` vs `...Taken` - BEFORE touching the arg-slot layout, which is itself weakly evidenced. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
