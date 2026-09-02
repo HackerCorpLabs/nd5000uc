@@ -16176,12 +16176,23 @@ instruction that has nothing to do with the patch.
 
 The `+0o200` window decodes exactly as the source says it should:
 
-| word | octal | instruction | NPL line at `135470` |
-|---|---|---|---|
-| `5223` | `0o51043` | `LDT` disp `0o1043` | `T:=5MBBANK` |
-| `5A23` | `0o55043` | `LDX` disp `0o1043` | `X:=SWMSG` |
-| `F744` | `0o173504` | `AAX` disp **`0o104`** | `*AAX HSWPI` |
-| `C6C2` | `0o143302` | `LDD T,X` | `LDDTX` |
+| word | octal | opcode field (bits 15-11) | reading | NPL line at `135470` |
+|---|---|---|---|---|
+| `5223` | `0o51043` | `0o12` -> `0o050000` = **`LDT`** | `[V]` opcode | `T:=5MBBANK` |
+| `5A23` | `0o55043` | `0o13` -> `0o054000` = **`LDX`** | `[V]` opcode | `X:=SWMSG` |
+| `F744` | `0o173504` | `AAX` (`0o173400` + 8-bit immediate) = **`AAX 0o104`** | `[V]` whole word | `*AAX HSWPI` |
+| `C6C2` | `0o143302` | `0o30` -> the `0o140000` register-op family | **`[OPEN]`** | `LDDTX` |
+
+**CORRECTION, same session.** The fourth row first said "`LDD T,X`". That is wrong - `0o143302`'s
+opcode field is `0o30`, the `0o140000` register-operation family, not a load - and it was written into
+a table as if derived. `LDDTX` is a MACRO, so what it expands to has to be read, not assumed. It is
+now `[OPEN]`, and it changes nothing: the identification rests on the three rows above it.
+
+The displacements first printed as "disp `0o1043`" were also wrong - that folds the I/X/B addressing
+bits (10, 9, 8) into the 8-bit displacement field. The displacement byte is `0o43`; the addressing
+bits are NOT decoded here and are `[OPEN]` too. **`AAX` is the load-bearing row precisely because it
+takes a plain 8-bit immediate with no addressing bits to misread**, which is why `0o104` is quotable
+and the others are quoted only as opcodes.
 
 Three independent confirmations in four words: the relocation is real, the PC-watch arms at `0xBBB8`
 /`0xBBBE` are on the right instructions, and **`AAX`'s displacement `0o104` confirms `HSWPI = 0o104`
