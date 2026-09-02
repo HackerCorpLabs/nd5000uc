@@ -14220,3 +14220,52 @@ one instrument shape in this investigation that has never lied.
 `G1-PASSED`.** If it is 2, `SWPINFO` was set both times and the break is at gate 3 or 4. If it is 0
 or 1, the first `LNEWSWAP` ran before `SWMESS` set `SWPINFO`, and the stall is an ORDERING
 problem - the swapper asked for work before the work was posted, and nothing asked again.
+
+## 206 - The `lnewswap` ladder came back ALL ZERO, and it could not be read
+
+Run `run205.log`, 16 min, test passed. Every one of the eight arms: **hits=0** - including
+`LNEWSWAP-entry`, which was predicted 2.
+
+**The instrument armed.** The banner `PC WATCH: LNEWSWAP's gates to ANSWER(3)` is in the log, and
+the same run measured `swpfu[LNEWSWAP:2]` - so the swapper certainly requested function 1 twice.
+
+**And that is the whole problem: the table cannot be read.** Every arm sat inside ONE routine, so
+
+```
+  "SINTRAN never executed LNEWSWAP"        -> all zeros
+  "my addresses for that routine are wrong" -> all zeros
+```
+
+are the SAME table. Nothing in it separates them. **This is the exact rule 205a states in its own
+text** - *"arm an address together with its required predecessor"* - and I broke it while writing
+it, by spending all eight slots on the routine under test. Recording it because the failure is not
+the wrong guess; it is that the design could not have told me either way.
+
+**A prediction that fails on EVERY arm at once is a signal about the instrument, not the subject.**
+A real behavioural finding is selective - some arms hot, some cold. Uniform zero across a ladder
+that includes an entry point is the shape of a mis-aimed watch. Worth a taxonomy line of its own.
+
+**Also worth separating, because I nearly conflated them:** `swpfu[LNEWSWAP:2]` is **our servicer's
+label for `SWPFU=1` in a message the SWAPPER wrote**. It is evidence the swapper REQUESTED the
+function. It is NOT evidence that SINTRAN's `SWPDECODER` dispatched to `LNEWSWAP`. Two different
+machines, two different sides of the mailbox.
+
+**Round 2 spends two slots on arms that can only fail one way** (`run206.log`, in flight):
+
+```
+  0xCA72  CONTROL 5ACTSWAPPER@0o145162   MEASURED 2 hits in 190/199, same module.
+                                         Zero here => the watch or the module addressing is wrong.
+  0xBB23  SWPDECODER-entry@0o135443      LNEWSWAP's REQUIRED PREDECESSOR - the GOSW that reaches it.
+```
+
+Dropped to make room: `ERROR-ARM@0o135551` (already eliminated - that arm zeroes `SWPINFO` and
+`SWPINFO` is non-zero) and `G4@0o135607` (unreachable unless G3 is, so G3 carries it).
+
+**What round 2 can now say that round 1 could not:**
+
+```
+  CONTROL 0                     -> the watch is broken or these are not the runtime addresses. Stop.
+  CONTROL 2, SWPDECODER 0       -> SINTRAN's swapper decoder never runs at all. A much bigger finding.
+  CONTROL 2, SWPDECODER >0, LNEWSWAP 0  -> the GOSW dispatches somewhere other than where I read it.
+  LNEWSWAP >0                   -> the original ladder is live and G1 answers the ordering question.
+```
