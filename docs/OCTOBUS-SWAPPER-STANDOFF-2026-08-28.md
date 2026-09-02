@@ -14676,3 +14676,50 @@ which was measured on the correctly-armed routine.
 > `0o200` is NOT carried over to the S3SM5 addresses.
 
 Round 7 re-arms the entire chain at its linked addresses.
+
+## 214 - The chain is ALIVE end to end, and the break is INSIDE `LNEWSWAP` `[V]`
+
+`run211.log`, the first run whose arms point at the routines they name:
+
+```
+  NXTMSG linked@0o135067        hits=18
+  XN500 linked@0o135123         hits=149
+  MCNO load linked@0o137246     hits=2
+  N5SWAP block linked@0o137440  hits=2
+  SWPDECODER linked@0o135643    hits=2
+  LNEWSWAP linked@0o135670      hits=2
+  SETS-ANSWER3 linked@0o136026  hits=0     <- THE GOAL
+  CONTROL 5ACTSWAPPER@0o145162  hits=2
+```
+
+**Everything I spent six rounds declaring dead is alive.** Both swapper monitor calls reach the
+dispatch, pass the `N5SWAP` test, enter `SWPDECODER` and land in `LNEWSWAP` - and the 2s match
+`swpfu[LNEWSWAP:2]` exactly, which is independent corroboration from a different instrument.
+
+**`SETS-ANSWER3` is ZERO.** So the break is **inside `LNEWSWAP`, between its entry and the
+`ANSWER(3)` write** - exactly where 205 placed it by reading the source, and exactly the measurement
+that has been blocked since, because every arm was `0o200` words short.
+
+**Retractions this settles, all mine:**
+
+```
+  207  "SWPDECODER NEVER RUNS"                  -> it runs, twice.
+  209  "the ND-5000 goes through XN500 instead" -> BOTH run: NXTMSG 18, XN500 149.
+  210  "SOCTO is the live path, we are in the wrong module"  -> wrong module was never the problem.
+  212  "the control arm is 0o200 off"           -> it was the only arm that was RIGHT.
+```
+
+The one that survives is 205's own reading of the source, which named the gates correctly from the
+start and simply could not be tested.
+
+**Round 8 arms the gates** - `G1` `SWPINFO`≠0, the error arm, the OK arm, `G3` requester is
+`SWPPING`, `G4` `MICFU` is `3SWMESS` - all relocated. **The relocation is now applied IN CODE**
+(`listing + 0o200`) with both forms printed in each label, so it cannot be dropped by hand again.
+That change caught a typo as it was written: I had keyed `G1` as `0o135674` where
+`0o135476 + 0o200 = 0o135676`.
+
+**Method note worth more than the result.** Seven runs, roughly two hours, and the finding is the
+one 205 predicted. What the runs actually bought was the discovery that my addresses were wrong -
+and that only became visible when a control arm and a known-hot/known-cold pair were in the SAME
+table. **Every table without a control was not weak evidence; it was no evidence, and it read
+exactly like strong evidence.**
