@@ -15744,3 +15744,71 @@ the both-lanes comparison that is supposed to be run anyway.
 Note the shape of what nearly happened: three plausible fixes, each supported by a real `[V]` fact,
 all three wrong - and the thing that stopped them was a measurement someone had already written into
 a comment beside the code. **The 78 calls were sitting in the source the whole time.**
+
+## 231 - the node is NOT SINTRAN-owned; we clobber a freshly-armed 3START activation
+
+run231 added the node's state and the pointer value at the instant of the answer:
+
+```
+MON 00FF argc=4 msgBase=0x00428D30 N5STA=2 SWPINFO=0x00008E30  <== reaches slot k=2
+MON 00FF argc=4 msgBase=0x00428D30 N5STA=2 SWPINFO=0x00008E30  <== reaches slot k=2
+```
+
+**`N5STA=2` is WAITING - an ND-500 status, not one of SINTRAN's swapper states (5/6/7).** The
+"we answered into a node SINTRAN currently owns" hypothesis from 230 is **REFUTED**. Recording that
+plainly because it was my hypothesis and the measurement killed it.
+
+`SWPINFO=0x00008E30` at answer time: the request pointer is LIVE when we overwrite it.
+
+### What HW 0o104 actually is - read the NPL, do not infer from the symbol name
+
+`MP-P2-N500.NPL:133654`, the store site, in context:
+
+```
+133642   IF A=MSWSTART THEN                          % Start swapper
+133645      SWPPING; CALL WN5STATUS                  % requester -> "using Swapper"
+133647      A:=5MBBANK; D:=X
+133651 *NNC06, CNVWADR                               % Convert multi-port address
+133654      X:=SWMSG; T:=5MBBANK; *AAX HSWPI; STDTX  % MMESSAGE=:SWMSG.SWPINFO
+133661      3START; *MICFU@3 STATX
+133663      5SWPROC; *SENDE@3 STATX; 5RECE@3 STATX
+133666      SWACTIVE; *AAX SWPFU; STATX
+133671      A:=300; *AAX 5PRIO-SWPFU; STATX          % priority = 300
+```
+
+This is **SINTRAN BUILDING AN OUTGOING 3START ACTIVATION**. `SWPINFO` is not a status flag and not a
+private field - it is the **first parameter of that activation**, carrying the converted address of
+the message the swapper must service. `136115` confirms the other end:
+
+```
+136115   11=:L; SWMSG+"SWPINFO"=:D; 5MBBANK; T:="XSDUNIT"; *MOVPA
+         % Move parameters from swmsg to par.array for 5swap
+```
+
+SINTRAN moves **11 words of PARAMETERS starting at `SWMSG+SWPINFO`**. So HW `0o104` onward is the
+swapper's parameter area, which is the same region the microcode uses for MON parameter values
+(`5AP3`/`5DP3` onward). **On hardware that is not a conflict, because the two uses are different
+PHASES of one block's life**: SINTRAN fills it going out, the swapper runs, the microcode overwrites
+it with MON parameters on the way back, by which time the outbound parameters have been consumed.
+
+### The defect, stated precisely
+
+`N5STA=2` means SWMSG was a **freshly-armed 3START activation waiting to be serviced** at the moment
+we wrote a MON stop record into it. We destroyed an activation SINTRAN had just built, for a MON call
+the swapper had made EARLIER. `LNEWSWAP` then reads the zeroed first parameter and correctly parks.
+
+**Our MON answer is LATE.** The microcode writes the stop record synchronously with the `CALLG`,
+before SINTRAN can observe `N5STA:=3` and re-arm the block. Ours is written from the `CpuND500`
+thread, and by then SINTRAN has already re-armed. This is a SEQUENCING defect at a real concurrency
+seam, not a layout or addressing defect.
+
+### Still refuted, still do not attempt
+
+The layout (230), the message base (230), answering 377B into SWMSG (230, 78 successes), and node
+ownership (231). Four hypotheses, each killed by evidence rather than by argument.
+
+**Next: the classic-lane A/B**, same ledger, `Nd500_LedFortran_UnderRealSintran_RealCpu_Capture`. The
+prediction is explicit and falsifiable: on the lane that works, the MON 377B answers should show
+`N5STA` and a `SWPINFO` that are NOT a freshly-armed 3START - i.e. the answer lands before the
+re-arm, not after. If the classic lane shows the same `N5STA=2` + live `SWPINFO` and still works,
+this explanation is wrong too and the difference is somewhere else entirely.
