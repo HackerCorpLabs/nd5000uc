@@ -6,13 +6,14 @@
 
 ---
 
-## TASK LIST — 3 tasks, 2 done, 1 in progress, 0 open
+## TASK LIST — 4 tasks, 3 done, 1 open
 
 | # | Task | State | Next action |
 |---|---|---|---|
 | T1 | The octobus `place-domain` swapper stall | **FIXED 2026-09-02** (`52dd87f55`) | Root cause: `OnStartProcessND5000` loaded the context block without calling `NoteLoadedProcess`, so `_loadedX5Cpu` stayed `-1`, the MON-stop context save took its early return, and the `CALLG` return address `0x08008255` was silently discarded - the swapper then resumed at its ENTRY point, re-zeroed `SWPINFO` and asked the same question forever. Measured: `place-domain` STALL->OK, MON 377B 2->8, `restarts` 1/1->**8/8** (`Seen==Taken`, genuinely forwarded), `argv[2]` `0`->`0x00008E30`, `CONTEXT SAVE SKIPPED` 2->0, and **MICFU `30B` appears for the first time (12)** = real user-domain page-ins. Suites: ND500 2264/2277 pass 0 fail; ND100 424/430 with one **known flake** (`DMA_BLAST_MultiBuffer_LargeTransfer(TCP_LEGACY)`, a real socket test - passes 2/2 alone, `IN_MEMORY` variant passed in the same run). **NOT claimed: the domain is parked at `PC=0x08000004 WAIT` and no program output was seen, so "cpu-stat runs" is unproven.** |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
+| T4 | The cpu-stat domain protect-violates on its FIRST instruction | **open - new head item** | `lastTRAPN=44B` (protect violation, NOT a page fault - `lastPageFault=(none)`), `lastProtectViolation=MMU read protection violation at 0x08000013 P1=0x08000004`. The domain runs `PS=10` where the swapper runs `PS=3`, and `PS` selects the capability table. Only 1 `LSWPAGE` served vs classic's 84. **READ FIRST, do not instrument:** `nd500-classic-vs-nd5000-page-table-split` (shared constants cost 13,359 spurious refaults), `nd5000-domain-information-table` (`PIA` at PCB `0xC8`), and the AM#37 note (do not "fix" a protection check that is correctly catching us). The ND-5000 MMU walk is HARDWARE, so the microcode cannot answer it. **First settle the contradiction `TRAPS BY CONDITION: none` vs `trapsPosted=1`** - one trap instrument is miscounting. Standoff 260. |
 
 **T2 was mine, not Ronny's** - I misread his "leave it" as "I will fix it" and left a suite that could
 not build for a day. **When an answer decides who does the work, say the owner back in the next

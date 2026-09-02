@@ -175,3 +175,62 @@ routine it calls showed 0, which cannot both be true and gives no way to tell wh
 Worked example in `Emulated.Tests\ND100\Nd100SintranNd5000OctobusBootHarnessTests.cs`,
 `ArmSwapperHandoverWatch()` — the four `5ACTSWAPPER` call sites plus the routine and both of its
 outcomes, seven of the eight slots, for the octobus swapper-handover question (task #56).
+
+---
+
+## The SWPINFO-hunt instruments (added 2026-09-02, standoffs 240-260)
+
+Four switches added while root-causing the octobus `place-domain` stall. All are **observe-only**
+except the first, which is an experiment switch and is **default OFF**.
+
+### `RETROCORE_ND500_SKIP_MON_VALUE_SLOTS` (env, default off) — EXPERIMENT, NOT A FIX
+
+Suppresses the MON-answer argument VALUE writes in
+`Nd500MicrocodeServicer.AnswerMonitorCallStopLocked`. It exists to answer one causality question
+that reading could not settle, and it did: with it on, `place-domain` flipped from STALL to OK.
+
+**Never leave it on.** With it on the run reaches "OK" with `restarts=0/0` and no MON call
+forwarded at all — differently stuck, not fixed. The real defect was elsewhere entirely (the
+Samson start not recording its process, fixed in RetroCore `52dd87f55`).
+
+### The MON-answer ledger, now printing ADDRESSES as well as values
+
+`Nd500MicrocodeServicer.MonAnswerLog` prints, per answered monitor call:
+`MON <n> argc= msgBase= N5STA= SWPINFO= argv[..] addr[..]`.
+
+**Why both**: a value of `0` read from a real operand address and a placeholder `0` for an absent
+operand are the same bytes. Printing values alone produced an entire wrong root cause (standoff
+246, refuted by 247). The addresses are what tell them apart.
+
+### Write-back diagnostics in `Nd500CpuProcessBridge.ApplyRestartWriteBack`
+
+Per write-back operand, three lines:
+ - `WB[k] @logical:=value captured=0x... current=0x...` — the physical address cached at CALL time
+   versus what the CURRENT mapping resolves, flagged `<== MISMATCH` when they differ.
+ - `WB[k] READBACK physical=... virtual=...` — the cell read straight back by BOTH paths, flagged
+   `<== THE TWO PATHS DISAGREE` when they differ.
+ - `CONTEXT SAVE SKIPPED - no loaded process (_loadedX5Cpu=-1), regs.PC=0x... IS BEING DISCARDED`.
+
+That last line is the one that mattered: the save was skipped **silently** for months, and an
+invisible skip is what let the defect hide.
+
+### `CpuND500.Nd500PhysWatchAddr` / `Nd500PhysWatchLog` — ND-500 physical write watch
+
+Static. Set the ND-500 PHYSICAL byte address; every write within `Nd500PhysWatchSpan` (default 3)
+is recorded with the guest `P` and a full stack trace, capped at `Nd500PhysWatchMax` (24).
+
+**Hooked on all three widths** (`WritePhysical8/16/32`) on purpose: a cell cleared by two byte
+stores and a cell never written look identical to a 32-bit-only watch.
+
+This is what named the writer in one run — the guest itself at `P=0x080081B8` — after four
+theories had been refuted. It is the same technique as `RAM.WatchWriteAtMachineAddress` on the
+ND-100 side.
+
+### Reading a ZERO from any of these
+
+Three separate zeros in that hunt each meant something different: the log existed but the harness
+printed it only inside a conditional that never fired; the printer was added to a method the test
+does not run; and the underlying question was still unmeasured. **Pick a printer whose output you
+can already SEE in the run you are debugging** — the octobus dumps now live in `ReportCopyLog()`
+for exactly that reason — and make every probe say WHICH kind of empty it is (not armed / armed
+and genuinely empty / populated).
