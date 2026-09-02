@@ -6,13 +6,13 @@
 
 ---
 
-## TASK LIST — 3 tasks, 1 done, 1 in progress, 1 open
+## TASK LIST — 3 tasks, 2 done, 1 in progress, 0 open
 
 | # | Task | State | Next action |
 |---|---|---|---|
 | T1 | The octobus `place-domain` swapper stall | in progress | Trace `LNEWSWAP`'s served-process branch (`135476` on) to the point it parks instead of restarting the requester. Standoffs 200-204. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
-| T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | open | An address word is landing in a microword's DATA - see item 3 below. |
+| T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
 **T2 was mine, not Ronny's** - I misread his "leave it" as "I will fix it" and left a suite that could
 not build for a day. **When an answer decides who does the work, say the owner back in the next
@@ -547,9 +547,42 @@ slices 4-7 match topLo. They do, but only because both are zero - it would pass 
 low half survives the round trip, which is precisely the open question."* It did its job: the basis
 moved and the test said so rather than passing vacuously. Do not "fix" it by relaxing the guard.
 
-**Next:** turn on `Nd5000ControlStoreLink`'s own `Record()` trace (`STAGE0`/`ADDRESS`/`SHIFT`/
-`EXTRA`/`GATE-OFF`/`MIR-SHORT`) for this fixture and read the word sequence in order. The trace
-names which word was taken for what; counting commits will not.
+**RESOLVED 2026-09-02 - IT WAS NEVER A DEFECT, AND THE STORED WORDS ALONE SAY THE OPPOSITE.**
+The trace was turned on (`Nd5000ControlStoreAddressFoldDiagTests`) and read in order:
+
+```
+  ADDR-LATCH 0000 halfwords=0
+  SHIFT 0040  SHIFT 0000  SHIFT 0002  SHIFT 0000
+  SHIFT 0000  SHIFT 0000  SHIFT 0001  SHIFT 0000
+  COMMIT cmd=0x0006 addr=0x0000 gate=0x00 00400000000200000000000000010000
+```
+
+**The FIRMWARE shifts `0001` as the seventh data word**, and the commit takes exactly those eight
+words at the address the firmware latched. So `microword[N].lo` carrying `N+1` is **firmware-sent
+data**, not an address folded into the data by our staging. The address arrives FIRST here and is
+latched separately - there is no off-by-one, and no ring bug. Commits: `latch=0 staging=0
+ring=20964`.
+
+What actually changed is this item's own fix: committing on WCS instead of AMIRCK let the firmware
+complete a control-store pass it never used to finish - which IS the `gateOpens` 13 -> 1502 move -
+and that pass writes an incrementing pattern into every word.
+
+**So the failing assertion was a stale baseline, exactly as its message said.** It has been replaced
+by the assertion it was waiting for: its comment had parked *"does the low half survive the round
+trip"* as unanswerable while both sides were zero. The low half is non-zero now, so all four slices
+are checked against it, plus a non-zero guard so it cannot go vacuous again. Measured
+`topLo=0x000000003FF10000` against buffer `[4]=0000 [5]=0000 [6]=3FF1 [7]=0000` - **the low half
+survives.** `Emulated.Tests.ND100`: **425 passed, 0 failed, 5 skipped of 430.**
+
+**Two method notes worth keeping.**
+ - **The stored words alone are misleading and the trace is not.** Every word's low half holding
+   `address+1` reads unmistakably as "an address is being written into the data", and I was one
+   step from hunting an off-by-one in the ring path that does not exist. Decoding the order settled
+   it in one run.
+ - **A trace cap truncates the FRONT of the question, not the tail.** `Record()` stops at
+   `TraceLimit` and keeps the FIRST entries, so 20000 held only the selftest and the sample-pattern
+   commits and ended before the load that decides the final contents - which reads exactly like a
+   clean, complete run. Raised to 400000 (actual 239549).
 
 ## 4 - Implement every microword field properly
 
