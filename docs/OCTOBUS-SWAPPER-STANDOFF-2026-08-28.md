@@ -14491,3 +14491,51 @@ is void is any conclusion of the form *"routine X never runs"* drawn from a cold
 `0o134xxx`-`0o137xxx` **while the module's liveness was unestablished**. `SOCTO` at 1025 now gives a
 live anchor, but in a different module, so it does not retroactively validate those cold arms
 either. The cold results stand as unread, not as refuted.
+
+## 211 - The control HOLDS. `5ACTSWAPPER` really runs, and 190/199 stand `[V]`
+
+`run210.log`, 15m51s. I armed my own control's interior expecting to catch it out. It survived:
+
+```
+  5ACTSWAPPER ENTRY@0o145162            hits=2
+  5ACTSWAPPER interior +1@0o145164      hits=3     CALL SLOCK
+  5ACTSWAPPER interior +2@0o145166      hits=3     X=:D=:MSGTOSW
+  5ACTSWAPPER interior +3@0o145171      hits=2     *NNC24,CNVWADR
+  5ACTSWAPPER interior +4@0o145175      hits=3     SWPWAIT; CALL WN5STATUS
+  SOCTO@0o035546   hits=1025    XN500@0o134723   hits=0    SWPDECODER@0o135443  hits=0
+```
+
+**A run of five consecutive PCs, all hot, with a known-hot/known-cold pair beside them in the same
+table.** That is not an alias. **So 190 and 199 STAND** - the wake path did run - and 210's suspicion
+is resolved against itself. Recording that plainly because the suspicion was mine and the tempting
+move was to let it quietly lapse.
+
+**BUT THE COUNTS DISAGREE ACROSS A STRAIGHT LINE: 2, 3, 3, 2, 3.** `0o145162`-`0o145175` has no
+branch in it - every instruction must execute the same number of times. **This reproduces the
+`0o163637`=3 vs `0o163641`=1 anomaly from 181/183**, which has been `[OPEN]` since. Two independent
+sightings make it a property of the INSTRUMENT:
+
+> **A `DiagPcWatch` count is +/-1. Only hot-vs-cold is safe.** The "read hot/cold, not values"
+> technique was adopted on instinct in 185; this is the second measurement that proves it necessary.
+> Any argument in this investigation that turned on an exact count is worth re-checking.
+
+**`[OPEN]` and NOT explained away:** `L` at the two entry hits (`134355o`, `136240o`) still lands on
+`WHILE D><-1` and a spot beside `GO NXTMSG`, neither of which is a `CALL 5ACTSWAPPER`. The interior
+being hot proves the routine runs; it does **not** explain the `L` values. Something about what `L`
+holds at that instruction is not understood, and it must not be quoted as a caller fingerprint again
+until it is - which retroactively weakens 179's technique note, where `L` was called "a fingerprint
+of the caller".
+
+**NEXT: `SOCTO`, and it needs finding before it can be read.** It is the only unambiguously live
+routine measured tonight (1025 hits) and it is where this machine's octobus message handling
+actually lives. Two obstacles, both concrete:
+
+```
+  1. SOCTO is in NONE of the 45 NPL sources - checked all of them, case-insensitively.
+     It exists only as SOCTO=035546 in SYMBOL-1-LIST.SYMB.TXT (L07).
+  2. The address 035546 appears in FOUR carved segments (003-S3CP, 006-S3FS, 045-S3ISYS,
+     and 030-S3SM5's file) - the same 16-bit collision at source level as on the PC watch.
+```
+
+Identify the right segment from SYMBOL-1-LIST's NEIGHBOURING symbols, not by picking whichever
+disassembly looks plausible. Guessing between four files is how this investigation lost five rounds.
