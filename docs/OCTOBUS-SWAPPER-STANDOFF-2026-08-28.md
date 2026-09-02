@@ -16432,3 +16432,51 @@ outcomes, both decisive:
 
 Do not "fix" the arg loop before that comparison. The classic lane is a known-good instance of
 the same code answering the same MON call, and it has now been the tie-breaker three times.
+
+## 242. THE SLOT LAYOUT IS RIGHT ON BOTH SIDES. THE PROBLEM IS THAT A SECOND MON CALL ARRIVES. [V]+[D]
+
+Before changing the arg loop I carved the layout instead of guessing which side was misplaced.
+`ND5000-ND100-MESSAGE-PROCESSING-REFERENCE-2026-08-23.md:2333`, graded `[V]` (carver response
+R6, BYTE/NPL confirmed):
+
+> `NUMPA` is a **bit mask**, not a count, on the way back: bit *k* means parameter *k+1* ...
+> **The swapper path uses `6` (bits 1+2 => parameters 2 and 3).** Values land in the **odd**
+> `5DPn` slots (`101,103,105,107,111`); the **even** `5APn` slots are zeroed.
+
+and `:2100`: `5AP3`=`0o104`, `5DP3`=`0o105`.
+
+So `HSWPI = 0o104 = 5AP3`, and parameter 3's 32-bit cell spans `0o104`+`0o105` = message bytes
+`0x88..0x8B`. **`SWPINFO` IS MON parameter 3, deliberately** - the swapper path's `NUMPA=6` names
+parameters 2 and 3 as the ones written back.
+
+The measurement matches the document exactly. SINTRAN's `STDTX` stored `A=0` into `0o43334`
+(`5AP3`, the even slot - zeroed) and `D=0x8E30` into `0o43335` (`5DP3`, the odd slot - the value).
+`LNEWSWAP` then does `LDDTX` on the pair and branches on `D`, the low half, which is `5DP3`.
+**SINTRAN is doing precisely what the reference describes**, and our value-slot base `0x80+4k` is
+also right. Neither side is misplaced.
+
+### So the defect is not WHERE we write - it is THAT we write again
+
+The order in the RAM watch is `store 0x8E30 -> zero -> store 0x8E30 -> zero`. A stop record is
+built when a MON call happens, and SINTRAN stages `SWPINFO` when it services that call. For our
+zero to land *after* SINTRAN's store, **a further MON call must be arriving while the previous
+one is still being serviced** - and on real hardware it cannot, because the calling process is
+STOPPED until it is restarted.
+
+The counters in the same run say the same thing:
+
+```
+  MON-ANSWER LEDGER: 2 entries    restarts=1/1
+```
+
+**Two MON 377B stop records, one restart.** `Seen == Taken` so the restart that did happen was
+genuinely forwarded - but one of the two calls produced no restart at all. That asymmetry, not
+the slot arithmetic, is the thing to chase. `[D]` - the mechanism is derived from the counts and
+the write order; it is not yet measured.
+
+### Next, in order
+
+ 1. The classic-lane `argc` comparison already running - it also reports `restarts`, so it says
+    whether 78 answers there produce 78 restarts.
+ 2. If classic is 1:1 and octobus is 2:1, the question becomes why our ND-500 CPU issued a second
+    `CALLG` MON while stopped. Do NOT suppress the second write to hide it.
