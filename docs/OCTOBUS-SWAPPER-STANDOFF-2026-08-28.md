@@ -16370,3 +16370,65 @@ MON-ANSWER LEDGER: 2 entries, both MON 00FF argc=4 msgBase=0x00428D30 N5STA=2
  - `restarts=1/1` - `Seen == Taken`, so the one `3MONCO` was genuinely forwarded, not faked.
  - **The octobus swapper issues only TWO MON 377B calls and then waits. The classic lane
    issues 78.** That gap, not the address conversion, is the live question. [OPEN]
+
+## 241. THE ZEROING WRITER IS NAMED BY STACK TRACE: OUR OWN MON-ANSWER ARG LOOP. [V]
+
+Same run239 log, no new instrument. The widened RAM watch records writers in arrival order
+with a stack trace on the exact cell, and the sequence over ND-100 physical `0x428DBA` is:
+
+```
+  ... := 0x00  (zeroing)
+  0x428DBA := 0x8E   0x428DBB := 0x30     <- SINTRAN stores 0x8E30
+  0x428DB8..DBA := 0x00                   <- zeroed again
+  0x428DBA := 0x8E   0x428DBB := 0x30     <- SINTRAN stores it a second time
+  0x428DB8..DBA := 0x00                   <- zeroed again
+```
+
+Both writers are named, not inferred:
+
+| write | stack |
+|---|---|
+| `:= 0x8E` | `Instructions.STDTX` -> `CpuND100.WritePhysicalMemory` - SINTRAN, PIL=2, the store at linked `0o134060` |
+| `:= 0x00` | `Nd500MicrocodeServicer.AnswerMonitorCallStopLocked:3716` -> `OctobusND5000Station.WriteNd100Word` - **our MON 377B answer's argument-value loop** |
+
+The gate at linked `0o135674` then reads zero, twice, which is exactly the count of answers.
+
+### What the cell IS - from the NPL source, not derived
+
+`MP-P2-N500.NPL:933`:
+
+```
+LNEWSWAP:
+       T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX      % AD:=X.SWPINFO
+       IF D><0 THEN                                 % Any proc. currently served?
+```
+
+`SWPINFO` is **SINTRAN's own record of which process the swapper is currently serving**, kept
+inside the swapper's message `SWMSG`. `D >< 0` means "a process is being served, go finish it".
+Reading zero means "nobody is being served" - so the completion path is skipped and the request
+is never finished. That is the stall, in SINTRAN's own words.
+
+### Why our answer lands on it
+
+`HSWPI = 0o104` (six symbol files). MON parameter VALUES sit at HW word `0o100+2k`, so value
+slot k=2 is word `0o104` = byte offset `0x88`. Our servicer writes `valSlot = msgBase + 0x80 + 4k`,
+which for k=2 is `0x88`. **`HSWPI` and MON value slot 3 are the same cell**, and this run's call
+has `argc=4`, so the loop reaches k=2 and writes zero over it.
+
+So the overwrite is real, it is ours, and it destroys the flag SINTRAN branches on. This does
+NOT retract [[nd5000-monanswer-overwrites-swpinfo]]'s finding that the classic lane overwrites
+the same cell 157 times and still works - it sharpens it. **Both can be true only if something
+differs about the classic call.** [OPEN]
+
+### The one measurement that decides it - and it is a comparison, not a new probe
+
+On the CLASSIC lane, for the same `MON 377B`, print `argc` and the value-slot writes. Two
+outcomes, both decisive:
+
+ - classic also has `argc=4` and also zeroes `0x88` -> the zeroing is NOT the difference, and
+   the octobus lane fails for another reason. Stop blaming the arg loop.
+ - classic has `argc < 3`, or writes values somewhere else -> our octobus `argCount` or our
+   value-slot base is wrong, and the fix is in the servicer.
+
+Do not "fix" the arg loop before that comparison. The classic lane is a known-good instance of
+the same code answering the same MON call, and it has now been the tie-breaker three times.
