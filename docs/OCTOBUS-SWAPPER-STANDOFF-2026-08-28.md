@@ -16657,3 +16657,41 @@ guard subsumes it and does not require every call site to declare what it knows.
 run246 is testing the dead-code fix with the probe switch OFF, so it is effectively a control and
 should reproduce run239's `place-domain cpu-stat (STALL)`. If it comes back OK instead, this whole
 section is wrong and the announce is live after all.
+
+## 246a. THE CONTROL CAME BACK AS PREDICTED, AND THE ARG VALUES ARE NOW ON THE RECORD. [V]
+
+run246 (dead-code fix, probe switch OFF) finished in 31.0 min:
+
+```
+  ----- `place-domain cpu-stat` (STALL) -----
+  micfu[1B:225 12B:1 23B:1 24B:1 31B:13]  restarts=1/1
+```
+
+**STALL, exactly as section 246 predicted.** The `AnnounceSwapperAlive` change touched nothing
+because nothing calls it, so this run is a clean re-run of run239 and it behaves like one
+(`24B:1`, `restarts=1/1`; the higher `1B:225` is just the longer wall-clock at unshortened
+timeouts). The prediction was written before the result arrived, which is the only way it counts
+for anything.
+
+The new `argv` trace answers the question section 245 left open, directly:
+
+```
+  MON 00FF argc=4 ... argv[0]=00000001 1=00000000 2=00000000 3=00000000
+```
+
+Slots 1-3 are all zero. Note this does NOT by itself distinguish "unused slot" from "value is
+genuinely zero" - which is precisely why the guard keys on the ADDRESS, not on the value. A slot
+with a real operand address whose value happens to be 0 still gets written, correctly.
+
+### Blast radius of the address-zero guard, checked before running it
+
+Both bridges pass real address arrays:
+
+ - `Nd500CpuProcessBridge.cs:1959` - the classic/functional lane, addresses resolved per operand.
+ - `Nd5000CpuProcessBridge.cs:180` - the microword lane, which normalises `null` to an empty array.
+
+With an empty array every address is 0, so no value slots are written - which is exactly the case
+where writing zeros was the defect. In both bridges `values[k]` is *derived from* `argAddresses[k]`,
+so a zero address always implied a placeholder value. No path loses a value it actually had.
+
+run247 measures the guard with the probe switch OFF.
