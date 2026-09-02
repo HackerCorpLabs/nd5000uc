@@ -15153,3 +15153,53 @@ here it is on a branch that runs too early.
 
 **NEXT:** move the stack dump to the very end of the fixture, after the final state dump, so it
 covers the whole run. Everything else about the instrument worked on the first attempt.
+
+## 221 - THE "WRITES-ONLY" LOG CONTAINS READS, ALL LABELLED `W`. 219/219a/220 retracted
+
+The two instruments disagreed on the SAME run - writes log 8 entries for `0x428DB8`, managed-stack
+capture 5 - so I read how each is fed.
+
+```
+  NDBusOctobus.AppendMpmAccess(addr, val, isWrite)      <- called by BOTH RecordMpmWrite and RecordMpmRead
+      ...
+      if (WriteLogEnabled && addr >= Lo && addr < Hi && _writeLog.Count < cap)
+          _writeLog.Add((addr, val, Nd100WriteContext() | WritingThreadTag(), DiagCurrentL));
+                                    ^ NO isWrite CHECK, and the tuple does not even carry it
+  harness:5698   $"  W 0x{a:X8}=0x{v:X4}  pc=..."       <- the 'W' is a LITERAL
+```
+
+**So every READ in the window is recorded in the "writes-only" log and printed with a `W`.**
+
+**What that retracts, all mine, all from tonight:**
+
+```
+  219   "our LDDTX WRITES"                      -> it READS. There is no stray write.
+  219a  "DEFECT 2 SURVIVES ... 4 bytes zeroed"  -> those four entries are a 4-byte READ returning 0.
+  220   "the two writes that matter"            -> they are not writes at all.
+```
+
+**And the two instruments never actually disagreed.** The managed-stack capture is hooked on the
+genuine write path and reported 5 writes with 5 correct stacks - `STA`, `STZTX`, `STDTX`, `STDTX`,
+`STZTX`. It was right both times. I treated its smaller count as a defect in the new instrument and
+spent a run moving the dump to the end of the fixture to "fix" it; the dump site was never the
+problem. **When a new instrument disagrees with an old one, the old one is not the reference by
+seniority.**
+
+**WHAT STILL STANDS, and it is 218's core finding, now cleaner:**
+
+```
+  pc=0o134057  STDTX  writes 00 00 8E 30 to 0x428DB8   [V by managed stack]
+  pc=0o135673  LDDTX  READS 0x428DB8 and gets 0x0000   [V - a read, correctly labelled at last]
+  pc=0o145210  STDTX  writes 8E 30 again               [V by managed stack]
+  pc=0o135673  LDDTX  reads 0 again
+```
+
+**A write of `0x8E30` is followed by a read of `0` from the same address, with no write in
+between.** No mystery zeroing - a straight read/write disagreement.
+
+**NEW PRIME SUSPECT, and it is ours and ungated:** `ND100Memory`'s read path calls
+`_octobus.TryOverrideMpmRead(address, ...)` at BOTH the byte (`:505`) and halfword (`:531`) sites,
+and both are marked **"FUNCTIONAL (ungated)"** - the station may substitute a value for any MPM-window
+read. A read override that returns 0 for this cell is exactly this symptom. **Next: read
+`OctobusND5000Station.TryOverrideMpmRead` and find what range it claims.** That is a code read, not
+a run.
