@@ -17197,3 +17197,45 @@ losing it, and the bridge instance identity is the next thing to check.
 Note what this makes of the counters: `startTaken=True` is TRUE and was never a lie - it reports
 that the servicer accepted the start. It simply does not report whether the bridge recorded it,
 and I read it as if it did for several sections.
+
+## 257. THE GAP IS ALREADY WRITTEN DOWN IN THE CODE, AND IT NAMES OUR LANE. [V]
+
+While run256 was in flight I read `OnStartProcess`. The comment at `Nd500CpuProcessBridge.cs:318`,
+written by an earlier session, says it outright:
+
+> UNKNOWN IS NOT "DIFFERENT". `_loadedX5Cpu` stays -1 on paths that never recorded an identity
+> (**the Samson start is one**), and blocking those broke
+> `SamsonTrapContinue_OnParkedProcess_ResumesInPlace_NoStaleReload`...
+
+**The Samson start is the octobus start.** So "this lane's start does not record which process is
+loaded" is not a discovery of mine - it is a known property of the code, written beside the very
+field whose `-1` discards the return address.
+
+That closes the derivation of section 256 with a source rather than an inference:
+
+ 1. the Samson/octobus start does not call `NoteLoadedProcess`, so `_loadedX5Cpu` stays `-1`;
+ 2. at the first `MON 377B`, `SaveLoadedProcessContextOnStop` returns early and the `CALLG`
+    return address `0x08008255` is discarded, silently (256);
+ 3. `SwitchToProcessIfNeeded` loads P from the context block: the entry point `0x08000004` (255);
+ 4. the swapper re-runs its initialisation, zeroes `SWPINFO` at `0x080081B8` (255, watch);
+ 5. it asks the identical `MON 377B` again with `argv[2]=0`, forever (249).
+
+**This is the third time in this hunt that the answer was already in the tree** - the classic lane
+I did not run for eleven sections, the harness probes that were already printing what I re-derived
+by hand, and now a comment naming the exact gap. The pattern is consistent enough to state
+plainly: *before instrumenting a field, read what the code says about that field.*
+
+### What the fix has to respect
+
+The comment is not describing an oversight to be deleted - it is describing a DELIBERATE
+tolerance, and it names the test that enforces it:
+`SamsonTrapContinue_OnParkedProcess_ResumesInPlace_NoStaleReload`. Blocking the unknown-identity
+path broke that test, because a resume with `-1` must NOT reload a stale block.
+
+So the fix is **not** to make `-1` decline. It is to stop `-1` arising: **the Samson start should
+record the identity it starts**, the same way the classic start does. Then the tolerance path
+keeps working for cases where identity really is unknown, and our lane stops being one of them.
+
+`[OPEN]` pending run256, which shows whether `PROCESS START recorded` ever prints on this lane. If
+it does not, the fix is a one-line `NoteLoadedProcess` on the Samson start path, and the existing
+Samson test is the guard that it did not break the tolerance.
