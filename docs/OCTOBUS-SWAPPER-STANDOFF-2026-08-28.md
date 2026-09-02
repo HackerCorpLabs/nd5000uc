@@ -16862,3 +16862,53 @@ exercised almost not at all here.
 **Next: instrument `ApplyRestartWriteBack` on the octobus lane** - count attempts, successes and
 declines, and print the target address of each. Do not change the answer loop; it has now been
 measured correct four separate ways.
+
+## 250. THE WRITE-BACK IS THE MECHANISM - AND THE OCTOBUS LANE WAS NEVER PRINTING ITS LOG. [V]+[OPEN]
+
+Two findings, and the second nearly turned the first into a wrong claim.
+
+### 1. The variable is populated BY THE WRITE-BACK, and this is free evidence [V]
+
+The first `MON 377B` on the CLASSIC lane is identical to ours:
+
+```
+  classic  call 1: argv[2]=00000000        octobus  call 1: argv[2]=00000000
+  classic  call 2: argv[2]=00210718        octobus  call 2: argv[2]=00000000
+```
+
+So `0x080240B4` is not initial program state - it is empty on the first call and populated before
+the second. `ApplyRestartWriteBack` already logs itself, and the classic lane's log says exactly
+what fills it:
+
+```
+  60 x  RESTART write-back: @0x080240B0:=0x0000000A @0x080240B4:=0x00210718
+  58 x  RESTART write-back: (empty)
+  124 lines total
+```
+
+**`@0x080240B4:=0x00210718` - the answer to call N is what makes call N+1 carry the pointer.** On
+our lane that value never arrives, so every call marshals 0 and SINTRAN reads "nobody being
+served".
+
+### 2. THE OCTOBUS COUNT OF ZERO WAS AN INSTRUMENT GAP, NOT AN ABSENCE [V]
+
+Grepping the octobus log for `RESTART write-back` returns **0**, and I nearly wrote that up as
+"the write-back never runs on this lane". It is not evidence. The octobus harness only dumps
+`Bridge.MonCallLog` **inside a conditional that has not fired in any run of sections 239-248**, so
+the line was never printed. The classic harness prints its copy unconditionally - which is the
+entire reason the two lanes looked so different here.
+
+"The write-back never ran" and "the log was never printed" produce the identical zero. This is
+taxonomy trap #2 in its purest form, and the only reason it was caught is that the count was
+*exactly* zero rather than small - a genuinely dead path usually still leaves one line.
+
+Fixed in `Nd100SintranNd5000OctobusBootHarnessTests.cs`: an UNCONDITIONAL dump that distinguishes
+the three cases it must never again conflate - no bridge attached, bridge attached with an empty
+log, and a populated log.
+
+### Status
+
+**`[OPEN]` until run250 reports.** The write-back mechanism is proven on the classic lane `[V]`;
+whether the octobus lane never reaches it, reaches it with empty arrays, or reaches it and faults
+is **not yet measured** - the three look identical from outside and the run in flight is the first
+instrument that can tell them apart.
