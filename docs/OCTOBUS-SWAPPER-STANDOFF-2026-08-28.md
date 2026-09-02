@@ -15491,3 +15491,103 @@ This came out of reading 13 lines in order, and those 13 lines were sitting in r
 219-225 argued about instruments. **RULE #0b again**: the ordering was the whole answer and no search
 would have surfaced it, because the informative fact is an ABSENCE BETWEEN two events - which you can
 only see once the events are laid out in sequence.
+
+## 226a - CORRECTION to 226: the fold is IDENTITY, not a 23-bit mask
+
+226 said the bank folds `0x428DBA` to `0x028DBA` via a 23-bit mask. **That derivation is refuted by
+the run.** run226 printed what it actually armed:
+
+```
+----- RAM watch armed on bank #63504289 machine 0x428DBA -> folded offset 0x428DBA span 4 -----
+```
+
+`FilterAddress` returned the address UNCHANGED, so `_addressBitsMask == 0` for this bank and the
+correct offset is `0x428DBA`.
+
+**What survives from 226, and is now MEASURED rather than derived:** the watch was armed on the wrong
+cell, `0x428DBA - 0x420000` was the wrong fold, the two instruments never disagreed, and arming by
+machine address is the fix. Only the mechanism was wrong - and the fix works precisely because it
+does not depend on knowing the mechanism.
+
+**Why the mask is zero is [OPEN].** `MemoryBase`'s constructor calls `AutoSetAddressBits(length)`,
+8 MB should give 23 bits, and no `SetAddressBits(0)` exists on any ND memory (checked). I do not know
+why it comes out 0 and am NOT going to publish a mechanism I cannot verify - that is exactly the
+mistake this section corrects. Side observation worth someone's time later, not chased here: with no
+folding and an 8 MB array based at `0x420000`, the top of the declared MPM window indexes past the
+array end, so the upper part of the window is silently unusable.
+
+**The lesson is the one 226 was already about, turned on itself:** I replaced a wrong hand-computed
+fold with a *different* wrong hand-computed fold, and only the printed value caught it. Making the
+instrument report what it armed is what made this self-correcting. Trap #22 stands; its worked
+example was wrong in the same way as the thing it warned about.
+
+## 228 - ROOT CAUSE: the MON-answer argument block overwrites the swapper's SWPINFO
+
+With the watch finally on the cell, run226 caught the writer. The zeroing write that sits between the
+two `0x8E` stores - the one no ND-100-side instrument could see - has this stack:
+
+```
+CpuND500.RunThreadBody()                                  <- the ND-500 CPU's OWN thread
+ -> Instructionset.Call()
+ -> CpuND500.HandleIndirectSegmentCall                    (CALLG into the segment-31 trampoline)
+ -> Nd500CpuProcessBridge.OnMonitorCall
+ -> Nd500MicrocodeServicer.AnswerMonitorCallStop
+ -> Nd500MicrocodeServicer.AnswerMonitorCallStopLocked    Nd500MicrocodeServicer.cs:3676
+ -> OctobusND5000Station.WriteNd100Word                   OctobusND5000Station.cs:1961
+ -> MpmWindow.TryWriteWord -> RAM.Write
+```
+
+Line 3676 is inside the argument-marshalling loop:
+
+```csharp
+for (uint k = 0; k < argCount; k++)
+{
+    uint addrSlot = msgBase + (0x40u + 4u * k); // HW 0o40+2k  = byte 0x40+4k
+    uint valSlot  = msgBase + (0x80u + 4u * k); // HW 0o100+2k = byte 0x80+4k
+    ...
+    host.WriteNd100Word(valSlot,     (ushort)(v >> 16));
+    host.WriteNd100Word(valSlot + 2, (ushort)(v & 0xFFFF));
+}
+```
+
+Solve the addresses backwards. The watch recorded zeros at `0x428DB6..0x428DBE`, which are
+`valSlot+2` for k=1, `valSlot`/`valSlot+2` for k=2, and k=3. That forces
+**`msgBase = 0x428D30` = `swMsg`, the SWAPPER'S OWN message.** And:
+
+- `SWPINFO` is at word `0o43334`; `swMsg` is at word `0o43230`; the difference is `0o104` words = byte
+  `0x88` from `msgBase`.
+- argument-value slot `k=2` is `msgBase + 0x80 + 8` = byte `0x88`, two words.
+
+**Argument-value slot k=2 and `SWPINFO` are the same two words.** A MON call with three or more
+arguments answered into the swapper's message writes `SWPINFO` to zero, and `LNEWSWAP`'s first gate
+`135474 IF D><0` then reads zero and parks the swapper. That is the stall.
+
+### Why every earlier instrument missed it for eight runs
+
+It happens **on the `CpuND500` thread**, through `OctobusND5000Station.WriteNd100Word`, never through
+`ND100Memory`. The cell probe, `RecordMpmWrite`, `RecordPortAWrite` and the managed-stack capture all
+hang off the ND-100 path and are structurally incapable of seeing it. 224 predicted exactly this
+("blind to Port B, which is where the value is being erased") and built the right instrument; 225-226
+then spent two runs because that instrument was pointed at the wrong cell.
+
+Also note what this does to 227's headline. 227 said "no write sits between the landing and the zero
+read", and that was TRUE OF THE PROBE and false of the machine. The absence was real and was an
+absence *in the instrument*. **An absence is only as wide as the instrument that failed to see it** -
+227 was right to treat it as pointing at an invisible writer rather than at a read-path defect.
+
+### What is measured vs what is not
+
+- `[V]` the writer, the stack, the call path, the values, and that `msgBase == swMsg`.
+- `[V]` the collision arithmetic above.
+- `[OPEN] **which side is wrong.** Either the arg-slot layout `0o40+2k`/`0o100+2k` is wrong, or the
+  answer is going into the wrong message. Do NOT guess: `CLAUDE.md` already warns that the "answer
+  result block at 40B-47B" has **no symbol evidence** and that the `FUNCS ,X 40+` stores are
+  frame-relative. The neighbouring `0o100+2k` block deserves the same suspicion. This needs a carve
+  of where the microcode actually puts MON arguments, against `MP-P2-N500.NPL` and the message
+  catalog - not a plausible-looking edit.
+- `[OPEN]` whether this MON call should have been FORWARDED rather than answered here at all. The
+  stack goes through `Nd500MicrocodeServicer.AnswerMonitorCall*`, which is the answering path. Per
+  `MON-PATH-LEDGER.md`, `3MONCO`/`3WMONCO` are CONDITIONAL - they forward when `ProcessHost` accepts
+  the restart and fall back to a canned answer when it does not. **Settle it with
+  `MonitorCallRestartsSeen` vs `MonitorCallRestartsTaken` before touching the layout**, because if
+  this call should never have been answered locally, the layout is the wrong thing to fix.
