@@ -14620,3 +14620,59 @@ as evidence for anything until the corrected arm reports.
 **Round 7 arms `0o144762` and its real interior.** If the corrected arm is hot, 190/199 are restored
 on a sound footing. If it is cold, `5ACTSWAPPER` never ran and the standoff's shape changes
 substantially - the ping would be posted with nothing ever acting on it.
+
+## 213 - RETRACT 212. ROOT CAUSE OF THE WHOLE NIGHT: `MP-P2-N500` is relocated `+0o200` `[V]`
+
+212 said the control arm was 0o200 words off. **It is not. The arm was right and I was wrong.** The
+harness file has said so since an earlier session, at `Nd100SintranNd5000OctobusBootHarnessTests.cs`
+line 1098:
+
+> *"(Listing `0o144762` + `0o200` = linked `0o145162` = 0xC672 - **the MP-P2-N500 offset**,
+> re-pinned, NOT carried over to the S3SM5 addresses above.)"*
+
+**`MP-P2-N500` is LINKED `0o200` words above its listing addresses.** `0o144762 + 0o200 = 0o145162`
+exactly. The control was correct; `0o145162` really is `5ACTSWAPPER`; **211's interior test was
+valid after all and 190/199 stand.**
+
+**AND THIS IS THE SINGLE CAUSE OF EVERY COLD ARM SINCE 205.** I derived every address straight from
+the NPL listing and never added the offset:
+
+```
+  listing     linked      hex     routine            what I recorded
+  0o134667 -> 0o135067  0xBA37   NXTMSG             "cold - the loop never runs"
+  0o134723 -> 0o135123  0xBA53   XN500              "cold - not the ND-5000 path either"
+  0o135443 -> 0o135643  0xBBA3   SWPDECODER         "NEVER RUNS" (207, already retracted once)
+  0o135470 -> 0o135670  0xBBB8   LNEWSWAP           "never reached"
+  0o135626 -> 0o136026  0xBC16   SETS-ANSWER3       "never reached"
+  0o137046 -> 0o137246  0xBEA6   MCNO load          "cold"
+  0o137240 -> 0o137440  0xBF20   N5SWAP block       "cold"
+```
+
+**Every one of those was armed 0o200 words short of the code it named.** Not one of those cold
+results means anything.
+
+**208's "aliasing" verdict falls too, and the arithmetic says why.** The two arms that reported
+hits were `0o137244` = `0xBEA4` and `0o137247` = `0xBEA7`. The relocated MCNO load is `0xBEA6`.
+Those hits sat *inside the real dispatch region* - **genuine code, not foreign aliases**. The
+registers "contradicting the labels" were doing nothing of the sort: the labels were for the wrong
+listing lines. I invented an aliasing story to explain a discrepancy whose cause was my own
+un-applied offset, and it was persuasive because aliasing is real and had genuinely happened twice
+before (179, 183).
+
+**What survives untouched:** `SOCTO`/`0x3B66` at 1025 hits (a different module, no offset assumed -
+and its identity is still unverified per 211a), and the `DiagPcWatch` +/-1 count property from 211,
+which was measured on the correctly-armed routine.
+
+**THE LESSON, and it is the expensive one:**
+
+> **The offset was written down, in the file I was editing, thirty lines above the arms I kept
+> replacing.** Six rounds and roughly ninety minutes of harness time went into re-deriving addresses
+> from a listing while the note saying "add 0o200" sat in the same method. I read that comment block
+> twice tonight - once to copy the arming pattern, once to check the control's history - and both
+> times I took what I was looking for and skipped the sentence that mattered.
+>
+> **Before arming ANY address from a listing, search the harness for that module's name and read
+> every existing comment about it.** The relocation is module-specific: the same note says the
+> `0o200` is NOT carried over to the S3SM5 addresses.
+
+Round 7 re-arms the entire chain at its linked addresses.
