@@ -22,9 +22,25 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: inside `LNEWSWAP`'s served-process branch (`135476` on), find why control reaches `SWPD4`
-(park the swapper) instead of `LDATREADY` (restart the requester).** Standoff **204**. Both are
-reachable from there; only `LDATREADY`/`INLDATREADY` clears `SWPPING`.
+**NEXT — AND IT NEEDS A HARNESS RUN, the first since 199.** Log `SWMSG.SWPINFO`, `SWMSG.SWPSTAT` and
+`CSWPM.N5STA` **at each `LNEWSWAP` service**, not at the end of the run. Two were serviced; the
+number that matters is whether they saw the same `SWPINFO`. Standoff **205**.
+
+**ANSWERED (205) `[V]`: the designed path for our exact node ends in `ANSWER(3)`, and it never gets
+there.** `LNEWSWAP`'s OK arm tests `CSWPM.N5STA == SWPPING` (`135575`) and `MICFU == 3SWMESS`
+(`135604`) - **both TRUE of `0x00428E30`** - then sets `ANSWER` at `135626` and goes to `SWPD2`,
+*"restart nd-100 proc"*. The node measures `SWPPING(6)` over 100 dumps, never `ANSWER(3)`, so
+control never reaches `135626`.
+
+**One gate eliminated with a byte behind it:** the error arm at `135551` **zeroes** `SWPINFO`, and
+`SWPINFO` measures `0x00008E30` at the end, so that arm did not run last. Independently agrees with
+`ansSWPSTAT=0B` - two witnesses, not one restated.
+
+**What is left is ORDERING, which no static read settles.** `SWPINFO` is set at `133654` inside
+`SWMESS`/`MSWSTART`. If the first `LNEWSWAP` was serviced before that, it saw `SWPINFO=0`, took
+`135474`'s false path and fell through to `SWPD4` - park, drain an empty fifo. That is exactly what
+the run's `[MON PATH]` note calls *"LNEWSWAP with nothing to do"* - **and that phrase is a claim
+about ordering the end-state dump cannot support**, since `SWPINFO` is non-zero when the run ends.
 
 **RESOLVED (204): `133645` wrote the `SWPPING` - the `SWMESS`/`MSWSTART` start path, not
 `5ACTSWAPPER`.** That arm predicts three measured values at once (requester `SWPPING(6)`,

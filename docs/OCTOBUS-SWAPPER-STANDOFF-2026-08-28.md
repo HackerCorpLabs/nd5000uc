@@ -14141,3 +14141,53 @@ started empty, and "nothing to do" cannot be the reason it parked.
 **NEXT:** inside `LNEWSWAP`'s served-process branch (`135476` onward), find why control reaches
 `SWPD4` (park the swapper) rather than `LDATREADY` (restart the requester). Both are reachable from
 there; only one clears `SWPPING`.
+
+
+## 205 - The designed path for OUR node ends in `ANSWER(3)`. It never gets there `[V]`
+
+`LNEWSWAP`'s OK arm, read in order. `CSWPM` is the node `SWMSG.SWPINFO` names - for us
+`0x00428E30`, `N5STA=SWPPING(6)`, `MICFU=0x0005 3SWMESS`:
+
+```
+  135550   IF A><0 THEN                          % Error-answer from swapper?
+  135551      *AAX HSWPI-SWPST; STZTX            % 0 =: X.SWPINFO
+  ...
+  135572   ELSE                                  % Ok answer from the swapper
+  135573      X:=CSWPM; CALL RN5STATUS
+  135575      IF A/\17777=SWPPING THEN           % Power bits might be set
+  135601         T:=5MBBANK; *MICFU@3 LDATX
+  135604         IF 3SWMESS=D THEN               % Message to swapper?
+  135626            CALL RN5STATUS; A/\160000\/ANSWER
+  135631            GO FAR SWPD2                 % Yes, restart nd-100 proc
+```
+
+**Both gates are TRUE of our node** - it is `SWPPING`, and its `MICFU` is `3SWMESS`. So the designed
+outcome is `N5STA := ANSWER(3)` and a restart of the ND-100 process.
+
+**The node measures `SWPPING(6)` across 100 dumps. It is never `ANSWER(3)`.** So control never
+reaches `135626`, and the question is which test diverted it.
+
+**One candidate is eliminated with a byte behind it.** The error arm at `135551` **zeroes**
+`SWPINFO`. `SWPINFO` measures `0x00008E30` at the end - non-zero - so the error arm did not run
+last. That matches `ansSWPSTAT=0B` from a different instrument, which is worth noting: two
+independent witnesses, not one restated.
+
+**What is left is an ORDERING question, and it is the first thing in this stretch that a static read
+cannot settle.** The three gates on the way to `135626`, each with its witness *at the moment
+`LNEWSWAP` ran* rather than at the end of the run:
+
+```
+  135474  IF SWMSG.SWPINFO >< 0        % "Any proc. currently served?"
+  135550  IF SWMSG.SWPSTAT >< 0        % error arm - eliminated above
+  135575  IF CSWPM.N5STA == SWPPING    % the requester still waiting
+```
+
+`SWPINFO` is set at `133654`, inside `SWMESS`/`MSWSTART`. If the FIRST `LNEWSWAP` was serviced
+before that, it saw `SWPINFO=0`, took `135474`'s false path, and fell through to `SWPD4` - park the
+swapper, drain an empty fifo. That is precisely the outcome the run's own `[MON PATH]` note
+describes as *"LNEWSWAP with nothing to do"*, and **that phrase is a claim about ordering that the
+end-state dump cannot support**: `SWPINFO` is non-zero when the run ends.
+
+**So the next step needs a harness run** - the first one this investigation has needed since 199.
+Log `SWMSG.SWPINFO`, `SWMSG.SWPSTAT` and `CSWPM.N5STA` **at each `LNEWSWAP` service**, not at the
+end. Two `LNEWSWAP`s were serviced; the interesting number is whether they saw the same `SWPINFO`.
