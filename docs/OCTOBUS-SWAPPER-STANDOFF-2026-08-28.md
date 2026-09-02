@@ -14539,3 +14539,32 @@ actually lives. Two obstacles, both concrete:
 
 Identify the right segment from SYMBOL-1-LIST's NEIGHBOURING symbols, not by picking whichever
 disassembly looks plausible. Guessing between four files is how this investigation lost five rounds.
+
+### 211a - CORRECTION, same tick: "SOCTO is the live path" is NOT established
+
+211 called `SOCTO` *"the only unambiguously live routine measured tonight"*. **Withdrawn.** What is
+measured is that **PC `0x3B66` (`0o35546`) executes 1025 times**. That it is `SOCTO` rests entirely
+on `SOCTO=035546` in `SYMBOL-1-LIST.SYMB.TXT` - and that list is **not an address table**. Its
+entries around `SOCTO` are:
+
+```
+  S1FUN=000020   S2FUN=000021   MRECP=000052   LOCKA=000060   MAXTR=000021   MBVER=000000
+```
+
+Those are **constants**, not code addresses. The list mixes both and does not say which is which, so
+`SOCTO=035546` may be a parameter, a device number or a table offset rather than an entry point.
+**1025 hits at some resident PC is unremarkable on its own** - resident SINTRAN executes constantly.
+
+**So the honest state is:** a hot PC whose identity is unverified, and the "the investigation has
+been in the wrong module" conclusion in 210 loses its support with it. The cold results for `XN500`,
+`NXTMSG` and `SWPDECODER` are unaffected - those came from `MP-P2-N500.NPL`, where the leading
+number on each line IS the location counter.
+
+**Before `SOCTO` is used for anything: establish that `035546` is code and in which segment.** The
+same value appears in four carved disassemblies. Neighbours in the symbol list do not identify the
+module - they are unrelated - so that route is closed and something else is needed.
+
+**The pattern, third time tonight:** a number that predicts an observation is not thereby explained.
+`0x3B66` being hot is compatible with SOCTO being the octobus driver AND with `035546` being a
+constant that happens to collide with busy resident code. I wrote the conclusion before checking
+which - after spending the whole night recording that exact mistake.
