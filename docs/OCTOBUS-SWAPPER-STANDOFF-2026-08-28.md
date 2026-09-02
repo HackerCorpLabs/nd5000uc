@@ -15674,3 +15674,73 @@ modelled on evidence that does not cover it.
 `CALL_MON` path, to find where the microcode itself puts MON arguments. Read the deep dive first -
 `docs\ND5000-ND100-MESSAGE-PROCESSING-REFERENCE-2026-08-23.md` - per the project rule, because it
 very likely already answers this.
+
+## 230 - the layout is RIGHT, and the classic lane disconfirms the obvious fix. It is an ORDERING problem.
+
+The deep dive answers 229's remaining candidates outright, and the project rule held: it was already
+in there, and re-deriving it would have been the 2026-08-25 mistake again.
+
+**Section 3.4, `CALL_MON1`/`CALL_MON8` (`003770B`-`004000B`), all `[V]` from raw microwords:**
+
+```
+003770B  const=121074B (0xA23C)   EA3 := EA1 + 0x3C
+003772B  CALL_MON8: loop top
+003776B  const=161004B (0xE204)   bump EA3 by +4      -> byte 0x40 = halfword 40B
+003777B  const=161100B (0xE240)   write #1 at +0x40   -> byte 0x80 = halfword 100B
+004000B  next=003772B             write #2, loop
+```
+
+The outbound MON stop writes **both** arrays - addresses at `40B`, values at `100B`, `+4` per
+argument. **Our servicer does exactly what the microcode does.** Candidates 1 and 3 from 229 are
+closed: the layout is not the defect, and the value array is genuinely written on the way out.
+
+And the two facts now collide at the SYMBOL level, from the same symbol table:
+
+```
+5AP1=100/5DP1=101   5AP2=102/5DP2=103   5AP3=104/5DP3=105   ...   5AP5=110/5DP5=111
+HSWPI=104
+```
+
+**`SWMSG.SWPINFO` IS `5AP3`/`5DP3`** - MON parameter 3's value slot. Both `[V]`, both from
+`N500-SYMBOLS.SYMB`.
+
+### The disconfirmation that stops the obvious fix
+
+`Nd500MicrocodeServicer.cs`'s own comment at the resolve site records a MEASUREMENT from a previous
+session, on two independent lanes:
+
+> `377B` on the swapper's own message `0x420D30` - **78 calls, ALL K=0**
+> `377B` on CPU-STAT's message `0x420E30` - 46 calls, ALL K=1 FUNCV=0x20B
+
+**78 MON 377B calls answered into the swapper's own SWMSG on the classic lane, all successful, on
+the lane where the swapper handover WORKS.** So answering 377B into SWMSG is not the bug, the
+`0o100+2k` layout is not the bug, and `msgBase` is not wrong - `ResolveMessageForRunningProcess`
+already fixed the single-global defect that comment describes.
+
+**Anyone about to "fix" this by moving the argument array, changing the message base, or
+special-casing 377B: stop. All three are refuted above.**
+
+### What it actually is
+
+The same block is time-shared. `N5STA` holds SINTRAN's OWN swapper states in some phases
+(`SWPWAIT=5`, `SWPPING=6`, `PSWWAIT=7` - deep dive line 526, and `swMsg` was measured at
+`N5STA=PSWWAIT(7)`), and an ND-500 message status in others. `SWPINFO` at `5AP3` is only safe while
+the node is NOT carrying a live 3+-argument MON stop. So the question is **ORDERING**, not layout.
+
+The octobus lane's order, from the probe and the watch in one run:
+
+```
+SINTRAN stores the pointer   W 0x8E  pc=B82F pil=2
+our MON 377B answer zeroes it        (CpuND500 thread, no ND-100 pc)
+LNEWSWAP's gate reads            R 0  pc=BBBB pil=12
+```
+
+**Next measurement, and it is a comparison not a guess:** run the same capture on the CLASSIC lane
+and get the equivalent ordering around `0x420DB8`. 78 successful calls there means the answer does
+NOT fall between SINTRAN's store and the gate's read. Whatever makes the octobus lane interleave
+differently IS the defect - and per `[[always-run-both-macro-and-microcode-accp]]` this is exactly
+the both-lanes comparison that is supposed to be run anyway.
+
+Note the shape of what nearly happened: three plausible fixes, each supported by a real `[V]` fact,
+all three wrong - and the thing that stopped them was a measurement someone had already written into
+a comment beside the code. **The 78 calls were sitting in the source the whole time.**
