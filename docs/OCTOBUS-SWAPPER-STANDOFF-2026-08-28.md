@@ -16993,3 +16993,64 @@ prefer a capture taken in another context.
 Do not "fix" it by dropping the capture - the capture exists because of a real fault documented
 above `_writeBackLogical`. The two cases have to be told apart, which is what the comparison print
 is for.
+
+## 253. THE ADDRESS IS RIGHT TOO. STALE CAPTURE REFUTED. [V]
+
+run252, both write-backs, both operands:
+
+```
+  WB[0] @0x080240B0:=0x00000005 captured=0x0004D8B0 current=0x0004D8B0
+  WB[1] @0x080240B4:=0x00008E30 captured=0x0004D8B4 current=0x0004D8B4
+  MISMATCH count: 0
+```
+
+**Captured and current are identical.** Section 252's suspicion - that an address cached under
+`X5CPU=-1` is applied after a switch to process 0 - is dead. The `CONTEXT SWITCH` in the log is
+real but harmless: the translation does not move.
+
+So for `0x080240B4` we now have, all `[V]`:
+
+ - the right value (`0x00008E30`, section 252),
+ - the right logical address (section 249),
+ - the right physical address, agreeing with the live mapping (this section),
+ - the write actually executed (section 252),
+
+**and the ND-500 program still reads `0x00000000` from it on the next call.**
+
+### The asymmetry the last three sections walked past
+
+The write and the read do not use the same path:
+
+```csharp
+    // call time, OnMonitorCall
+    values[k] = addr != 0 ? cpu.ReadVirtualMemory32(addr) : 0;      // VIRTUAL read
+    // restart time, ApplyRestartWriteBack
+    cpu.WritePhysicalWord32ForInspection(physical, writeBackValues[k]);   // PHYSICAL write
+```
+
+Both agree on the translation `0x080240B4 -> 0x0004D8B4`. That does NOT mean they reach the same
+storage: a physical write and a virtual read can resolve to the same number and still land in
+different backing objects (different memory bank, an I-space/D-space split, or a cached page the
+virtual path serves from). This project has already been bitten twice by exactly that shape -
+[[nd500-id-space-aliasing]] and standoff 234's D-space-vs-I-space misread.
+
+**Next, and it is small: read the cell straight back after writing it, by BOTH paths, and print
+all three numbers.**
+
+```
+    write physical 0x0004D8B4 := 0x00008E30
+    read  physical 0x0004D8B4 -> ?
+    read  virtual  0x080240B4 -> ?
+```
+
+Three outcomes, each pointing somewhere different and none of them guessable from here:
+
+ - physical reads back 0 -> the write never landed; the fault is in the physical write path.
+ - physical reads `0x8E30` but virtual reads 0 -> the two paths address different storage; that
+   is the defect, and it is an aliasing bug, not a write-back bug.
+ - both read `0x8E30` -> the value is written correctly and something CLEARS it before the next
+   call, and the hunt moves to what runs in between.
+
+Do not change any behaviour until that print exists. Three sections in a row have now refuted a
+theory that looked obvious, and the pattern is that each was a guess about a mechanism nobody had
+measured.
