@@ -15282,3 +15282,43 @@ the write path and ends the search.
 died to a measurement that took minutes once the instrument reported the right thing. **The
 expensive part was never the machine; it was a log that printed reads as writes**, which is fixed,
 and which is why this section could be written from a single run.
+
+## 224 - The write LANDS. The read returns zero. So the eraser is on PORT B `[V]`
+
+`run221.log`:
+
+```
+  W  0x00428DBA=0x008E bank=#24129389 pc=B82F pil=2    the store is issued
+  RB 0x00428DBA->0x8E  bank=#24129389 pc=B82F          IT LANDED - read straight back out of mem
+  R  0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12   the LDDTX reads ZERO
+  W  0x00428DBA=0x008E bank=#24129389 pc=CA88 pil=12   5ACTSWAPPER stores it again
+  RB 0x00428DBA->0x8E  bank=#24129389 pc=CA88          lands again
+  R  0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12   and reads zero again
+```
+
+**The byte is in memory immediately after the store, and gone by the time it is read** - same
+address, same bank object, twice. No ND-100 write in between: every ND-100 access to this cell is in
+that list, because the probe sits on the only ND-100 path.
+
+**AND THAT LAST CLAUSE IS THE ANSWER. Every instrument built tonight watches PORT A.** The MPM is
+**dual-port**: the octobus station and the ND-5000 CPU reach the same `RAM` object **directly**, not
+through `ND100Memory`. A Port-B write is invisible to `RecordMpmWrite`, to `RecordPortAWrite`, to
+the managed-stack capture and to the cell probe alike - all of them hang off the ND-100 side.
+
+The harness even names the limitation in the code I read hours ago and did not register: *"targeted
+write-only **Port-A** capture"*. **The word "Port-A" was doing load-bearing work in a comment I
+skimmed for the mechanism and not for the scope.**
+
+**So the eraser is on the ND-5000 side** - the station or the CPU zeroing the message block - and it
+is still ours to fix. That also retires the last of the guest-side story: SINTRAN writes correctly,
+`LNEWSWAP` reads correctly, and something on our Port B removes the value in between.
+
+**NEXT: instrument the `RAM` OBJECT, not the port.** A hook inside `RAM.Write` (or a probe on
+`DeviceRAM` itself) catches every writer whatever port it arrives on, which is precisely the
+property every instrument so far has lacked. Same managed-stack treatment - the stack will name the
+station method or CPU path directly.
+
+**The shape of tonight, in one line:** every measurement was correct and every conclusion drawn from
+it was too narrow, because the instruments all shared one blind spot and I kept confirming across
+instruments that had it in common. **Agreement between two instruments that watch the same port is
+not corroboration.**
