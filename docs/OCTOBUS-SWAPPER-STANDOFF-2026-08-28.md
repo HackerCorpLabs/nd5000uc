@@ -17239,3 +17239,51 @@ keeps working for cases where identity really is unknown, and our lane stops bei
 `[OPEN]` pending run256, which shows whether `PROCESS START recorded` ever prints on this lane. If
 it does not, the fix is a one-line `NoteLoadedProcess` on the Samson start path, and the existing
 Samson test is the guard that it did not break the tolerance.
+
+## 258. CONFIRMED, AND FIXED AT THE SOURCE. [V] + one honest caveat
+
+run256, with the two new lines:
+
+```
+  PROCESS START recorded:        0 occurrences
+  CONTEXT SAVE SKIPPED - no loaded process (_loadedX5Cpu=-1),
+      regs.PC=0x08008255 IS BEING DISCARDED (monitor-call stop)      x2
+```
+
+Exactly the prediction in section 256, written before the run. **The Samson start never records
+the identity, and both monitor-call stops throw the return address away.**
+
+### The fix
+
+`OnStartProcessND5000` (`Nd500CpuProcessBridge.cs`) loads the context block and returns without
+telling the bridge whose context it now holds. One line added after the successful load:
+
+```csharp
+    NoteLoadedProcess(servicer.ReadMessageX5Cpu(msgByteAddress));
+```
+
+The identity comes from the message - the same source the context switch a few lines above uses.
+
+**What was deliberately NOT done:**
+
+ - not making `-1` decline: that tolerance is intentional, and the point is to stop `-1` arising
+   here rather than to punish it downstream;
+ - not touching the un-park/resume exit in the same method. Under `_loadedX5Cpu < 0` that path
+   resumes whatever the CPU happens to hold, so naming the message's process there would be a
+   guess. The measured defect is on the real start path; that is what got changed. The resume
+   exit remains unrecorded and is `[OPEN]`.
+
+### The caveat, and it matters
+
+The comment I relied on names
+`SamsonTrapContinue_OnParkedProcess_ResumesInPlace_NoStaleReload` as the test that pins the
+tolerance. **That test does not exist in the main tree** - `grep -rln` finds it only inside
+`.claude/worktrees/agent-*`, i.e. in other agents' checkouts, and
+`Emulated.Tests.ND500/nd500if/Nd500SamsonStartTests.cs` is absent here.
+
+So the guard the comment promises is NOT protecting this change. I am not claiming it is. The
+suites that do exist (`Emulated.Tests.ND500`, including `Nd500ND5000StartTests`) are running now,
+and the octobus harness run follows. Until those report, this fix is **built, not verified**.
+
+Nothing about the earlier measurement changes: whether or not the fix works, sections 249-257
+stand on their own runs.
