@@ -15241,3 +15241,44 @@ hypothesis outright; different offsets name the defect and the fix site in one l
 on four lines and the suspect list went from "something, somewhere, zeroes a cell" to "one address
 resolves two ways". **Most of tonight's difficulty was reading an instrument wrong, not the machine
 being subtle.**
+
+## 223 - SAME BANK, both directions. The write is issued and the read returns zero `[V]`
+
+`run220.log`, the first instrument tonight that records DIRECTION explicitly:
+
+```
+  R 0x00428DBA=0x0000 bank=#24129389 pc=61CE pil=0
+  W 0x00428DBA=0x0000 bank=#24129389 pc=61CF pil=0
+  W 0x00428DBA=0x0000 bank=#24129389 pc=B2C6 pil=1
+  W 0x00428DBA=0x008E bank=#24129389 pc=B82F pil=2    <- SWMESS STDTX, byte 0x8E
+  R 0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12   <- LDDTX reads ZERO
+  W 0x00428DBA=0x008E bank=#24129389 pc=CA88 pil=12   <- 5ACTSWAPPER, byte 0x8E again
+  R 0x00428DBA=0x0000 bank=#24129389 pc=BBBB pil=12   <- and reads ZERO again
+  W 0x00428DBA=0x0000 bank=#24129389 pc=BCB3 pil=12   <- the EMPTY path, afterwards
+```
+
+**Every access is served by the SAME memory object, `bank=#24129389`.** The moving-window /
+different-storage hypothesis from 222 is **refuted** - and it was mine, proposed one section earlier
+on the strength of a real project note about `ADRZERO` moving. A plausible mechanism that predicts
+the symptom is still not evidence.
+
+**`pc=BBBB` is `0o135673`** - the `LDDTX` - and it is now labelled `R`, confirming 221's reading
+that the "zero writes" there were reads all along.
+
+**So, stated with direction for the first time:** a byte write of `0x8E` to `0x428DBA` is followed
+by a halfword read of the same address, in the same bank, returning `0x0000`, with nothing in
+between. Twice.
+
+**THE ONE GAP LEFT IN THE CHAIN.** The probe is placed where the write is *issued* - before the
+`if (isByte) ... mem.Write(...)` that actually stores it - so it proves the write was **attempted**,
+not that it **landed**. Everything downstream of that point is still unmeasured, and it is a short
+list: the byte/halfword split, the X5ACT activation hook that sits between, and `mem.Write` itself.
+
+**NEXT, and it is small:** read the byte back from `mem` immediately after `mem.Write` for the probed
+address and record both. Equal values put the defect in the read path; a zero read-back puts it in
+the write path and ends the search.
+
+**Method note.** Three hypotheses have now died here - erasure, wrong cell, moving window - and each
+died to a measurement that took minutes once the instrument reported the right thing. **The
+expensive part was never the machine; it was a log that printed reads as writes**, which is fixed,
+and which is why this section could be written from a single run.
