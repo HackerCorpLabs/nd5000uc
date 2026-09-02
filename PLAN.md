@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED 2026-09-02** | `Nd500MicrocodeServicer.AnswerMonitorCallStopLocked`'s arg-value slot `msgBase+0x80+4k` for k=2 IS the swapper's `SWPINFO` (`swMsg+0x88`), so answering a 3+-arg MON call into `swMsg` zeroes it and `LNEWSWAP`'s gate parks. Standoff 228. **Next: settle whether that MON call should have been FORWARDED at all** - compare `MonitorCallRestartsSeen` vs `...Taken` - BEFORE touching the arg-slot layout, which is itself weakly evidenced. |
+| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED; fix not yet chosen** | MON 377B (argc=4, x2) answered into SWMSG writes its arg-value slot k=2 over `SWMSG.SWPINFO` (`HSWPI=0o104`, symbol-hard in 6 files) - the POINTER to the requester's message - so `LNEWSWAP`'s `IF D><0` gate correctly finds nothing. Forwarding is CLEAN (`Seen=1 Taken=1 gap=0`), target message is correct. Standoffs 228-229. **Next: carve (a) whether MON args belong at `0o100+2k` at all, (b) MON 377B's real argument count, (c) whether that block is READ from the message rather than written into it.** Do not edit before carving. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
