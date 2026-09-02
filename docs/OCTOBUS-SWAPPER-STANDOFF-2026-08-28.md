@@ -16209,3 +16209,60 @@ gets the bank (237). So the anomaly is inside the routine, or in what the routin
 
 **Do not theorise about what `CNVWADR` does before that dump lands.** Every hypothesis in this file
 formed ahead of the measurement has been wrong, and the routine is now directly readable.
+
+## 239 - CNVWADR is an INLINE SHIFT, not a call - and the correct answer is 0x00428E30
+
+run238's site-context dump, I-space:
+
+```
+NNC06@0o134051:  F106 BA47 4A45 CC79 [D986] 6A44 DDFB 5A43 523F
+NNC24@0o145171:  C900 CC79 18F7 4A70 [D986] 6A6F DDFB 20F3 F105
+```
+
+`0xD986` = `0o154606`. Against the repo's OWN opcode table (`Instructions.cs:229-232`):
+
+```
+SHT 0154000 | SHD 0154200 | SHA 0154400 | SAD 0154600
+```
+
+`0o154600` is **`SAD` - shift A and D as one 32-bit double.** The site is ARITHMETIC, not a `JPL`.
+
+**`*CNVWADR` expands INLINE.** Consequences, both of which invalidate earlier work in this file:
+
+- **run238's "CNVWADR BODY @0o055160" dump is meaningless.** There is no routine being called from
+  these sites, so whatever sits at the symbol's address is not the implementation being executed. The
+  dump is left in the log as a record, and should not be decoded or quoted.
+- **Section 7.6.9's patch story gets simpler, not just dead**: a `124003B` stamp over a "call site"
+  presumes a call. These sites are shifts.
+
+### The arithmetic, and why it points at a lost high half
+
+Measured at the store (237): `X = 0o43430 = 0x4718`, `D` after = `0o107060 = 0x8E30` = **`X << 1`**,
+`A` after = **`0`**, with `A := 5MBBANK = 0x21` loaded immediately before the site.
+
+A LINKED 32-bit shift does:
+
+```
+AD before = 0x0021_4718        (A = bank 0x21, D = word offset 0x4718)
+AD << 1   = 0x0042_8E30
+```
+
+**`0x00428E30` is exactly the ping message's ND-100 physical byte address.** That is the correct
+result, and the low half `0x8E30` matches the measurement bit for bit. **Only the high half is
+missing.** `0x0042` became `0`.
+
+So the candidate is now specific and mechanical: **a double-register shift that does not carry
+between D and A** - or does not write A at all - would produce precisely `0x00008E30`.
+
+`[V]` the site word, the opcode-table identification, and the register values.
+`[OPEN]` the shift's exact count/type decode (`0o154606`'s low bits), and whether our `SAD`
+implementation links the registers. **Deliberately NOT hand-decoded further** - the last two
+hand-decodes in this file were wrong (238's correction), and the registers can simply be read.
+
+run239 arms the PC watch ON the site (`0o134051`) and the two words after it, so `A` and `D` are
+captured on both sides of the shift. **The watch table holds EIGHT slots and was full**, so the three
+new arms replace `STORE w1/w2/w3`, which had reported identical values and were adding nothing.
+
+**Caution for the next reader:** the same CPU runs both lanes, so a plain "our SAD is broken" would
+break the classic lane too - and it does not. Whatever this turns out to be, it has to explain why
+only one lane is affected. Do not stop at the first explanation that fits the octobus lane alone.
