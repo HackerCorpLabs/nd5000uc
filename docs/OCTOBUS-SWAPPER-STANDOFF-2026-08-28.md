@@ -15322,3 +15322,50 @@ station method or CPU path directly.
 it was too narrow, because the instruments all shared one blind spot and I kept confirming across
 instruments that had it in common. **Agreement between two instruments that watch the same port is
 not corroboration.**
+
+## 225 - The port-agnostic watch and the cell probe DISAGREE. Neither is trusted until they don't
+
+`run222.log`. The `RAM`-object watch on offset `0x8DBA` captured **one** write in the whole run:
+
+```
+  [Write] offset 0x008DBA := 0x00
+     ... RAM.Write <- ND100Memory.WriteMemory32W <- ... <- Instructions.STA()
+```
+
+A Port-A `STA` storing zero, early. **And that is the only one.**
+
+**But the cell probe, on the same run and the same cell, recorded six accesses including two writes
+of `0x8E`** (`pc=B82F` and `pc=CA88`), each confirmed to have LANDED by a read-back taken from the
+same memory object one statement later.
+
+```
+  cell probe (Port A path)  : W 0x8E, RB ->0x8E, R 0x0000, W 0x8E, RB ->0x8E, R 0x0000, W 0x00
+  RAM-object watch          : one write, 0x00, from an STA
+```
+
+**Both cannot be right.** The read-back proves the byte reached the object; the object's own write
+hook says no such write happened. **I am not going to pick the one that suits the story** - that is
+exactly how 219, 220 and 222 went wrong.
+
+**Candidate explanations, none tested:**
+
+```
+  the 0x8E stores reach the array by a path that bypasses BOTH RAM.Write and RAM.WriteFast
+  the watch is armed on a DIFFERENT RAM instance than the one being written
+     - argued against by the cell probe reporting bank=#24129389 on every access, but the probe
+       resolves its bank per access while the watch was armed once, at setup
+  FilterAddress maps those stores to a different offset than 0x8DBA
+```
+
+**NEXT: make the two instruments agree before drawing anything from either.** Log the RAM instance
+hash inside `NoteWatchedWrite` and compare it against the probe's `bank=#`, and record EVERY write in
+a small window around `0x8DBA` rather than one exact offset - an exact-match watch cannot tell
+"nobody wrote it" from "the offset is not what I think".
+
+**Standing rule this earns:** *an exact-address watch that reports nothing is reporting about the
+address, not about the traffic.* Widen first, then narrow.
+
+**Honest note on the session.** From 219 onward this has been instrument debugging, not machine
+debugging - eight runs to establish that a byte written is not the byte read, which the very first
+of them already showed. The machine's behaviour has been stable and reproducible throughout; every
+delay has been mine.
