@@ -14321,3 +14321,63 @@ comment carrying the wrong claim is corrected in the same commit as this round's
 
 **The number was right both times.** What moved is only whether the name behind it was sourced -
 which is worth noting, because "right conclusion, wrong reason" survives review far too easily.
+
+## 208 - The chain's two "passes" are ALIASED, and the predecessor pair is what proves it `[V]`
+
+`run207.log`, 15m48s, test passed.
+
+```
+  CONTROL 5ACTSWAPPER@0o145162            hits=2
+  SWAPMON-BLOCK X:=N5MESSAGE@0o137240     hits=0     <- the REQUIRED PREDECESSOR
+  A==N5SWAP passed@0o137244               hits=2
+  X==SWMSG passed CALL SWPDECODER@0o137247 hits=2
+  NOT-AUTHORIZED else arm@0o137256        hits=0
+  SWPDECODER-entry@0o135443               hits=0
+  LNEWSWAP-entry@0o135470                 hits=0
+  SETS-ANSWER3@0o135626                   hits=0
+```
+
+**The table contradicts itself twice, and both contradictions point the same way.**
+
+1. `0o137240` is `X:=N5MESSAGE`, the straight-line PREDECESSOR of `0o137244`. It is COLD while its
+   successors are hot. You cannot reach `137244` without executing `137240`.
+2. The registers refute the arms' own labels. `A==N5SWAP passed` means the gate `IF A=N5SWAP`
+   (N5SWAP = `377`) has just succeeded - and the hit prints **`A=0o`**. Zero is not 377.
+   `X==SWMSG passed` prints `X=43243o` at one hit and the block's `X` should be `SWMSG`.
+
+```
+  A==N5SWAP passed  hit#1 PIL=12 A=0o      D=43230o X=43374o B=52222o L=137242o
+  X==SWMSG passed   hit#1 PIL=12 A=115542o D=43230o X=43243o B=52222o L=137242o
+```
+
+**So both hits are foreign code at the same 16-bit PC**, and every arm in the real
+`N5SWAP`/`SWPDECODER`/`LNEWSWAP` chain is cold. `DiagPcWatch` matches the 16-bit PC only; segments
+share the virtual space. This is the third aliasing catch in this investigation (179, 183, now 208).
+
+**AND `B` DID NOT DISCRIMINATE THIS TIME.** 179 and 183 were caught by `PIL`/`B` differing from the
+path under test. Here the alias carries `B=52222o` - **the same `B` as the genuine `5ACTSWAPPER`
+hits** - so the register that settled the previous two would have waved this one through. What
+caught it was the COLD PREDECESSOR and the arm's own semantic precondition (`A` must be 377).
+**A discriminator that worked twice is not a rule.** Pair every arm with its predecessor AND state
+what the registers must hold if the label is true.
+
+**What is `[V]` after three runs:**
+
+```
+  5ACTSWAPPER runs twice, X=0o43430 (the ping node) both times   - genuine, corroborated by 190/199
+  SWPDECODER, LNEWSWAP, the N5SWAP block, SETS-ANSWER3           - never run
+  answeredByCsharpEmulation=0, realRoundTrips=1                  - REAL SINTRAN answered, not our C#
+```
+
+That last line matters and is worth stating plainly: the project's standing question - *who answered
+the MON calls* - has the right answer here. This is not our emulation shadowing SINTRAN.
+
+**So SINTRAN answers the swapper's MON 377B somewhere OTHER than the block at `0o137241`**, and my
+reading of the service path is incomplete rather than merely mis-instrumented.
+
+**NEXT, and it is deliberately not another arm on a computed address.** Three runs have now been
+spent on addresses derived from the NPL listing's location counter, and one of the eight is
+demonstrably not where I think it is. **Validate the mapping first:** find what load address
+`MP-P2-N500` actually occupies at run time, and confirm it against a routine whose hit count is
+independently known. Arming more computed addresses before that is buying more tables that cannot
+be trusted.
