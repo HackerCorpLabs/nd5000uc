@@ -17339,3 +17339,42 @@ ND5000 path. The classic path does not run on this lane. The mechanism is eviden
 
 `Emulated.Tests.ND500`: **2264 passed, 0 failed, 13 skipped of 2277**, exit code 0. The
 `Emulated.Tests.ND100` suite is running now; until it reports, "no regressions" covers ND500 only.
+
+## 260. THE NEXT ITEM, MEASURED FROM THE SAME RUN: THE DOMAIN TAKES A PROTECT VIOLATION AT ITS FIRST INSTRUCTION. [V]
+
+No new run needed - run258 already carries it.
+
+```
+  CONTEXT SAVE X5CPU=1 P=0x08000004 (regs.PC=0x08000004 P1=0x08000004 retry=True) (trap stop)  x2
+  trapsAttempted=1 trapsPosted=1 lastTRAPN=44B lastTrapP=0x08000004
+  lastPageFault=(none)
+  lastProtectViolation=MMU read protection violation at 0x08000013 P1=0x08000004
+  swpfu[LNEWSWAP:8 LSWPAGE:1]
+  domain PS=10 CED=0 CAD=0        (the swapper runs PS=3 CED=0)
+```
+
+**`44B` is a PROTECT VIOLATION, not a page fault** - `lastPageFault=(none)` confirms it, and the
+servicer's own comments name 44B that way. So the cpu-stat domain starts, executes its first
+instruction at `0x08000004`, that instruction READS `0x08000013`, and the MMU refuses the read.
+`P1` equals the instruction address, so this is the first instruction, not a later one.
+
+This is a different failure from T1 and must not be folded into it. T1 was ours - a discarded
+return address. This one is a memory-protection verdict on the domain's own first read, with the
+domain running under `PS=10` where the swapper runs under `PS=3`. `PS` selects the capability
+table, so it decides which segments the running code may see.
+
+Only ONE `LSWPAGE` is served in the whole run (classic serves 84), which is consistent with the
+domain never getting past its first instruction to fault for more pages.
+
+### Do not repeat the T1 mistakes on this one
+
+ - **Read before instrumenting.** [[nd500-classic-vs-nd5000-page-table-split]] records that the two
+   generations divide the same 27 bits differently and that sharing the constants cost 13,359
+   spurious refaults; [[nd5000-domain-information-table]] records the `PIA` gate at PCB offset
+   `0xC8`; and the AM#37 note warns against "fixing" a protection check that is correctly catching
+   our engine. Any of those could be this. Read them first.
+ - **The MMU walk is HARDWARE on the ND-5000** ([[microcode-cannot-answer-hardware-questions]]),
+   so "execute the microcode and ask it" has a blind spot here and the manual is the authority.
+ - **`TRAPS BY CONDITION (whole run): none` while `trapsPosted=1`** - those two cannot both be
+   right. One of the trap instruments is not counting what its label claims. Settle that BEFORE
+   quoting either, or it will produce a confident wrong number exactly like the counters in T1 did.
