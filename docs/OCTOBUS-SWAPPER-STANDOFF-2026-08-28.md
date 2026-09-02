@@ -17054,3 +17054,49 @@ Three outcomes, each pointing somewhere different and none of them guessable fro
 Do not change any behaviour until that print exists. Three sections in a row have now refuted a
 theory that looked obvious, and the pattern is that each was a guess about a mechanism nobody had
 measured.
+
+## 254. THE WRITE LANDS AND BOTH PATHS AGREE. SOMETHING CLEARS THE CELL AFTERWARDS. [V]
+
+run253, the both-path read-back taken immediately after each write-back:
+
+```
+  WB[0] READBACK physical=0x00000005 virtual=0x00000005
+  WB[1] READBACK physical=0x00008E30 virtual=0x00008E30
+  (twice, once per write-back)   DISAGREE count: 0
+
+  next MON 377B:  [2] @0x080240B4=0x00000000
+```
+
+The third of the three outcomes section 253 laid out. **No aliasing** - physical and virtual read
+the identical value from the identical address, so `WritePhysicalWord32ForInspection` and
+`ReadVirtualMemory32` do reach the same storage. **The write landed.**
+
+The chain for `0x080240B4` is now verified end to end and every link is sound:
+
+| link | verdict |
+|---|---|
+| SINTRAN's answer value `0x00008E30` | correct (252) |
+| write-back mask `0o0006` naming params 2 and 3 | correct, matches the reference (252) |
+| logical address, same as classic | correct (249) |
+| captured vs current physical address | identical, `0x0004D8B4` (253) |
+| the write executing | yes (252) |
+| the value readable straight afterwards, both paths | yes, `0x00008E30` (this section) |
+
+**And the ND-500 program reads `0x00000000` from it on its next monitor call.**
+
+So the value is destroyed in the window between the restart and the next `MON 377B` - while the
+guest is running. Nothing in the answer path can be responsible; that path has now been cleared
+six different ways.
+
+### Next: name the writer, do not theorise about it
+
+This is the same question section 241 answered on the ND-100 side, and the technique that worked
+there works here: **watch ND-500 physical `0x0004D8B4` for writes and capture a stack trace.**
+Section 241 named its writer in one run and ended a hunt that had already burned several sections
+of guessing; four theories have been refuted since (246, 242, 252/253), every one of them a guess
+about an unmeasured mechanism.
+
+Candidates exist - the swapper re-paging the page that holds the variable during `place-domain`
+is an obvious one, given `31B` transfers are running - but **none of them should be written down
+as the cause before the watch names it.** The point of the watch is that it cannot be fooled by
+which candidate sounds best.
