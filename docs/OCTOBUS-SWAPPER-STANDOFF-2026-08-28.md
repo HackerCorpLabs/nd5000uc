@@ -14822,3 +14822,48 @@ drives control to `EMPTY` that early.
 relocation, thirty lines above the arms I kept editing). Both were comments left by earlier sessions
 recording exactly the thing I then rediscovered the hard way. **Grep the emulator's own comments for
 a routine name before instrumenting it** - our tree is a source, not just the subject.
+
+## 217 - The erase theory dies too. Write and read are looking at DIFFERENT CELLS `[V]`
+
+`run214.log`. All three zeroing arms hit exactly once, and all three land AFTER both `LNEWSWAP`
+calls:
+
+```
+  ... SWPINFO WRITE ... 5ACTSWAPPER#1 ... LNEWSWAP#1 GATE D=0 ... SWPD4#1
+      5ACTSWAPPER#2 ... LNEWSWAP#2 GATE D=0 ... SWPD4#2
+      EMPTY@0o136250   SWPINFO-ZEROED@0o136257   SWPIN-ZEROED@0o136262     <- all last
+```
+
+**Nothing erases the value before the gate reads it.** Combined with 216 - the write is first and
+stores the right value - both explanations I have offered for `D=0` are now dead:
+
+```
+  ORDERING (205)  refuted by 216: the write precedes both calls.
+  ERASURE  (216)  refuted here:   both zeroing writers run after both calls.
+```
+
+**What is left is that the write and the read address DIFFERENT CELLS**, and the captured registers
+point at where:
+
+```
+  SWPINFO WRITE @0o134054   X=43430o    the PING NODE
+  THE GATE      @0o135674   X=43334o    swMsg(43230o) + 0o104
+```
+
+If the store used the ping node as its base it landed at `43534o`, and the gate reads `43334o` - a
+cell nobody wrote, which is exactly `D=0`.
+
+**NOT ESTABLISHED, and the reason matters.** The write's `X` was sampled at the FIRST word of
+`X:=SWMSG; T:=5MBBANK; *AAX HSWPI; STDTX; AAX -HSWPI`, *before* `X:=SWMSG` executes - so `43430o` is
+just the leftover from the `SWPPING` write on the line above. **A register sampled at the first word
+of a multi-operation source line describes the PREVIOUS line, not this one.** That is a
+general hazard of this instrument and it has been quietly present in every register I have quoted
+tonight.
+
+**Round 11 walks the store word by word** - all five words of `0o133654`-`0o133660` armed - rather
+than guessing which one is the `STDTX`. The word where `X` becomes `43334o`, or fails to, is the
+answer.
+
+**Three hypotheses offered, two already refuted by measurement.** Recording that as the shape of the
+night rather than as a complaint: each was specific enough to die, which is the only reason the
+third is worth testing.
