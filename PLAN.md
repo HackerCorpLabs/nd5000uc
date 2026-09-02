@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED = an ORDERING race** | Our MON 377B answer writes param-3's value slot (`5AP3`/`5DP3` = HW `0o104`) which IS `SWMSG.SWPINFO` (`HSWPI=0o104`), landing between SINTRAN's store of the request pointer and `LNEWSWAP`'s `IF D><0` gate. **The layout, the message base and the 377B answer are all VERIFIED CORRECT - do not 'fix' any of them** (classic lane: 78 x 377B into SWMSG, all K=0, and that lane works). Standoffs 228-230. **Next: capture the same ordering around `0x420DB8` on the CLASSIC lane and diff the interleaving.** |
+| T1 | The octobus `place-domain` swapper stall | **REFRAMED - the SWPINFO overwrite is NORMAL** | Classic lane (WORKS) overwrites `SWPINFO` 157x on MON 377B with the same `N5STA=2`, so the whole 218-231 framing was wrong. Real difference found: the stored (bank,address) is `0x00210718` classic vs `0x00008E30` octobus - **bank half ZERO on octobus**, and the two are not even the same kind of address. **Next: carve `CNVWADR` (`*NNC06` @133651) and `5MBBANK` on both lanes.** Standoff 232. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
