@@ -14971,3 +14971,51 @@ and an absence look exactly like proof.**
 
 **NEXT:** read the ND-100 `LDDTX`/`STDTX` implementation. Two questions, in order - why does the
 load path write at all, and why does the store put `0x008E` where `0x8E30` belongs.
+
+## 219a - RETRACT DEFECT 1. The store is CORRECT; I read one byte of a four-byte write
+
+219 claimed *"the double store writes the wrong value - `0x008E` where `D=0x8E30`"*. **False.** The
+writes log is BYTE-wise, and I grepped two of the four bytes:
+
+```
+  5383121  W 0x00428DB8=0x0000  pc=134057B   |
+  5383122  W 0x00428DB9=0x0000  pc=134057B   |  A = 0x0000   high half
+  5383123  W 0x00428DBA=0x008E  pc=134057B   |
+  5383124  W 0x00428DBB=0x0030  pc=134057B   |  D = 0x8E30   low half   CORRECT
+```
+
+`STDTX` stores `0x0000_8E30` exactly as it should, big-endian, four bytes. **`0x008E` was byte 3 of
+4.** `Instructions.MemoryReference.cs` `STDTX` and `WritePhysicalMemory` are both correct and need no
+change. The second "independent site" at `pc=145210B` writes `0x8E` and `0x30` too - it corroborated
+nothing, because it was the same misreading twice.
+
+**This is the fourth time tonight a value was quoted from a partial view of the evidence**, and the
+first three all involved the same reflex: grep a pattern, read what comes back, stop. **The
+adjacent bytes cost one command.**
+
+### DEFECT 2 SURVIVES, and is now the whole of it
+
+Reading all four bytes makes it sharper, not weaker:
+
+```
+  pc=134057B  pil=2   0x428DB8..BB := 00 00 8E 30    SWMESS stores SWPINFO   [correct]
+  pc=135673B  pil=12  0x428DB8..BB := 00 00 00 00    ALL FOUR BYTES ZEROED   [the defect]
+  pc=145210B  pil=12  0x428DBA..BB := 8E 30          5ACTSWAPPER restores it [correct]
+  pc=135673B  pil=12  0x428DB8..BB := 00 00 00 00    zeroed AGAIN
+  pc=136261B/136263B                                 the EMPTY path, afterwards
+```
+
+**A full 32-bit zero store at `pc=0o135673`, twice, each time immediately before the gate at
+`0o135674` reads zero.** `L=137450B` on those entries matches the `L` on the PC watch's
+`LNEWSWAP-entry` and `GATE` hits, so it is the same call context, not a coincidence elsewhere.
+
+**And it cannot be the instruction the listing shows there.** Linked `0o135673` is the last word of
+`T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX`, and `ReadPhysicalMemory` provably does not write
+(`CpuND100.MMS.cs:924` - it calls `SystemBus.ReadMemory16` and nothing else). So either the
+listing-to-linked mapping is off for this line, or the `pc` in the trace is not the address of the
+storing instruction.
+
+**NEXT: get the instruction actually at linked `0o135673` from the LINKED IMAGE, not the listing.**
+`MACM-1718K-loaded-image.bin` is in the carver's `re\` folder. Every attempt tonight to reason about
+this code from the NPL listing has needed a correction; the linked image is the artifact that
+actually runs.
