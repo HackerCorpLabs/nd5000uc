@@ -14269,3 +14269,55 @@ Dropped to make room: `ERROR-ARM@0o135551` (already eliminated - that arm zeroes
   CONTROL 2, SWPDECODER >0, LNEWSWAP 0  -> the GOSW dispatches somewhere other than where I read it.
   LNEWSWAP >0                   -> the original ladder is live and G1 answers the ordering question.
 ```
+
+## 207 - `SWPDECODER` NEVER RUNS. The whole 205 ladder was aimed at the wrong routine `[V]`
+
+`run206.log`, 15m50s, test passed. The control did its job on the first read:
+
+```
+  CONTROL 5ACTSWAPPER@0o145162  hits=2   <- the watch works, these ARE the runtime addresses
+    hit#1 PIL=2  A=5o     D=5o     T=24o    X=43430o B=52222o L=134355o
+    hit#2 PIL=12 A=52222o D=43430o T=52404o X=43430o B=52222o L=136240o
+  SWPDECODER-entry@0o135443     hits=0
+  LNEWSWAP-entry, G1, OK-ARM, G3, SETS-ANSWER3, SWPD4   all 0
+```
+
+**`SWPDECODER` is never entered, so nothing inside `LNEWSWAP` was ever reachable** and standoffs
+205/205a were instrumenting a routine that does not run. The control reproduces the earlier
+measurement exactly, including `X=0o43430` - the ping node - at both `5ACTSWAPPER` hits (190, 199).
+
+**`SWPDECODER` has exactly ONE caller**, behind two gates:
+
+```
+  137240   X:=N5MESSAGE
+  137241   IF A=N5SWAP THEN              % N5SWAP=377, "MON.CALL USED BY THE SWAPPER"
+  137244      IF X=SWMSG THEN
+  137247         CALL SWPDECODER         % DECODE FUNCTION FROM SWAPPER
+  137250      ELSE
+  137256         A:=25; CALL WN5STATUS   % "YOU ARE NOT AUTHORIZE TO DO THIS"
+```
+
+So the swapper's monitor call either never reaches this block, or fails one of the two gates - and
+the else arm is LOUD: SINTRAN answers **"you are not authorized"** when the call arrives in a
+message that is not `SWMSG`. Round 3 (`run207.log`, in flight) walks that chain, and because the
+watch prints registers per hit, `0o137240` reports the actual `A` (the MON number) and `X` (the
+message) rather than only whether the block was reached.
+
+### CORRECTION to 200: `N5SWAP` IS a real symbol
+
+200 said *"`N5SWAP` is not in `N500-SYMBOLS.SYMB` and I could not find it anywhere - so the name is
+unsourced and must not be quoted as a symbol."* **Wrong.**
+
+```
+  MP-P2-N500.NPL:1273     SYMBOL N5SWAP=  377    % MON.CALL USED BY THE SWAPPER.
+  MP-P2-PERF-SAMP.NPL:1100 SYMBOL N5SWAP=  377
+```
+
+Right there in the file this whole investigation has been reading. I grepped ONE `.SYMB` dump,
+found nothing, and promoted that to "invented name" - **a null result about the file I happened to
+search, reported as a fact about the symbol.** Exactly what RULE #0b says a zero-hit grep can never
+support, committed on the same night I wrote that lesson into two other sections. The harness
+comment carrying the wrong claim is corrected in the same commit as this round's arms.
+
+**The number was right both times.** What moved is only whether the name behind it was sourced -
+which is worth noting, because "right conclusion, wrong reason" survives review far too easily.
