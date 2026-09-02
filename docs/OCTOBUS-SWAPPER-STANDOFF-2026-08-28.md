@@ -16550,3 +16550,52 @@ Re-launched as run245 with `RETROCORE_ND5000_PACK=D:\DOMS-CSFIX.IMG` (verified p
 bytes) and `RETROCORE_ND5000_WATCH=lnewswap`. Note for comparability: run245 uses the DEFAULT
 timeout scale, not a shortened one - a longer timeout can only reduce false stalls, and the
 question being asked ("does it get past two demand-page calls") is not sensitive to it.
+
+## 245. CAUSALITY CONFIRMED: THE PARAMETER-3 WRITE IS WHAT STALLS PLACE-DOMAIN. THE SWITCH STAYS OFF. [V]
+
+run245, identical to run239 except `RETROCORE_ND500_SKIP_MON_VALUE_SLOTS=1`:
+
+```
+  run239 (switch off)   ----- `place-domain cpu-stat` (STALL) -----
+  run245 (switch on)    ----- `place-domain cpu-stat` (OK)    -----
+```
+
+The two runs are the same machine up to that point - the octobus interrupt census is identical
+to the digit in both: `raises=1599 delivered=286 whileDisabled=733`. So the only variable is the
+value-slot write, and it flips place-domain between stalling and completing.
+
+### THIS IS NOT SUCCESS, AND MUST NOT BE REPORTED AS PROGRESS TOWARD THE GOAL
+
+The same header says what actually happened:
+
+```
+  run239   micfu[1B:65 12B:1 23B:1 24B:1 31B:13]  msgs=81  restarts=1/1  PC=0x08008255 WAIT
+  run245   micfu[1B:17 12B:1 23B:1      31B:13]  msgs=32  restarts=0/0  PC=0x08008255 WAIT
+```
+
+**`24B` (`3MONCO`) is GONE and `restarts=0/0`.** Not one monitor call was forwarded. WHO ANSWERED
+THE MON CALLS? *Nobody - none were made.* "place-domain OK" means the SINTRAN command returned to
+its prompt; the ND-5000 is still parked at `PC=0x08008255 stopMode=WAIT`, exactly where it was.
+run239 at least forwarded one call for real (`Seen == Taken`). By the project's own test this run
+is not better than run239, it is differently stuck.
+
+**So the switch is a probe, not a repair, and it stays OFF.** It is env-gated and default-off, so
+nothing needs reverting.
+
+### What it localises
+
+The classic lane writes this same slot 187 times and completes, so the write itself cannot be
+wrong. The difference must be the VALUE written. Two facts point the same way:
+
+ - octobus writes ZERO into parameter 3 (that is what the RAM watch captured in section 241).
+ - the classic ledger reports `SWPINFO=0x00210718` on **all 187 answers** - the cell is never
+   observed destroyed there, across the whole run.
+
+That is consistent with the classic lane writing back a value that equals what is already in the
+cell, while the octobus lane writes zero over a live pointer. **`argValues[2]` is the suspect.**
+
+### Next - measure the values, do not reason about them
+
+Add `argValues[k]` to the `MonAnswerLog` line and run BOTH lanes. If classic's `argValues[2]` is
+non-zero and octobus's is zero, the defect is wherever the octobus path fills `argValues`, and the
+repair goes there - not into the arg loop, which is doing its job correctly on both lanes.
