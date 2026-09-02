@@ -16599,3 +16599,61 @@ cell, while the octobus lane writes zero over a live pointer. **`argValues[2]` i
 Add `argValues[k]` to the `MonAnswerLog` line and run BOTH lanes. If classic's `argValues[2]` is
 non-zero and octobus's is zero, the defect is wherever the octobus path fills `argValues`, and the
 repair goes there - not into the arg loop, which is doing its job correctly on both lanes.
+
+## 246. THE ZERO IS AN UNUSED OPERAND SLOT BEING WRITTEN AS IF IT WERE A VALUE. [V]
+
+### First, a wrong turn - recorded so it is not repeated
+
+I found `AnnounceSwapperAlive` passing `new uint[] { 1u, 0u, 0u, 0u }` and it looked like the
+answer: a synthesized MON 377B with three placeholder zeros, one of which lands on `HSWPI`. I
+wrote a scoped fix for it and built it.
+
+**`AnnounceSwapperAlive` has no callers.** `grep -rn` across the tree finds its definition, one
+comment mentioning it, and copies inside `.claude/worktrees/`. It is dead code, so the fix changes
+nothing.
+
+The stack trace in section 241 already said so and I under-read it. It named
+`Nd500CpuProcessBridge.OnMonitorCall` <- `CpuND500.HandleIndirectSegmentCall` <- `Call()` - a REAL
+`CALLG` from the ND-500 CPU, not a synthesized announce. **The header's `ansArg0=1 ansArg1=0`
+happening to match `{1,0,0,0}` is what made the wrong code look right.** A coincidence between a
+literal in the source and a value in a log is not evidence; the stack trace was, and it was already
+in hand.
+
+### The actual source of the zero
+
+`Nd500CpuProcessBridge.cs:1737`:
+
+```csharp
+    // Address 0 = missing/unused slot: record 0, don't fault on it.
+    values[k] = addr != 0 ? cpu.ReadVirtualMemory32(addr) : 0;
+```
+
+and the comment 12 lines above it, already measured by an earlier session:
+
+> Measured: the swapper calls MON 377B with operands at `0x080240B0`/`0x080240B4` ...
+
+**Two operand addresses, `argCount = 4`.** So slots 2 and 3 have `addr == 0`, which this code
+correctly documents as "missing/unused slot" and fills with a placeholder zero *for the trace*.
+The arg loop in `AnswerMonitorCallStopLocked` then writes that placeholder into the message as
+though it were a real value - and slot 2 is `HSWPI`/`SWPINFO`.
+
+So the defect is one confusion, stated plainly: **an unused slot and a slot whose value is zero
+are not the same thing, and the code turns the first into the second.** Everything downstream is
+correct - the slot arithmetic (242), the classic lane's 187 identical writes (243), and the
+causality (245).
+
+### The fix this implies
+
+Withhold the VALUE write when the argument's ADDRESS is zero. That is right on both lanes and
+needs no per-call-site knowledge: a slot with no operand address has no value to deliver, and
+leaving it alone preserves whatever SINTRAN staged there. `argCount` is untouched, because SINTRAN
+reads it as `NUMPA`.
+
+The `knownValueCount` parameter added for the dead-code fix is being reverted - the address-zero
+guard subsumes it and does not require every call site to declare what it knows.
+
+### Prediction on the run in flight
+
+run246 is testing the dead-code fix with the probe switch OFF, so it is effectively a control and
+should reproduce run239's `place-domain cpu-stat (STALL)`. If it comes back OK instead, this whole
+section is wrong and the announce is live after all.
