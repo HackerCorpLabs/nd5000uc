@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **open - the write/read disagreement is the whole defect** | `CNVWADR` is now VERIFIED CORRECT byte-exact (standoff 240): `(wordAddr - 5MBBANK*65536)*2`, so `0x8E30` is the right ND-500-side address and the value SINTRAN stores is sound. **9 hypotheses dead.** The cell is `swMsg+0o104 words` = ND-100 physical `0x428DB8` = `HSWPI`/`5DP3` - which is ALSO MON argument value slot k=2, and the MON-ANSWER LEDGER records both 377B answers landing on it. NEXT: put a single SEQUENCE COUNTER on that one cell and print, in order, SINTRAN's store, our MON-answer write, and the LDDTX read - **on BOTH lanes**. Section 231 tried to settle ordering with call COUNTS, which cannot see order at all. |
+| T1 | The octobus `place-domain` swapper stall | **open - the cell is exonerated on both lanes** | `CNVWADR` verified byte-exact (240); the zeroing writer named by stack trace as our own MON arg loop (241); the slot layout carved and correct on BOTH sides - `HSWPI` IS MON parameter 3, by design (242); and the CLASSIC lane does the identical overwrite **187 times with the same `argc=4` and still completes** (243), which refuted my own second-MON-call theory. **11 hypotheses dead.** The blunt remaining fact: octobus makes **2** demand-page calls then only watchdogs (`micfu[1B:65]`, CPU `WAIT` at `PC=0x08008255`); classic makes **187** and finishes. RUNNING: one env-gated causality experiment (`RETROCORE_ND500_SKIP_MON_VALUE_SLOTS`) - **not a fix**, it only asks whether the octobus run gets past two calls when parameter 3 is left alone. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
@@ -22,18 +22,11 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: THE CLASSIC-LANE ARGC COMPARISON IS RUNNING.** Ordering is SETTLED (standoff 241): the
-RAM watch already had it, with stack traces. SINTRAN's `STDTX` stores `0x8E30` into `HSWPI`; our
-`Nd500MicrocodeServicer.AnswerMonitorCallStopLocked:3716` zeroes it; the gate then reads zero. `HSWPI`
-(word `0o104` = byte `0x88`) IS MON value slot k=2, and this call has `argc=4`.
+**NEXT: ONE CAUSALITY EXPERIMENT IS RUNNING, AND IT IS NOT A FIX.** Everything about the cell is now measured correct: the conversion (240), the writer (241), the slot layout on both sides (242), and the classic lane doing the same overwrite 187 times and completing (243). The slots are where the reference says they are, so suppressing the write would be papering over a symptom.
 
-`MP-P2-N500.NPL:933` says what the cell means: `SWPINFO` is SINTRAN's record of which process the
-swapper is serving, and `IF D><0` gates the completion path. Zero means nobody, so the request never
-finishes.
+`RETROCORE_ND500_SKIP_MON_VALUE_SLOTS` is env-gated and default OFF. It answers ONE question reading cannot: does the octobus run get past its two demand-page calls if parameter 3 is left alone? **A yes does not license keeping it on** - it localises the defect to something that only matters when that cell is disturbed. A no removes the cell from the hunt for good. Unset it after the measurement either way.
 
-The classic lane answers the SAME MON 377B 78 times and works, so the overwrite alone cannot be the
-whole story. **Print `argc` and the value-slot writes there and compare.** Do NOT change the arg loop
-before that number is in hand. Standoffs **218**, **240**, **241**.
+Standoffs **240**-**243**.
 
 **THE STALL IS LOCATED, AND IT IS OURS `[V]` (2026-09-02, rounds 7-11).** SINTRAN writes `0x8E30`
 into word `0o43334` and later reads **zero** out of the same word:
