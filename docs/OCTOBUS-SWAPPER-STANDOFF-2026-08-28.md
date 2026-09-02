@@ -15653,3 +15653,24 @@ over the pointer. The swapper then correctly concludes there is nothing to do.
 
 **Nothing is being changed on this evidence.** Each candidate implies a different edit, and picking
 one now would be exactly the plausible-looking guess this file exists to prevent.
+
+### 229a - candidate 2 closed: argc=4 is real
+
+`argCount` is not fabricated and is not a default. It is the operand count decoded from the `CALLG`
+instruction itself (`Instructions/CALL/Call.cs:129`, `cpu.PendingCallArgCount = argCount`, set from
+the instruction's own argument-operand list, each of which must be a memory operand or the CPU raises
+IOS). So the swapper really does pass **four** arguments to MON 377B, and the collision at slot k=2
+cannot be explained away as a miscount.
+
+**That leaves candidates 1 and 3, which are the same carve:** where do MON argument values actually
+live, and is that block WRITTEN into the message by the answer path or READ out of it by the restart
+path? `Nd500MicrocodeServicer.cs:3242` describes the restart direction ("the 32-bit address @0o40+2k
+gets the 32-bit value @0o100+2k written into PROCESS memory"), which is a READ of the message. The
+answer path writes the same slots. If both directions are correct then `0o100+2k` genuinely overlaps
+`HSWPI=0o104` in SWMSG, which cannot be true on hardware that works - so one of the two directions is
+modelled on evidence that does not cover it.
+
+**Next carve, and it is a real one:** `MP-P2-N500.NPL`'s MON-call handling and the B30 microcode's
+`CALL_MON` path, to find where the microcode itself puts MON arguments. Read the deep dive first -
+`docs\ND5000-ND100-MESSAGE-PROCESSING-REFERENCE-2026-08-23.md` - per the project rule, because it
+very likely already answers this.
