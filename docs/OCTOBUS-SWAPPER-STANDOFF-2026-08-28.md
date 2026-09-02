@@ -15812,3 +15812,60 @@ prediction is explicit and falsifiable: on the lane that works, the MON 377B ans
 `N5STA` and a `SWPINFO` that are NOT a freshly-armed 3START - i.e. the answer lands before the
 re-arm, not after. If the classic lane shows the same `N5STA=2` + live `SWPINFO` and still works,
 this explanation is wrong too and the difference is somewhere else entirely.
+
+## 232 - REFUTED: overwriting SWPINFO is NORMAL. The framing since 218 was wrong.
+
+The classic-lane A/B came back and it kills the explanation, not just the detail.
+
+`Nd500_LedFortran_UnderRealSintran_RealCpu_Capture`, same ledger, the lane that WORKS:
+
+```
+[MON-ANSWER LEDGER after RUN LEDFORTRAN] 187 answered
+   MON 00FF argc=4 msgBase=0x00420D30 N5STA=2 SWPINFO=0x00210718  <== reaches slot k=2
+   MON 00FF argc=7 msgBase=0x00420D30 N5STA=2 SWPINFO=0x00210718  <== reaches slot k=2
+   MON 00FF argc=4 msgBase=0x00420D30 N5STA=2 SWPINFO=0x00000240  <== reaches slot k=2
+   ... 157 of them, ALL msgBase 0x00420D30, ALL N5STA=2, ALL reaching k=2
+```
+
+**157 MON 377B answers overwrite a live `SWPINFO` at `5AP3`, with the node in exactly the same state
+(`N5STA=2`), and the swapper works.** So:
+
+- 231's sequencing explanation ("we clobber a freshly-armed 3START") is **REFUTED** - the working lane
+  does the same thing 157 times.
+- And so is the framing this file has carried since **218**: *"SINTRAN writes 8E30 and something
+  zeroes it, and that is why the swapper parks."* **The zeroing is normal.** It is what the microcode
+  is supposed to do, on both lanes, every MON 377B.
+
+Five hypotheses now dead: the layout, the message base, answering 377B into SWMSG, node ownership,
+and sequencing. Every one of them was built on the assumption that the overwrite was abnormal, and
+that assumption was never tested against the working lane until now - **eleven sections in.** The
+both-lanes rule ([[always-run-both-macro-and-microcode-accp]]) exists precisely to catch this and I
+ran the comparison last instead of first.
+
+### The one real difference the comparison DID surface
+
+The two lanes store different VALUES in that slot:
+
+| lane | SWPINFO | high half | low half |
+|---|---|---|---|
+| classic (works) | `0x00210718` | `0x0021` | `0x0718` |
+| octobus (parks) | `0x00008E30` | `0x0000` | `0x8E30` |
+
+`133647` sets `A:=5MBBANK; D:=X`, `133651 *NNC06, CNVWADR` converts the multi-port address, and
+`133654` stores the 32-bit `AD`. So the stored value is **(bank, address)** - and the octobus lane's
+**bank half is ZERO** where the classic lane's is `0x21`.
+
+`0x00210718` also reads as a plain ND-100 WORD address: `0x210718 * 2 = 0x420E30` - the requester's
+message. The octobus value `0x8E30` is neither (`0x8E30 * 2 = 0x11C60`, nowhere); it is the
+MPM-relative BYTE offset of `0x428E30`. **The two lanes are not storing the same kind of thing.**
+
+`[V]` the values and that they differ. `[OPEN]` which form is correct, what `5MBBANK` is on each
+lane, and whether `CNVWADR` is the routine producing the difference. **That is the next carve, and it
+starts from `CNVWADR` and `5MBBANK`, not from another hypothesis about who writes the cell.**
+
+### The method failure worth keeping
+
+I had a reproducible failing lane and a known-good lane, and I spent 219-231 instrumenting only the
+failing one. RULE #0b says find a COMPLETE, KNOWN-GOOD instance first and read it in full. The
+known-good instance here was a whole other lane, running the same servicer, one `dotnet test` away -
+and it answered in one run what eleven sections of single-lane instrumenting could not.
