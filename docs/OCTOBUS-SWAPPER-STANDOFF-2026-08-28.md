@@ -14191,3 +14191,32 @@ end-state dump cannot support**: `SWPINFO` is non-zero when the run ends.
 **So the next step needs a harness run** - the first one this investigation has needed since 199.
 Log `SWMSG.SWPINFO`, `SWMSG.SWPSTAT` and `CSWPM.N5STA` **at each `LNEWSWAP` service**, not at the
 end. Two `LNEWSWAP`s were serviced; the interesting number is whether they saw the same `SWPINFO`.
+
+## 205a - The `lnewswap` watch, designed and generated (not yet run)
+
+Eight arms, which is exactly what the global `DiagPcWatch` table holds - so the mode is
+mutually exclusive with the `chsws*` modes, by design. Arms saved at
+`scratchpad\lnewswap_arms.txt`, **generated from the octal by script**, because every
+arm-placement error in this investigation came from a hand conversion.
+
+```
+  0xBB38  LNEWSWAP-entry@0o135470              liveness and count
+  0xBB3E  G1-PASSED SWPINFO nonzero@0o135476   inside the THEN of 135474
+  0xBB69  ERROR-ARM taken@0o135551             gate2 true  - the arm that zeroes SWPINFO
+  0xBB7A  OK-ARM taken@0o135572                gate2 false - SWPSTAT was 0
+  0xBB81  G3-PASSED requester is SWPPING@0o135601
+  0xBB87  G4-PASSED MICFU is 3SWMESS@0o135607
+  0xBB96  SETS-ANSWER3 the goal@0o135626       reaching this is the whole question
+  0xBBE7  SWPD4 park swapper@0o135747
+```
+
+**Every arm is the first instruction INSIDE a branch, never the test itself.** Arming `135474`
+would only say `LNEWSWAP` reached the gate, which we already know; arming `135476` says the gate
+was PASSED. That turns the set into a monotone ladder - read hot/cold, not values - which is the
+one instrument shape in this investigation that has never lied.
+
+**Predicted from 205, so the run can falsify something rather than just report:** `LNEWSWAP-entry`
+= 2, `OK-ARM` = 2, `ERROR-ARM` = 0, `SETS-ANSWER3` = 0, `SWPD4` >= 1. **The informative arm is
+`G1-PASSED`.** If it is 2, `SWPINFO` was set both times and the break is at gate 3 or 4. If it is 0
+or 1, the first `LNEWSWAP` ran before `SWMESS` set `SWPINFO`, and the stall is an ORDERING
+problem - the swapper asked for work before the work was posted, and nothing asked again.
