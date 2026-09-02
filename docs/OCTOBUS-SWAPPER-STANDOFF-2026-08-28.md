@@ -14381,3 +14381,58 @@ demonstrably not where I think it is. **Validate the mapping first:** find what 
 `MP-P2-N500` actually occupies at run time, and confirm it against a routine whose hit count is
 independently known. Arming more computed addresses before that is buying more tables that cannot
 be trusted.
+
+## 209 - RETRACT 207. The mapping control voided four rounds, and the cause is the ND-500/ND-5000 twin
+
+`run208.log`, 15m43s.
+
+```
+  MAPCTRL NXTMSG@0o134667      hits=0     <- the ND-500 message loop. Once per message. ZERO.
+  CONTROL 5ACTSWAPPER@0o145162 hits=2
+  MCNO loaded into A@0o137046  hits=0
+  FIRST test A==2TUSED@0o137052 hits=0
+  N5SWAP block entry@0o137240  hits=0
+  inner IF@0o137244            hits=2     <- the alias reproduces exactly
+  SWPDECODER-entry@0o135443    hits=0
+  NOT-AUTHORIZED else@0o137256 hits=0
+```
+
+**207's headline - "`SWPDECODER` NEVER RUNS" - is RETRACTED.** It was read off a cold arm in an
+address range that this control now shows I cannot draw any conclusion from. The run processes well
+over a hundred messages and `NXTMSG` reports zero, so **no cold arm anywhere in `0o134xxx`-`0o137xxx`
+means what I said it meant** - four rounds of arms in that range, void.
+
+**The control cost one arm and invalidated four rounds. That is the argument for always spending a
+slot on one.**
+
+**AND THE CAUSE IS NAMED, IN THE SOURCE, AT THE CONTROL'S OWN ADDRESS:**
+
+```
+  134667   NXTMSG:
+  134667   *NNJ08=*
+  134667          GO XN500          % Continue in XN500 if nd5000
+```
+
+`NXTMSG` is the **classic ND-500** message loop. On an ND-5000 it is patched to jump straight out to
+**`XN500` @ `0o134723`**, which walks the `X5FIF` fifo, sets `N5MESSAGE`, and **contains no
+`N5SWAP` test and no `CALL SWPDECODER` at all**. So the entire dispatch chain I have been
+instrumenting since 205 - `137046` MCNO load, `137052` 2TUSED, `137241` N5SWAP, `137247`
+SWPDECODER, and `LNEWSWAP` under it - **is the classic ND-500 path, and our machine is an ND-5000.**
+
+**THIS IS THE DOCUMENTED TRAP, FOR THE FOURTH TIME.** Standoff 162's pattern note, quoted verbatim:
+*"every ND-5000 path has a classic ND-500 twin beside it, the classic one reads like the only one,
+and three separate wrong placements this session were all that same mistake."* Now four. **The twin
+is not in a different file - it is the same routine, and the ND-5000 exit is the FIRST instruction
+under the label.** Reading the routine from its label downward finds the classic body; reading the
+first instruction finds the fork.
+
+**One fork remains, and one arm settles it.** `NXTMSG` being cold has two live explanations and I
+cannot yet choose:
+
+```
+  XN500 HOT  -> the range IS at its listed addresses, the classic path is simply bypassed.
+                Clean answer, and SWPDECODER really is not on this generation's path.
+  XN500 COLD -> the range is not mapped at these PCs and I still know nothing about any of it.
+```
+
+Round 5 arms `XN500@0o134723` plus two high-traffic addresses inside its inner loop.
