@@ -8,8 +8,33 @@
 
 ## Next
 
-**NEXT: identify WHICH of the three `SWPPING` writers stamped `0x00428E30`.** Standoff **203**. It is
-a binary and it splits the remaining work.
+**NEXT: inside `LNEWSWAP`'s served-process branch (`135476` on), find why control reaches `SWPD4`
+(park the swapper) instead of `LDATREADY` (restart the requester).** Standoff **204**. Both are
+reachable from there; only `LDATREADY`/`INLDATREADY` clears `SWPPING`.
+
+**RESOLVED (204): `133645` wrote the `SWPPING` - the `SWMESS`/`MSWSTART` start path, not
+`5ACTSWAPPER`.** That arm predicts three measured values at once (requester `SWPPING(6)`,
+`swMsg MICFU=0x0013` `3START`, `SWPFU=SWACTIVE`); `5ACTSWAPPER`'s success arm predicts
+`MICFU=0x14` and is refuted by it. **So `5ACTSWAPPER` never reached `145071` - both its executions
+took the `145111` "insert in swap-wait-fifo" else.** Nothing is lost on our side.
+
+The designed chain, mapped:
+
+```
+  SWMESS/MSWSTART 133645  requester:=SWPPING; SWMSG.SWPINFO:=requester;
+                          SWMSG.MICFU:=3START; SWPFU:=SWACTIVE
+  LNEWSWAP        135470  IF SWMSG.SWPINFO ><0 THEN "proc currently served"
+  LDATREADY       136341 / INLDATREADY 136446   clears a SWPPING requester ("Restart process")
+  SWPD4           135747  mark swapper free, then drain the swap-wait fifo,
+                  136027  serving only entries at SWPWAIT(5)
+```
+
+**The two gates use DIFFERENT states**: the fifo drain serves `SWPWAIT(5)` (what `5ACTSWAPPER` marks
+at `144775`), our node is `SWPPING(6)` via the START path, so it is not in the fifo and the drain
+correctly finds nothing. `SWPPING` is cleared by `LDATREADY`, not by the drain.
+
+**`swpInfo=0x00008E30`, NOT zero** - so `LNEWSWAP` takes the "proc currently served" branch and
+"the swapper was started with no work" is refuted as the reason it parked.
 
 **REFUTED (203): SINTRAN DOES send the restart.** The `[D]` carried since 199.1 - *"nothing turns
 `SWPPING` posted into the `3MONCO` restart"* - is wrong. `5ACTSWAPPER`'s swapper-free arm does it

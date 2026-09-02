@@ -14089,3 +14089,55 @@ saying twice: **a state does not name who wrote it.**
 
 `MCCO` is not defined in `MP-P2-N500.NPL` - external, not yet carved. Not needed for the above: the
 `MICFU` stamp precedes it and is the observable.
+
+
+## 204 - 203's binary RESOLVES: `133645` wrote the `SWPPING`, so `5ACTSWAPPER` never reached its arm `[V]`
+
+Read in order from `MP-P2-N500.NPL`, no run. `SWMESS` is the handler for a message TO the swapper,
+and its `MSWSTART` arm is the third `SWPPING` writer:
+
+```
+  133642   IF A=MSWSTART THEN                       % Start swapper
+  133645      SWPPING; CALL WN5STATUS               % Set process in "using Swapper" state
+  133654      X:=SWMSG; ... AAX HSWPI; STDTX        % MMESSAGE =: SWMSG.SWPINFO
+  133661      3START; *MICFU@3 STATX                % SWMSG.MICFU := 3START
+  133666      SWACTIVE; *AAX SWPFU; STATX
+```
+
+**That arm predicts three measured values at once** - the requester at `SWPPING(6)`,
+`swMsg MICFU=0x0013` (`3START`, and NOT the `0x14` `5ACTSWAPPER` would have stamped), and
+`SWPFU=SWACTIVE`. `5ACTSWAPPER`'s success arm predicts a different `MICFU` and is refuted by it.
+
+**So 203's binary lands on its second branch: `5ACTSWAPPER` never reached `145071`.** Both of its two
+executions took the `145111` else - *"Insert in Swap-wait-fifo"*. Nothing is lost on our side; the
+`3MONCO` was never stamped because SINTRAN never got to the instruction that stamps it.
+
+**The designed chain, now mapped end to end** (this is the part worth keeping):
+
+```
+  SWMESS/MSWSTART 133645  requester := SWPPING;  SWMSG.SWPINFO := requester;
+                          SWMSG.MICFU := 3START; SWPFU := SWACTIVE
+  swapper runs, asks LNEWSWAP (SWPFU=1)
+  LNEWSWAP        135470  IF SWMSG.SWPINFO >< 0 THEN "proc currently served"
+  LDATREADY       136341  IF requester = SWPPING -> 3RMED read, then
+  INLDATREADY     136446  IF requester = SWPPING -> copy SWMSG status onto it  % "Restart process"
+  SWPD4           135747  PSWWAIT =: SWMSG                                     % "Mark swapper free"
+                  135752  then DRAIN the swap-wait fifo, and for each entry
+                  136027     IF A=SWPWAIT THEN CALL 5ACTSWAPPER
+```
+
+**Two gates that matter, and they use DIFFERENT states.** The fifo drain at `136027` serves only
+`SWPWAIT(5)` - which is what `5ACTSWAPPER` marks at `144775` before deciding, and therefore what a
+fifo-parked message carries. Our node is `SWPPING(6)` and reached that state through the START path,
+so **it is not in the fifo at all** and `SWPD4`'s drain correctly finds nothing. The clearing path
+for a `SWPPING` requester is not the drain - it is `LDATREADY`/`INLDATREADY`.
+
+**And one measured value kills the obvious explanation.** The harness prints
+`swpInfo=0x00008E30 swMsg=0x00428D30`, and the comment beside it says *"SWPINFO=0 means SINTRAN
+started the swapper with NO work attached"*. **`SWPINFO` is NOT zero** - it names the ping node. So
+`LNEWSWAP`'s `IF D><0` at `135474` takes the **"proc currently served"** branch. The swapper was not
+started empty, and "nothing to do" cannot be the reason it parked.
+
+**NEXT:** inside `LNEWSWAP`'s served-process branch (`135476` onward), find why control reaches
+`SWPD4` (park the swapper) rather than `LDATREADY` (restart the requester). Both are reachable from
+there; only one clears `SWPPING`.
