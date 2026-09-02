@@ -16744,3 +16744,27 @@ shown where the operands came from. Run BOTH lanes and compare the address lists
 If the classic lane's slot-2 address differs from the octobus lane's - or if one lane resolves an
 address the other leaves at 0 - that is the difference, and it is upstream in the bridge, not in
 the answer loop. Do not touch the answer loop again without that comparison in hand.
+
+## 247a. CAVEAT ON THE "2 vs 187" FRAMING - THE TWO LANES ARE NOT RUNNING THE SAME WORKLOAD
+
+Written before run248 reports, so it cannot be shaped to fit the answer.
+
+The two lanes being compared run **different programs**:
+
+ - octobus: `ShortBringup_Octobus_NoStartSwapper_PlaceAndRun_Capture` - `place-domain cpu-stat`.
+ - classic: `Nd500_LedFortran_UnderRealSintran_RealCpu_Capture` - LED-FORTRAN, a full program run.
+
+So "octobus answers `MON 377B` twice, classic answers it 187 times" is **not by itself evidence of
+a stall difference**. A program that runs to completion demand-pages far more than one that stops
+early, so a large part of that ratio is simply workload. Quoting 2-vs-187 as if it measured the
+defect would be the same error as quoting a MICFU count without naming the stage - the mistake
+this project already paid a day for.
+
+**What the comparison DOES support, and this part is unaffected by workload:** the classic lane
+performs the identical parameter-3 write onto the identical `HSWPI` cell, with the identical
+`argc=4`, **187 times without ever failing on it**. That is a statement about whether the write is
+survivable, not about how many times each lane calls. Section 243's conclusion stands; only the
+"2 vs 187" headline needs this qualifier.
+
+When run248's address lists arrive, compare them **per call**, not in aggregate - a difference in
+the slot-2 address on a single `MON 377B` is the signal; the number of calls is not.
