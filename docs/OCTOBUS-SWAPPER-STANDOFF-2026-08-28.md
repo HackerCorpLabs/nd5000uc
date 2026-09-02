@@ -15369,3 +15369,65 @@ address, not about the traffic.* Widen first, then narrow.
 debugging - eight runs to establish that a byte written is not the byte read, which the very first
 of them already showed. The machine's behaviour has been stable and reproducible throughout; every
 delay has been mine.
+
+## 226 - the two instruments never disagreed: the RAM watch was folded to a different cell
+
+225 recorded that the RAM-object watch (1 write, an unrelated `STA` of `0x00`) and the ND-100 cell
+probe (2 stores of `0x8E`, each read back) could not both be right, and refused to pick one. Reading
+the fold settles it without another run: **only one of them was ever looking at the cell.**
+
+`MemoryBase.FilterAddress` is a MASK, not a subtraction:
+
+```
+internal uint FilterAddress(uint address)
+{
+    if (_addressBitsMask == 0) return address;
+    return address & _addressBitsMask;
+}
+```
+
+and the mask comes from `AutoSetAddressBits(length)` in the constructor. The octobus 5MPM is created
+with `NDBusND500IF.DEFAULT_SHARED_MEMORY_SIZE = 8 * 1024 * 1024`, so:
+
+- `AutoSetAddressBits(0x800000)` -> 23 bits -> `_addressBitsMask = 0x7FFFFF`
+- `FilterAddress(0x428DBA)` = `0x428DBA AND 0x7FFFFF` = **`0x028DBA`**
+
+The harness armed `WatchWriteOffset = 0x8DBA`, from the comment `0x428DBA - 0x420000 = 0x8DBA`. Start
+address and mask agree only when the bank's length is a power of two starting on its own boundary,
+and an 8 MB bank based at `0x420000` is not. So the watch was armed on `0x008DBA` - a cell nothing in
+this run writes - and the one hit it did record was an unrelated machine address aliasing into it.
+
+**What was actually wrong: the instrument, not the machine.** There was no contradiction to
+adjudicate, and the three candidates 225 listed (a bypass of `RAM.Write`/`WriteFast`, a watch on a
+different instance, a fold landing elsewhere) resolve to the third. The other two are now closed by
+reading:
+
+- **bypass**: `RAM.RawData` exposes the backing array, but grep across `Emulated.HW`,
+  `Emulated.Machines`, `Emulated.Tests`, `Emulated.Tests.ND100` shows its only users are Mac IIci and
+  Sun2 - **no ND path touches it**. `MpmBackedMicroMemory.Write` (the ND-5000 CPU's own view of MPM)
+  goes through `_mpm.Write`, which is hooked. `MemoryBase.WriteZ` calls `Write`. Both entry points
+  were already hooked.
+- **instance**: every `InitializeSharedMemory` call site is either guarded on `DeviceRAM == null`
+  (`ND100Machine.ND5000.cs:214`, `:542`, `ND100Machine.ScsiDioc.cs`) or the octobus constructor
+  itself. The RAM is created once and never replaced.
+
+### Fix
+
+`RAM.WatchWriteAtMachineAddress(uint)` folds the address with the bank's own `FilterAddress` and
+returns the offset it armed. The harness now calls it with `0x428DBA` and PRINTS the fold, so a wrong
+fold can never again be silent. Files:
+
+- `E:\Dev\Repos\Ronny\RetroCore\Emulated.HW\Memory\RAM.cs`
+- `E:\Dev\Repos\Ronny\RetroCore\Emulated.Tests\ND100\Nd100SintranNd5000OctobusBootHarnessTests.cs`
+
+### The rule this earns
+
+**An address handed to an instrument must be folded by the SAME code the subject uses, never by
+arithmetic in the comment.** The wrong fold does not fail loudly - it produces a plausible, quiet,
+WRONG measurement, and here it produced an apparent disagreement between two honest instruments that
+cost a run and a section to notice. Where a diagnostic takes an address, it should take the address
+the rest of the machine names and do its own folding.
+
+Note also that 225's own standing rule ("an exact-address watch that reports nothing is reporting
+about the address, not about the traffic - widen first") was CORRECT and pointed straight at this,
+and the widening to `span 4` still could not reach it, because the error was 0x20000 wide, not 4.
