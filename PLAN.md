@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **REFRAMED - chasing the zero bank** | `SWPINFO` carries a 32-bit ND-100 WORD address (classic `0x210718` = byte `0x420E30`); octobus holds `0x00008E30`, an MPM-relative BYTE offset with bank=0. Carved: bank half IS `5MBBANK`, derived at `XMSINIT` (`RP-P2-N500.NPL:131133`) from `5FPMAILBOX`, the page `5GBUFF` allocates (`5P-P2-MON60.NPL:027104`). **Next: read resident `5FPMA`=0o111102 and `5NPMA`=0o111103 at end of run on BOTH lanes.** Do not patch `CNVWADR` - it is downstream. Standoffs 232-233. |
+| T1 | The octobus `place-domain` swapper stall | **open - aim was wrong since 218** | The SWPINFO cell is entirely NORMAL: value correct (`0x8E30` addresses a real message as an MPM-window byte offset), overwrite normal (classic does it 157x), `5MBBANK=0x21` correct, `CNVWADR` not patched, `5FPMAILBOX=0x851` allocated. **8 hypotheses dead.** **NEXT: STOP ADDING INSTRUMENTS - read run231's existing probe dump top to bottom and write down what each says before hypothesising.** Unexplained: `LNEWSWAP code words at 0x0000BB38 and 0x0000BBB8 both read ALL ZEROS`. Standoffs 232-235. |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
