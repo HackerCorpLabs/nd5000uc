@@ -14436,3 +14436,58 @@ cannot yet choose:
 ```
 
 Round 5 arms `XN500@0o134723` plus two high-traffic addresses inside its inner loop.
+
+## 210 - `SOCTO` is the live path (1025 hits). `XN500` is NOT. And my control is now in doubt
+
+`run209.log`, 15m43s.
+
+```
+  SOCTO octobus driver@0o035546   hits=1025   <- THE LIVE PATH
+  XN500 nd5000 loop@0o134723      hits=0
+  XN500 inner fifo read@0o134752  hits=0
+  XN500 sets N5MESSAGE@0o134761   hits=0
+  NXTMSG classic loop@0o134667    hits=0
+  CONTROL 5ACTSWAPPER@0o145162    hits=2
+  SWPDECODER-entry@0o135443       hits=0
+  N5SWAP block entry@0o137240     hits=0
+```
+
+**`SOCTO` runs 1025 times.** The resident octobus driver (`SOCTO=035546`, `SYMBOL-1-LIST` L07) is
+where this machine actually spends its ND-5000 message handling. **Neither `MP-P2-N500` message loop
+runs** - not the classic `NXTMSG`, and not `XN500` either, so 209's "the ND-5000 goes through
+XN500" was a reasonable read of `GO XN500` and is **not** what happens.
+
+**AND THE CONTROL I HAVE LEANED ON FOR TWO ROUNDS IS NOW SUSPECT.** `5ACTSWAPPER@0o145162` reports
+2 hits with `X=0o43430` - the ping node - which is semantically perfect for a routine whose entry
+contract is *"X = message requiring service from swapper"*. But its `L` values do not survive a
+check:
+
+```
+  hit#1 L=134355o  ->  0o134354 is  "WHILE D><-1"   (a loop test, not a call)
+  hit#2 L=136240o  ->  0o136237 is  beside "BUSR: CC5CPUDF=:B; GO NXTMSG"
+```
+
+**Neither is a `CALL 5ACTSWAPPER`.** The known call sites are `134154`, `135367`, `136037`,
+`141765`. So either that arm is aliased foreign code as well, or `L` does not carry a return address
+in this context. **I do not know which, and I am not going to pick the one that keeps my earlier
+conclusions.** `X=0o43430` looks like corroboration but is not independent - standoff 199 took that
+value FROM THIS SAME ARM.
+
+**What this puts at risk:** 190 and 199 both rest on "the wake path RAN - `5ACTSWAPPER` executed
+twice". If that arm is an alias, so is the premise, and the standoff's shape changes again.
+
+**NEXT, two things, neither of which is another guess:**
+ 1. **Re-validate `5ACTSWAPPER` from its INTERIOR.** Arm several consecutive addresses inside the
+    routine (`0o145164`, `0o145166`, `0o145171`, `0o145175`). A single aliased PC is cheap; a whole
+    run of consecutive PCs aliasing with matching semantics is not. If the interior is cold while
+    the entry is hot, the entry is an alias and 190/199 need revisiting.
+ 2. **Pivot to `SOCTO`.** It is the only routine measured tonight that is unambiguously live, it is
+    in a RESIDENT module rather than `MP-P2-N500`, and it is where the swapper's monitor call must
+    actually be handled. The investigation has been reading the wrong module, not merely the wrong
+    generation's branch inside the right one.
+
+**Correction to 209:** it said the mapping control "voided rounds 1-4". Too strong as stated - what
+is void is any conclusion of the form *"routine X never runs"* drawn from a cold arm in
+`0o134xxx`-`0o137xxx` **while the module's liveness was unestablished**. `SOCTO` at 1025 now gives a
+live anchor, but in a different module, so it does not retroactively validate those cold arms
+either. The cold results stand as unread, not as refuted.
