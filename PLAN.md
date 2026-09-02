@@ -22,9 +22,28 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT — AND IT NEEDS A HARNESS RUN, the first since 199.** Log `SWMSG.SWPINFO`, `SWMSG.SWPSTAT` and
-`CSWPM.N5STA` **at each `LNEWSWAP` service**, not at the end of the run. Two were serviced; the
-number that matters is whether they saw the same `SWPINFO`. Standoff **205**.
+**NEXT: VALIDATE THE ADDRESS MAPPING BEFORE ARMING ANOTHER COMPUTED ADDRESS.** Find what load
+address `MP-P2-N500` actually occupies at run time and confirm it against a routine whose hit count
+is independently known. Standoff **208**.
+
+**Three runs done (205, 206, 207). What they settled:**
+
+```
+  5ACTSWAPPER runs twice, X=0o43430 (the ping node) both times  - genuine, corroborates 190/199
+  SWPDECODER, LNEWSWAP, the N5SWAP block, SETS-ANSWER3          - NEVER RUN
+  answeredByCsharpEmulation=0, realRoundTrips=1                 - REAL SINTRAN answered, not our C#
+```
+
+**So SINTRAN answers the swapper's MON 377B somewhere other than the block at `0o137241`** - my
+read of the service path is incomplete, not just mis-aimed.
+
+**Why the halt on computed addresses:** round 3's two "passes" were ALIASED foreign code. The
+predecessor `0o137240` was COLD while its straight-line successors were hot, and the arm labelled
+*"`A==N5SWAP` passed"* printed `A=0o` where the gate requires `377`. **`B` did not discriminate this
+time** - the alias carried `B=52222o`, the same `B` as the genuine `5ACTSWAPPER` hits - so the
+register that caught 179 and 183 would have waved this one through. **A discriminator that worked
+twice is not a rule.** Pair every arm with its predecessor AND state what the registers must hold
+if the label is true.
 
 **ANSWERED (205) `[V]`: the designed path for our exact node ends in `ANSWER(3)`, and it never gets
 there.** `LNEWSWAP`'s OK arm tests `CSWPM.N5STA == SWPPING` (`135575`) and `MICFU == 3SWMESS`
