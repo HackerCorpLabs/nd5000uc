@@ -22,11 +22,18 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: ORDER THE THREE ACCESSES TO ONE CELL, ON BOTH LANES.** ND-100 physical `0x428DB8`
-(= `swMsg + 0o104 words` = `HSWPI` = `5DP3` = MON argument value slot k=2) is written by SINTRAN,
-written again by our MON 377B answer, and read back as zero. Stamp each of those three with a single
-monotonic counter and print them in sequence. Counts cannot answer an ordering question - section 231
-tried and got a wrong verdict. Standoffs **218**, **240**.
+**NEXT: THE CLASSIC-LANE ARGC COMPARISON IS RUNNING.** Ordering is SETTLED (standoff 241): the
+RAM watch already had it, with stack traces. SINTRAN's `STDTX` stores `0x8E30` into `HSWPI`; our
+`Nd500MicrocodeServicer.AnswerMonitorCallStopLocked:3716` zeroes it; the gate then reads zero. `HSWPI`
+(word `0o104` = byte `0x88`) IS MON value slot k=2, and this call has `argc=4`.
+
+`MP-P2-N500.NPL:933` says what the cell means: `SWPINFO` is SINTRAN's record of which process the
+swapper is serving, and `IF D><0` gates the completion path. Zero means nobody, so the request never
+finishes.
+
+The classic lane answers the SAME MON 377B 78 times and works, so the overwrite alone cannot be the
+whole story. **Print `argc` and the value-slot writes there and compare.** Do NOT change the arg loop
+before that number is in hand. Standoffs **218**, **240**, **241**.
 
 **THE STALL IS LOCATED, AND IT IS OURS `[V]` (2026-09-02, rounds 7-11).** SINTRAN writes `0x8E30`
 into word `0o43334` and later reads **zero** out of the same word:
