@@ -15924,3 +15924,55 @@ this file has already produced five wrong answers about.
 5FPMAILBOX >> 4`, which does not reconcile with `bank 0x21` against a plausible page number, so the
 shift semantics need checking before anyone leans on them. It does not block the measurement:
 `5FPMAILBOX = 0` versus non-zero answers the question either way.
+
+## 234 - REFUTED again: 5MBBANK is CORRECT on the octobus lane, and CNVWADR is not patched out
+
+233 predicted `5FPMAILBOX = 0` on the octobus lane. **Wrong.** And the instrument that says so was
+ALREADY IN THE HARNESS, written by an earlier session, and had already run in run226/run229/run231
+while I was carving the NPL by hand. From run231:
+
+```
+----- resident probe (octobus-shortbringup) ADRZERO@0o52047 byteConv=0x0000 wordConv=0x0000 ... -----
+----- CNVWADR patch probe (octobus-shortbringup) MAPPING pil=14 D-space/APT (MNCTAB anchor: 6/6) -----
+----- NSAMSON@0o11250=0x0004 N5CPU@0o11247=0x0001 5MBBANK@0o4654=0x0021
+      5FPMAILBOX@0o111102=0x0851 ADRZERO@0o52047=0x0840 ... -----
+----- NNC24@0o145171=0x0000 | NNC06@0o134051=0x0000 -----
+```
+
+- **`5FPMAILBOX = 0x0851`** - non-zero and inside the plausible page range the probe's own comment
+  gives (`0o4100..0o10100` = 2112..4160). The allocation happened.
+- **`5MBBANK = 0x0021`** - **the SAME bank the classic lane stores.** The octobus lane is not missing
+  the bank; it has it.
+- **`NSAMSON = 0x0004`** - non-zero, so SINTRAN DID detect SAMSON.
+- **`NNC24 = 0x0000`, `NNC06 = 0x0000`** - not `0xA803`, so the `MNCTAB` entries were NOT stamped and
+  **`CNVWADR` is not patched out.** The handoff's section 7.6.9 hypothesis is dead - and the probe's
+  author wrote the falsification condition into the comment in advance, which is why this took one
+  grep instead of another run.
+- `ADRZERO = 0x0840` = 2112 validates the read convention, so the rest of the line is trustworthy.
+
+**So SINTRAN holds the correct bank (`0x21`) and still stores `SWPINFO = 0x00008E30` with a zero
+bank.** The defect is between `A:=5MBBANK` at `133647` and the `STDTX` at `133654` - not in the
+allocation, not in the CPU-type detection, and not in whether the conversion sites are patched.
+
+### Seven hypotheses now dead
+
+layout, message base, answering 377B into SWMSG, node ownership, sequencing, the SWPINFO overwrite
+being abnormal at all (232), and now the zero bank being a missing/zero `5MBBANK` (234) plus the
+CNVWADR-patched-out theory (7.6.9).
+
+### The process failure, and it is the SAME one twice in one session
+
+The octobus skill's trap #1 says: *"Before investigating any 'open' item, grep the code and the tests
+for it. More than half the time it is done."* The answer to 232's "next carve" and 233's whole
+prediction was **already printing in every run log I had open**, four sections earlier. I carved the
+NPL by hand to reach a hypothesis a previous session had already reached, instrumented, and
+falsified.
+
+Pair that with 232's lesson (I had a known-good lane and did not run it for eleven sections) and the
+shape is one thing: **I kept generating new work instead of reading what was already measured.**
+Both failures cost more than every wrong hypothesis in this file.
+
+**NEXT, and it is narrow:** trace the guest at `133647`-`133654` on the octobus lane (`CNVWADR` =
+`NNC06` @ `0o134051`, the store's write was seen at guest `pc=B82F`) and read what `A` and `D`
+actually hold going into `STDTX`. `5MBBANK` is correct in memory; the question is whether the code
+loads it, and what `CNVWADR` does to the pair. Read the run logs for an existing trace FIRST.
