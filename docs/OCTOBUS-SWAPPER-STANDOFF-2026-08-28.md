@@ -15976,3 +15976,61 @@ Both failures cost more than every wrong hypothesis in this file.
 `NNC06` @ `0o134051`, the store's write was seen at guest `pc=B82F`) and read what `A` and `D`
 actually hold going into `STDTX`. `5MBBANK` is correct in memory; the question is whether the code
 loads it, and what `CNVWADR` does to the pair. Read the run logs for an existing trace FIRST.
+
+## 235 - the zero bank is a red herring too: 0x8E30 addresses a REAL message
+
+The harness's own probe suite already decodes it, in run231:
+
+```
+----- 5MBBANK PROBE 5MBBANK@0o4654=0x0021 (33) | 5FPMAILBOX=2129 -> XMSINIT recompute=0x0021 MATCH -----
+----- HSWPI probe LastStartSwpInfo=0x00008E30 -----
+----- HSWPI 0x00008E30 as WINDOW byte 0x428E30: FFFF FFFF 0006 0001 0000 0000 0005 0005 003B 0840 ... -----
+----- HSWPI 0x00008E30 as WORD addr  0x011C60: 0000 0000 0000 0000 ... -----
+```
+
+Decode the window dump against the message layout (`N5STA`=2, `SENDE`=3, `X5CPU`=4, `X5ACT`=5,
+`MICFU`=6):
+
+| word | value | field |
+|---|---|---|
+| 0-1 | `FFFF FFFF` | LINK = -1, the queue sentinel |
+| 2 | `0006` | `N5STA` = **SWPPING** |
+| 3 | `0001` | `SENDE` |
+| 6 | `0005` | `MICFU` = **3SWMESS** |
+
+**That is a real, well-formed message** - and it is exactly the requester node this file identified at
+`0x428E30` back at the start. As a WORD address the same value points at `0x011C60`, which is all
+zeros. So `SWPINFO = 0x00008E30` is CORRECT for this lane, addressing the message as an MPM-window
+byte offset, exactly as `0x00210718` is correct for the classic lane addressing it as a word address.
+
+**The two lanes use different but internally consistent conventions. The zero bank is not a defect.**
+232's "the one real difference the comparison surfaced" does not survive either.
+
+`5MBBANK` is additionally confirmed by the probe recomputing it from `5FPMAILBOX` through the
+`XMSINIT` formula and getting a MATCH - so even the `AD SH 12` decode 233 left `[OPEN]` is settled,
+in the harness, already.
+
+### Where this actually stands - eight dead hypotheses
+
+layout | message base | answering 377B into SWMSG | node ownership | sequencing | the overwrite being
+abnormal | zero/missing `5MBBANK` | `CNVWADR` patched out (7.6.9) | the zero bank meaning anything.
+
+**Everything about the SWPINFO cell is now accounted for and NORMAL.** The value is right, the
+overwrite is right, the bank is right, the conversion is right, the allocation is right. The swapper
+still parks. Which means the defect is NOT in this cell and never was - 218 aimed the whole
+investigation at it and the aim was wrong.
+
+### What the next session should actually do
+
+**STOP ADDING INSTRUMENTS. MINE THE ONES THAT ARE ALREADY PRINTING.** run231's dump contains at least
+a dozen probes written by earlier sessions - `SAMSON CPU scan`, `5MSINIT`, `CARVED mailbox` (which
+reports `X5ACT_carved == CS-derived MATCH`), `5ACTSWAPPER X-reload`, `LNEWSWAP code words`, the
+`resident probe`, the `CNVWADR patch probe`, the `HSWPI probe`. Several answer questions this file
+spent whole sections re-deriving by hand. Read the complete dump top to bottom, in order, and write
+down what each probe SAYS before forming any hypothesis.
+
+Two of those lines are worth a look immediately and were never commented on here:
+`LNEWSWAP code words at 0x0000BB38` and `at 0x0000BBB8` both read **all zeros** - the code the PC
+watch is armed on reads as zeros through this probe's addressing. That is either a probe using the
+wrong address space (likely - `MAPPING pil=14 D-space/APT` is on the line above) or something much
+more interesting, and nobody has said which.
