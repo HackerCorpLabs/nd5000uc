@@ -6,6 +6,20 @@
 
 ---
 
+## TASK LIST — 3 tasks, 0 done, 1 in progress, 2 open
+
+| # | Task | State | Next action |
+|---|---|---|---|
+| T1 | The octobus `place-domain` swapper stall | in progress | Trace `LNEWSWAP`'s served-process branch (`135476` on) to the point it parks instead of restarting the requester. Standoffs 200-204. |
+| T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
+| T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | open | An address word is landing in a microword's DATA - see item 3 below. |
+
+**T2 was mine, not Ronny's** - I misread his "leave it" as "I will fix it" and left a suite that could
+not build for a day. **When an answer decides who does the work, say the owner back in the next
+sentence.** The cost was not the bug; it was that 429 tests could not run and nothing said so.
+
+---
+
 ## Next
 
 **NEXT: inside `LNEWSWAP`'s served-process branch (`135476` on), find why control reaches `SWPD4`
@@ -502,6 +516,40 @@ instruction) and `AconDecoderTableTests` (sweeps the shipped ROM against table 9
 **What is left of this item:** re-measure the real CS load end to end. `gateOpens` moved 13 -> 1502
 on the same command, so the card's behaviour changed substantially and that has not been
 characterised yet.
+
+**THAT UNCHARACTERISED CHANGE NOW HAS A FAILING TEST ON IT (2026-09-02).** With the
+`Emulated.Tests.ND100` build repaired (`cde2ac1e1`) the suite runs for the first time since
+`CommandPerform` was removed - **423 passed, 1 failed, 5 skipped of 429** - and the one failure is
+this item:
+
+```
+  Nd5000StartMicroprogramMeasurementTests.StartMicroprogram_ResultWord_MeasuredWithALiveCpu
+  "the low half of microword 0x3FF0 is no longer zero - re-measure word[6]"
+  Expected: 0   But was: 1072758784 = 0x3FF10000
+
+  microword 0x3FF0 = 0000000000018000  000000003FF10000
+  microword 0x3FF1 = 40400001DE028018  0000000000000000
+```
+
+**`0x3FF1` is an ADDRESS sitting in the DATA of microword `0x3FF0`** - the neighbouring word's
+address folded into the previous word's low half, at halfword slot 6 of 8. So an address word is
+being taken as a data word somewhere in the staging/commit path. Given
+`Nd5000ControlStoreLink`'s ninth-gated-word rule (the 9th word IS the address, measured from the
+card's own `LOAD-CONTROL-STORE` line), the suspect is the boundary between one microword's ninth
+word and the next word's first.
+
+**It is PRE-EXISTING, not fallout from the build fix** - it fails when run alone, and the build fix
+only touched a private helper in a different fixture that this test does not call. It was invisible
+because the assembly did not compile, so no test in it ran at all.
+
+**The assertion that caught it is a STALENESS GUARD and its comment says so** - *"NOT asserted: that
+slices 4-7 match topLo. They do, but only because both are zero - it would pass whether or not the
+low half survives the round trip, which is precisely the open question."* It did its job: the basis
+moved and the test said so rather than passing vacuously. Do not "fix" it by relaxing the guard.
+
+**Next:** turn on `Nd5000ControlStoreLink`'s own `Record()` trace (`STAGE0`/`ADDRESS`/`SHIFT`/
+`EXTRA`/`GATE-OFF`/`MIR-SHORT`) for this fixture and read the word sequence in order. The trace
+names which word was taken for what; counting commits will not.
 
 ## 4 - Implement every microword field properly
 
