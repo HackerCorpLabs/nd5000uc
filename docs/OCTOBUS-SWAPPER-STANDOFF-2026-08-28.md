@@ -17287,3 +17287,55 @@ and the octobus harness run follows. Until those report, this fix is **built, no
 
 Nothing about the earlier measurement changes: whether or not the fix works, sections 249-257
 stand on their own runs.
+
+## 259. THE STALL IS FIXED. `place-domain` COMPLETES, THE SWAPPER PAGES, AND MON CALLS ARE FORWARDED. [V]
+
+run258, one line changed, nothing else:
+
+```
+                         BEFORE (run239/246/247)        AFTER (run258)
+  place-domain           (STALL)                        (OK)
+  wall clock             15.9 min                       5.0 min
+  MON 377B answered      2                              8
+  micfu                  [1B:65 12B:1 23B:1 24B:1 31B:13]
+                                                        [1B:52 12B:1 23B:2 24B:8 30B:12 31B:27]
+  restarts (Seen/Taken)  1/1                            8/8
+  argv[2] on call 2      0x00000000                     0x00008E30
+  CONTEXT SAVE SKIPPED   2                              0
+  first MON 377B         X5CPU=-1                       X5CPU=0
+```
+
+**`argv[2]` now carries `0x00008E30` - SINTRAN's answer survives into the next call**, which is
+the single value sections 249-257 were chasing. `CONTEXT SAVE X5CPU=0 P=0x08008255` appears 16
+times: the return address is being saved instead of discarded, so the swapper resumes after its
+`CALLG` instead of restarting from its entry point.
+
+### Against the project's own bar, not a green light
+
+**WHO ANSWERED THE MON CALLS?** `restarts=8/8` - `Seen == Taken`, so every restart was accepted by
+the attached CPU, not faked. `24B` (`3MONCO`) went 1 -> 8. This is the case the MON-PATH-LEDGER
+calls CONDITIONAL, and the pair says it resolved the forwarding way on all eight.
+
+**`30B` appears for the first time in this hunt: 12 of them.** `3PHSR` is the USER-DOMAIN page-in
+counter (`3PHSR`/`3PHSW` = `30B`/`31B`), the counter this project's own memory note insists on not
+confusing with the swapper-load `13B`/`14B`. Twelve user-domain page-ins means the swapper is
+actually serving demand pages, which it had never done on this lane.
+
+`startSeen=2`, `startX5CPU=1`: a SECOND process started - the cpu-stat domain. `place-domain` and
+`run` both returned.
+
+### What is NOT claimed
+
+The domain sits at `PC=0x08000004 stopMode=WAIT` - its entry point, parked. **No program output
+has been observed, so "cpu-stat runs" is NOT established.** The stall that blocked everything is
+gone and the machinery beneath it is working; that is the claim, and it stops there.
+
+The `PROCESS START recorded` line prints 0 times, which is correct and not a gap: section 256 put
+that line beside the CLASSIC path's `NoteLoadedProcess`, while the fix added a bare call on the
+ND5000 path. The classic path does not run on this lane. The mechanism is evidenced by
+`X5CPU=0` on the first call and by `CONTEXT SAVE SKIPPED` falling to zero.
+
+### Regression status
+
+`Emulated.Tests.ND500`: **2264 passed, 0 failed, 13 skipped of 2277**, exit code 0. The
+`Emulated.Tests.ND100` suite is running now; until it reports, "no regressions" covers ND500 only.
