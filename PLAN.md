@@ -22,9 +22,39 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: VALIDATE THE ADDRESS MAPPING BEFORE ARMING ANOTHER COMPUTED ADDRESS.** Find what load
-address `MP-P2-N500` actually occupies at run time and confirm it against a routine whose hit count
-is independently known. Standoff **208**.
+**NEXT: INSTRUMENT THE EMULATOR, NOT THE GUEST.** Log the PHYSICAL address and bank that our
+`STDTX` at linked `0o134060` and our `LDDTX` at linked `0o135670` each resolve to, and compare them.
+One trace line on each side. Standoff **218**.
+
+**THE STALL IS LOCATED, AND IT IS OURS `[V]` (2026-09-02, rounds 7-11).** SINTRAN writes `0x8E30`
+into word `0o43334` and later reads **zero** out of the same word:
+
+```
+  store  @0o134060  X=43334o  D=107060o (0x8E30)     the STDTX
+  gate   @0o135674  X=43334o  D=0                    the LDDTX, twice
+  cell   word 0o43334 -> byte 0x8DB8 -> ND-100 physical 0x428DB8 = swMsg + 0o104 words
+```
+
+That address is **inside the 5MPM shared window**. A write at `PIL=2` and a read at `PIL=12` of the
+same shared cell disagree - which is our emulator's behaviour, not SINTRAN's logic. **Every actor in
+the guest has now been measured doing the right thing in the right order.**
+
+Two candidates, different fixes: **ROUTING** (store lands in ND-100 local RAM while the load comes
+from the octobus DeviceRAM, or the reverse - `ND100Memory.FindMemoryBank`'s MPM decision), or
+**PAGING/BANK** (both sites set `T:=5MBBANK` first, so if they still disagree our handling of the
+bank register differs between `STDTX` and `LDDTX`).
+
+**All three guest-side hypotheses were refuted by measurement, in this order:** ordering (216 - the
+write precedes both calls), erasure (217 - both zeroing writers run afterwards), wrong cell (218 -
+store and load resolve to the same address).
+
+**Method note:** eleven rounds all measured the guest, and the guest was right every time. **A PC
+watch can only ever indict the code it watches.**
+
+**Two things cost most of the night and both were already written down in files we own:** the
+`+0o200` `MP-P2-N500` relocation (in the harness, thirty lines above the arms being edited) and the
+`EMPTY`-path zeroing at `136057-136062` (cited by line in `Nd500CpuProcessBridge.cs`). **Grep our own
+comments for a routine name before instrumenting it.**
 
 **Three runs done (205, 206, 207). What they settled:**
 
