@@ -17378,3 +17378,50 @@ domain never getting past its first instruction to fault for more pages.
  - **`TRAPS BY CONDITION (whole run): none` while `trapsPosted=1`** - those two cannot both be
    right. One of the trap instruments is not counting what its label claims. Settle that BEFORE
    quoting either, or it will produce a confident wrong number exactly like the counters in T1 did.
+
+## 261. T4 DIAGNOSED FROM THE SAME LOG: THE DOMAIN RUNS WITH THE SWAPPER'S REGISTERS. [V]
+
+The full protection-violation record - I truncated it at 160 characters in section 260, and the
+part I cut is the whole answer:
+
+```
+  MMU read protection violation at 0x08000013 P1=0x08000004 <- failing instruction
+  reason=capability is ZERO - segment 1 is not in domain 0 (program capability table, CED=0, PS=10)
+  operand: mode=LOCAL_SHORT reg=0 disp=20 B=0x08024278 R=0x08024300
+           I1=0x000003E8 I2=0x00000001 I3=0x00000001 I4=0x00000001 -> ea=0x0802428C
+```
+
+**`B=0x08024278` and `R=0x08024300` are the SWAPPER's registers**, not the domain's. And this
+exact signature is already written down in `SwitchToProcessIfNeeded`'s own comment:
+
+> MEASURED on LED-FORTRAN: a fault arrived carrying the SWAPPER's registers
+> (`B=0x08024278 R=0x08024300`) while its capability came from the DOMAIN's process segment
+> (`PS=10`, `CED=0`). Either that mix is real and expected, or a switch is moving some state and
+> not the rest - and P alone cannot tell those apart.
+
+Same registers, same `PS=10`, same `CED=0`. The alternative that comment left open is now
+settled by the reason string: **a switch is moving some state and not the rest.** The capability
+lookup uses the domain's `PS`, the addressing uses the swapper's `B`/`R`, and `ea=0x0802428C` is
+literally operand 3 of the swapper's `MON 377B` (`addr[3]=0x0802428C`, section 248) - the domain
+is computing an address out of the swapper's frame.
+
+Note also `CONTEXT SWITCH` appears **zero** times in run258: `OnStartProcessND5000` calls
+`StartProcessFromContextBlock` directly and never goes through `SwitchToProcessIfNeeded`, so the
+outgoing swapper is not saved by that path and whatever the start does not overwrite survives.
+
+### The lesson, again, and it is the same one
+
+**The reason string was in every run of this hunt.** It names the failing segment, the domain, the
+capability table, the addressing mode and the register values, and I spent a section calling it
+"a protect violation at 0x08000013" because I cut the line short with `\{0,160\}`. That is the
+fourth time in this hunt the answer was already present - after the classic lane, the harness
+probes, and the comment naming the Samson gap.
+
+**Print the whole line. A truncated instrument is an instrument that lies by omission**, and it
+lies most about the field authors put last, which is usually the explanation.
+
+### What T4 is now
+
+Not "why does the MMU refuse" - the MMU is right, segment 1 genuinely is not in domain 0's
+capability table. **T4 is: why does the domain execute with the swapper's `B`/`R`?** That is a
+context-load question in the same family as T1, and the same file. `[OPEN]`.
