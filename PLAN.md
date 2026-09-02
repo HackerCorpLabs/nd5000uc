@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **open - narrowed to ONE value and one mechanism** | **The lanes differ in exactly one measured thing (249):** same `MON 377B`, same four operand addresses (`08012A28/080240B0/080240B4/0802428C`), but classic carries `argv[2]=0x00210718` where we carry `0`. That value IS the swapper pointer, so classic writes it over itself harmlessly while we write `0` over `0x8E30`. **The answer loop, slot layout, ordering and message identity are all measured CORRECT on both lanes** - stop editing them. **Mechanism (250):** classic's call 1 also has `argv[2]=0`; the value arrives via `ApplyRestartWriteBack` (`@0x080240B4:=0x00210718`, 60 of 124 logged lines). NEXT: run250 is the first run whose log can separate *never reached* / *reached with empty arrays* / *reached and faulted* - the octobus harness was never printing `Bridge.MonCallLog` at all, so its zero was an INSTRUMENT GAP, not an absence. |
+| T1 | The octobus `place-domain` swapper stall | **FIXED 2026-09-02** (`52dd87f55`) | Root cause: `OnStartProcessND5000` loaded the context block without calling `NoteLoadedProcess`, so `_loadedX5Cpu` stayed `-1`, the MON-stop context save took its early return, and the `CALLG` return address `0x08008255` was silently discarded - the swapper then resumed at its ENTRY point, re-zeroed `SWPINFO` and asked the same question forever. Measured: `place-domain` STALL->OK, MON 377B 2->8, `restarts` 1/1->**8/8** (`Seen==Taken`, genuinely forwarded), `argv[2]` `0`->`0x00008E30`, `CONTEXT SAVE SKIPPED` 2->0, and **MICFU `30B` appears for the first time (12)** = real user-domain page-ins. Suites: ND500 2264/2277 pass 0 fail; ND100 424/430 with one **known flake** (`DMA_BLAST_MultiBuffer_LargeTransfer(TCP_LEGACY)`, a real socket test - passes 2/2 alone, `IN_MEMORY` variant passed in the same run). **NOT claimed: the domain is parked at `PC=0x08000004 WAIT` and no program output was seen, so "cpu-stat runs" is unproven.** |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
@@ -22,11 +22,9 @@ sentence.** The cost was not the bug; it was that 429 tests could not run and no
 
 ## Next
 
-**NEXT: ONE CAUSALITY EXPERIMENT IS RUNNING, AND IT IS NOT A FIX.** Everything about the cell is now measured correct: the conversion (240), the writer (241), the slot layout on both sides (242), and the classic lane doing the same overwrite 187 times and completing (243). The slots are where the reference says they are, so suppressing the write would be papering over a symptom.
+**NEXT: THE DOMAIN IS PLACED AND STARTED BUT HAS NOT RUN.** T1's stall is fixed (standoff 259, commit `52dd87f55`). The swapper now serves demand pages and MON calls are genuinely forwarded (`restarts=8/8`). What remains: the cpu-stat domain starts (`startSeen=2`, `startX5CPU=1`) and then sits at `PC=0x08000004 stopMode=WAIT` with no output. **Ask the goal's question of the NEXT step too - a run only counts if REAL SINTRAN answers the MON calls.** Also `[OPEN]`: the un-park exit in `OnStartProcessND5000` still records no identity, which is the same class of gap that caused T1.
 
-`RETROCORE_ND500_SKIP_MON_VALUE_SLOTS` is env-gated and default OFF. It answers ONE question reading cannot: does the octobus run get past its two demand-page calls if parameter 3 is left alone? **A yes does not license keeping it on** - it localises the defect to something that only matters when that cell is disturbed. A no removes the cell from the hunt for good. Unset it after the measurement either way.
-
-Standoffs **240**-**243**.
+Standoffs **240**-**259**.
 
 **THE STALL IS LOCATED, AND IT IS OURS `[V]` (2026-09-02, rounds 7-11).** SINTRAN writes `0x8E30`
 into word `0o43334` and later reads **zero** out of the same word:
