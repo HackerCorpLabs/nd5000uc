@@ -16266,3 +16266,37 @@ new arms replace `STORE w1/w2/w3`, which had reported identical values and were 
 **Caution for the next reader:** the same CPU runs both lanes, so a plain "our SAD is broken" would
 break the classic lane too - and it does not. Whatever this turns out to be, it has to explain why
 only one lane is affected. Do not stop at the first explanation that fits the octobus lane alone.
+
+### 239a - "our SAD drops the high half" is REFUTED by reading the code
+
+Checked before run239 landed, so the run is not needed to kill it.
+`Emulated.HW\ND\CPU\ND100\Instructions.ShiftInstructions.cs`:
+
+```csharp
+public void SAD()
+{
+    int doubleReg = regs.currentRegisters.A << 16 | regs.currentRegisters.D;
+    doubleReg = DoubleShift(doubleReg);
+    regs.currentRegisters.A = (ushort)(doubleReg >> 16);
+    regs.currentRegisters.D = (ushort)(doubleReg & 0xFFFF);
+}
+```
+
+`A` and `D` ARE linked into one 32-bit value, and BOTH are written back. `DoubleShift` shifts the
+full 32 bits (`msb = (doubleRegister >> 31) & 1`, `doubleRegister << 1`), so nothing there truncates
+to 16 bits either. **The emulator's double shift is not dropping the high half.** This also fits the
+caution 239 recorded - a broken `SAD` would break the classic lane too, and does not.
+
+**And there is a contradiction in my own reading that run239 must resolve.** The measured `D` is
+`X << 1`, i.e. a shift of ONE. But the site word `0o154606`'s low bits are `0o6`, which would be a
+shift of SIX. Those cannot both describe the same executed instruction. So either:
+
+ - `A` was already `0` on entry to the site (making `A := 5MBBANK` the thing to look at, not the
+   shift), or
+ - the word at `0o134051` is not the instruction that produced the stored value - the source line
+   spans several words and 237 read registers at the STORE, two words later, not at the site.
+
+**Not choosing between them here.** The arms in run239 sit ON the site and the two words after it and
+report `A` and `D` at each, which distinguishes the two cases directly. Writing the contradiction
+down rather than resolving it by preference is the whole point - the last three times this file
+picked the reading that fit the story, the story was wrong.
