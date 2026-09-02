@@ -16094,3 +16094,54 @@ Data and code are different address spaces on this machine; a single reader used
 for one of them and silent about it. Related to trap #22 (fold the address the way the subject does)
 and to 219d's "read physical memory where paged memory was needed" - the same family, one level up:
 not the wrong arithmetic, the wrong TABLE.
+
+## 237 - MEASURED AT THE INSTRUCTION: CNVWADR returns A=0 where the classic lane has the bank
+
+This was in run231's `PC watch table` the whole time, with registers. Mining the existing probes -
+which 235 said to do - produced the sharpest evidence in the file in one read.
+
+```
+STORE w0 X:=SWMSG @134054o hit#1 PIL=2  A=0o D=107060o T=41o X=43430o B=52222o L=134047o
+STORE w3            @134057o hit#1 PIL=2  A=0o D=107060o T=41o X=43334o
+STORE w4            @134060o hit#1 PIL=2  A=0o D=107060o T=41o X=43334o
+LNEWSWAP-entry      @135670o hit#1 PIL=12 A=1o D=43230o T=6o  X=43331o
+THE GATE            @135674o hit#1 PIL=12 A=0o D=0o      T=41o X=43334o
+```
+
+Decode against the source:
+
+```
+133647   A:=5MBBANK; D:=X          <- bank into A, message address into D
+133651 *NNC06, CNVWADR             <- "convert multi-port address"
+133654   X:=SWMSG; T:=5MBBANK; *AAX HSWPI; STDTX
+```
+
+| register | value | meaning |
+|---|---|---|
+| `T` | `0o41` = 33 = `0x21` | `5MBBANK`, correctly loaded - the bank register for the `STDTX` |
+| `X` | `0o43430` | MPM-relative WORD offset of the ping message (`0x8E30/2 = 0x4718 = 0o43430`) |
+| `D` | `0o107060` = `0x8E30` | MPM-relative BYTE offset - `CNVWADR` doubled X, word to byte |
+| **`A`** | **`0`** | **the bank, AFTER `CNVWADR`. It went in as `5MBBANK` and came out ZERO.** |
+
+`133647` puts `5MBBANK` into `A` immediately before the call, and `T` proves the value is available
+and correct at that instant. **`CNVWADR` converts the offset and drops the bank.** `AD = 0x00008E30`
+is stored, which is exactly the `SWPINFO` value measured all along - now traced to the instruction
+that produced it rather than inferred from the result.
+
+The classic lane stores `0x00210718` - bank `0x21` retained, offset as a WORD address. **Same
+routine, same inputs available, different output.** That is a real behavioural difference, measured,
+not a difference of convention as 235 supposed.
+
+The gate is consistent with the same cell: `T=0o41`, `X=0o43334` on both the store (`w3`/`w4`) and
+the gate, so store and load resolve identically. `A=0 D=0` at the gate is the zeroed low half.
+
+**`[V]`** the register values and that `A` is zero leaving `CNVWADR`. **`[OPEN]`** why - the two
+candidates are the section 7.6.9 patch (site stamped `124003B`, re-opened by 236 because the old
+"not patched" verdict was read through the wrong page table) and a genuine difference in what
+`CNVWADR` computes on this configuration. **run236 reads the `CNVWADR` sites through I-SPACE and
+prints both spaces; that is the discriminator.**
+
+Note for 235's benefit: its "two valid conventions, not a bug" reading is now doubtful. `0x8E30`
+does address a real message when interpreted as a window offset, but nothing in SINTRAN was shown to
+interpret it that way - and `A` being zeroed by a routine whose job is to APPLY the bank is not what
+a second valid convention looks like.
