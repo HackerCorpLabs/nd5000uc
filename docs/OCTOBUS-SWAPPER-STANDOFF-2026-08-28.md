@@ -14723,3 +14723,56 @@ one 205 predicted. What the runs actually bought was the discovery that my addre
 and that only became visible when a control arm and a known-hot/known-cold pair were in the SAME
 table. **Every table without a control was not weak evidence; it was no evidence, and it read
 exactly like strong evidence.**
+
+## 215 - THE GATE IS NAMED: `SWMSG.SWPINFO` reads ZERO at both `LNEWSWAP` calls `[V]`
+
+`run212.log`. The ladder standoff 205 designed, finally aimed correctly:
+
+```
+  LNEWSWAP-entry@0o135670   hits=2
+  G1-PASSED@0o135676        hits=0    <- FIRST GATE, fails BOTH times
+  ERROR-ARM@0o135751        hits=0
+  OK-ARM@0o135772           hits=0
+  G3-PASSED@0o136001        hits=0
+  G4-PASSED@0o136007        hits=0
+  SETS-ANSWER3@0o136026     hits=0
+  CONTROL 5ACTSWAPPER       hits=2
+```
+
+The gate is the routine's very first test:
+
+```
+  135470  LNEWSWAP:  T:=5MBBANK; X:=SWMSG; *AAX HSWPI; LDDTX   % AD := SWMSG.SWPINFO
+  135474             IF D><0 THEN                              % "Any proc. currently served?"
+```
+
+**`SWMSG.SWPINFO` reads ZERO at both calls.** The served-process branch is skipped whole, and
+control falls through to `SWPD4` - mark the swapper free, drain an empty fifo, park. **That is the
+run's own `[MON PATH]` note, "LNEWSWAP with nothing to do", and it is exactly what 205 predicted
+from the source before a single one of these runs.**
+
+**And it sits against a measurement that says the opposite at the end of the run:**
+
+```
+  at both LNEWSWAP calls   SWMSG.SWPINFO = 0
+  at end of run            swpInfo = 0x00008E30
+```
+
+Both are `[V]`, from different instruments. So `SWPINFO` **is** set - just not when the swapper
+asks. Two candidates, and they need different fixes:
+
+```
+  ORDERING     SWMESS sets SWPINFO at 0o133654 only AFTER both LNEWSWAP calls are answered.
+               The swapper asks before the work is posted, and nothing asks again.
+  WRONG BLOCK  the SWPINFO written and the SWMSG that LNEWSWAP reads are different blocks,
+               so the value is never zero and never seen at the same moment.
+```
+
+**Round 9 separates them by ORDER, not by counts** - the per-hit register log is chronological
+across all arms, so the `SWMESS` writes and the `LNEWSWAP` gate appear in the sequence they
+happened. It arms `0o135474` rather than `0o135476`, because at that instruction `D` holds the
+`SWPINFO` just loaded and `X` holds the address it came from: the two numbers that decide it.
+
+**Note what the counts could never have shown.** Eight rounds of hot/cold got the break to one
+instruction; the remaining question is purely about sequence, and no count answers it. The
+instrument has to change shape, not just aim.
