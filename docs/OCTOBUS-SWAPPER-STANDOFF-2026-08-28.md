@@ -15118,3 +15118,38 @@ guest-instruction path or emulator path - and if it is ours, that is the fix sit
 **Decoding the guest was the wrong instrument for this question**, and two runs went into it. The
 question was never "which ND-100 instruction" - it was "what code zeroes this cell", and only one of
 those two possibilities is an ND-100 instruction at all.
+
+## 220 - Every writer of the cell is a GUEST INSTRUCTION. Our C# does not clear it `[V]`
+
+`run218.log`. Managed stacks for writes to `0x428DB8`, five captured:
+
+```
+  pc=0x61CF = 0o60717   pil=0    Instructions.STA()
+  pc=0xB2C6 = 0o131306  pil=1    Instructions.STZTX()
+  pc=0xB82F = 0o134057  pil=2    Instructions.STDTX()   <- SWMESS, the correct store (A=0, high half)
+  pc=0xCA88 = 0o145210  pil=12   Instructions.STDTX()   <- 5ACTSWAPPER, also correct
+  pc=0xBCB1 = 0o136261  pil=12   Instructions.STZTX()   <- the EMPTY path
+```
+
+Every stack runs `ExecuteDecodedInstruction -> Instructions.<op> -> WriteEL/WriteVirtualMemory ->
+WritePhysicalMemory`. **These are guest instructions executing, not our emulator clearing a message
+block.** 219d's suspicion - that the zeroing might be our own C# on the ND-100 thread - is **refuted
+for every write captured**, and that possibility can be dropped.
+
+**The stack also settles the identity question the guest-side instruments could not.** `0o136261` is
+`STZTX` - store zero - which is exactly the `EMPTY` path (`0o136057` listing + `0o200`), matching
+what round 10 measured by hit count. Two independent instruments, same answer.
+
+**BUT THE TWO WRITES THAT MATTER ARE NOT IN THE CAPTURE.** The writes log for the earlier run listed
+`pc=135673B` **twice** - the zero-writes that land immediately before `LNEWSWAP`'s gate reads zero -
+and neither appears here. The cap is 12 and only 5 were taken, so it is not eviction.
+
+**The likely cause is my dump POINT, not the capture.** The stacks are printed beside the
+`5ACTSWAPPER X-reload` probe, which fires part-way through the fixture; writes occurring after that
+point are captured into the list but never printed. **A capture and a dump are two different
+lifetimes, and I chose the dump site for reachability without checking it was LATE enough.** The
+same fixture-shape mistake as 219c, one layer along: there the dump was on a branch that never ran,
+here it is on a branch that runs too early.
+
+**NEXT:** move the stack dump to the very end of the fixture, after the final state dump, so it
+covers the whole run. Everything else about the instrument worked on the first attempt.
