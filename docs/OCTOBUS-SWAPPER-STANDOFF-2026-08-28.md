@@ -15869,3 +15869,58 @@ I had a reproducible failing lane and a known-good lane, and I spent 219-231 ins
 failing one. RULE #0b says find a COMPLETE, KNOWN-GOOD instance first and read it in full. The
 known-good instance here was a whole other lane, running the same servicer, one `dotnet test` away -
 and it answered in one run what eleven sections of single-lane instrumenting could not.
+
+## 233 - where the bank half comes from: 5MBBANK <- 5FPMAILBOX, and what to measure next
+
+Carved, not guessed. `RP-P2-N500.NPL:131133`, inside `XMSINIT` (the mailbox init):
+
+```
+131127   XMSINIT: *1BANK; COPY SD DA; STA I (SVDRE; 2BANK
+131133          5FPMAILBOX=:D:=0; AD SH 12; A=:5MBBANK      % MEMORY BANK FOR MESSAGES
+131140          A=:T; 5NPMAILBOX SH 12 -1+D; D=:X
+131146          DO WHILE X><A   *STZTX   X+1  OD            % zero the mailbox area
+```
+
+`5MBBANK` is DERIVED from `5FPMAILBOX`, which is the page number `5GBUFF` returns when SINTRAN
+allocates the ND-500 message-block buffer (`5P-P2-MON60.NPL:027102-027104`):
+
+```
+027076   IF D><0 THEN A+1 FI; A=:5NPMAILBOX     % pages for all messages + mailboxes
+027102   CALL 5GBUFF; GO FAR 0INZERET
+027104   A=:5FPMAILBOX
+```
+
+`133647`'s `A:=5MBBANK; D:=X` then `CNVWADR` then `STDTX` is what lands in `SWPINFO`, so the bank
+half of `SWPINFO` IS `5MBBANK`, hence `5FPMAILBOX`.
+
+The classic value decodes consistently: `0x0021 << 16 | 0x0718` = `0x210718` **words** = byte
+`0x420E30` = the requester's message. So `SWPINFO` carries a plain 32-bit ND-100 WORD address split
+across A/D. The octobus lane should therefore hold `0x428E30 / 2` = `0x00214718`. It holds
+`0x00008E30`, which is `0x428E30 - 0x420000` - an **MPM-relative BYTE offset**, with a zero bank.
+
+### The prediction, and how to test it
+
+**If `5FPMAILBOX` is 0 on the octobus lane, `5MBBANK` is 0 and the bank half is 0.** That is directly
+measurable rather than derivable - `5GBUFF` either allocated a page or it did not.
+
+Resident addresses to read at the end of a run, BOTH lanes:
+
+| symbol | octal | source |
+|---|---|---|
+| `5FPMAILBOX` (`5FPMA`) | `111102` | `SYMBOL-2-LIST.SYMB.TXT:1552` |
+| `5NPMAILBOX` (`5NPMA`) | `111103` | `SYMBOL-2-LIST.SYMB.TXT:1553` |
+
+**`5MBBA=004654` from `N500-SYMBOLS` is NOT to be used as an address without checking.** Standoff
+211a already caught `SYMBOL-1-LIST` mixing constants with addresses (`S1FUN=000020`, `MRECP=000052`),
+and `004654` is small enough to be a displacement. Derive `5MBBANK` from the measured `5FPMAILBOX`
+and the code above instead, or find it in the resident list.
+
+**Do NOT "fix" `CNVWADR` or the stored form.** Both are downstream of `5FPMAILBOX`. If the page
+number is zero the whole address is wrong for a reason that has nothing to do with the conversion,
+and patching the conversion would paper over an allocation that never happened - the shape of defect
+this file has already produced five wrong answers about.
+
+**`AD SH 12`'s exact decode is deliberately left `[OPEN]`** - a first pass gives `5MBBANK =
+5FPMAILBOX >> 4`, which does not reconcile with `bank 0x21` against a plausible page number, so the
+shift semantics need checking before anyone leans on them. It does not block the measurement:
+`5FPMAILBOX = 0` versus non-zero answers the question either way.
