@@ -15059,3 +15059,28 @@ you check the file size.
 disassemble those words.** That names the instruction from the bytes that actually execute, and it
 independently tests the `+0o200` mapping for this specific line - which every other reasoning route
 tonight has needed a correction on.
+
+## 219c - The dump printed nothing, because I hooked it to a line this test never runs
+
+`run216.log`: test passed, 15m55s, and **zero occurrences** of `LNEWSWAP code words`.
+
+The dump was called from `DumpMbBank("after-start-swapper")`. The fixture under test is
+`ShortBringup_Octobus_**NoStartSwapper**_PlaceAndRun_Capture` - **it never takes that path.** The
+instrument was correct, built, and attached to a branch that does not execute in the run it was
+built for.
+
+**A dump is only evidence from a line that EXECUTES**, and an empty dump is indistinguishable from a
+dump that ran and found nothing. Sixteen minutes for a blank.
+
+Moved beside the `5ACTSWAPPER X-reload` probe, which is **observed printing in this exact fixture** -
+so the call site is verified by the previous run's own output rather than assumed. It also uses the
+local `Fmt(addr)` helper already in scope there instead of a private method, which is one less thing
+to get wrong.
+
+**Two self-inflicted errors caught before they cost a run, both by checks added earlier tonight:**
+ - the window bases were keyed `0x5B38`/`0x5BB8` where `0o135470`/`0o135670` are `0xBB38`/`0xBBB8` -
+   caught by printing the conversion beside the code, the second time that habit has saved a run;
+ - a heredoc turned `\n` into real newlines and broke the string literals - **the trap already in
+   this file's wrong-turns list** ("heredoc quoting failures (twice) - write patch scripts with the
+   Write tool"), which I then walked into by using a heredoc anyway. Patch scripts are now written
+   with the Write tool, no shell escaping in the path at all.
