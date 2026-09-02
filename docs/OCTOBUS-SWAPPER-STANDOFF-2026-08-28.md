@@ -15203,3 +15203,41 @@ and both are marked **"FUNCTIONAL (ungated)"** - the station may substitute a va
 read. A read override that returns 0 for this cell is exactly this symptom. **Next: read
 `OctobusND5000Station.TryOverrideMpmRead` and find what range it claims.** That is a code read, not
 a run.
+
+## 222 - The read override is CLEARED, and the value simply does not persist
+
+`OctobusND5000Station.TryOverrideMpmRead` is gated on `_ducsActive && HaveControlStore` and serves
+only `[_ducsR25BaseByte, +_ducsBlockBytes)` - the DUCS control-store read-back block. Measured in
+`run219.log`: **144 overrides, every one at `0x4208xx`**, none within reach of `0x428DB8`. Suspect
+eliminated, for the cost of one grep rather than a run.
+
+**So the position is now very narrow.** In one run, in log order, with no other access to those
+bytes in between:
+
+```
+  line 5383123  pc=0o134057  STDTX writes 8E 30 into 0x428DBA/BB   [write confirmed by managed stack]
+  line 5389949  pc=0o135673  LDDTX reads  0x428DBA and gets 0x0000
+  line 5390005  pc=0o145210  STDTX writes 8E 30 again
+  line 5396661  pc=0o135673  LDDTX reads 0 again
+```
+
+**Between the write and the read there is no write to that address, no zeroing instruction and no
+read override. The value does not persist.**
+
+**LEADING HYPOTHESIS - the window MOVED.** Both hooks fire only when
+`mem == _octobus.DeviceRAM`, so both accesses are in the shared window; but `mem` is chosen by
+`ND100Memory.FindMemoryBank(address)`, and the MPM window's placement is configurable -
+`DEFINE-MEMORY-CONFIGURATION` sets `ADRZERO`, and this project already carries the note that
+**`ADRZERO` is not a constant, it moves with ND-100 memory size**. If the window's base changed
+between the store and the load, the same ND-100 physical address resolves to a DIFFERENT OFFSET
+inside `DeviceRAM`: the write lands at one offset and the read comes back from another, which is
+exactly a value that will not persist.
+
+**The measurement that tests it is small and specific:** log the computed **DeviceRAM offset**, not
+the ND-100 address, at both the write and the read of `0x428DB8`. Equal offsets refute the
+hypothesis outright; different offsets name the defect and the fix site in one line.
+
+**Note what made this tractable.** Once 221 removed the phantom zero-writes, the surviving facts fit
+on four lines and the suspect list went from "something, somewhere, zeroes a cell" to "one address
+resolves two ways". **Most of tonight's difficulty was reading an instrument wrong, not the machine
+being subtle.**
