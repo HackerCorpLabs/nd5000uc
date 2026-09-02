@@ -10,7 +10,7 @@
 
 | # | Task | State | Next action |
 |---|---|---|---|
-| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED; fix not yet chosen** | MON 377B (argc=4, x2) answered into SWMSG writes its arg-value slot k=2 over `SWMSG.SWPINFO` (`HSWPI=0o104`, symbol-hard in 6 files) - the POINTER to the requester's message - so `LNEWSWAP`'s `IF D><0` gate correctly finds nothing. Forwarding is CLEAN (`Seen=1 Taken=1 gap=0`), target message is correct. Standoffs 228-229. **Next: carve (a) whether MON args belong at `0o100+2k` at all, (b) MON 377B's real argument count, (c) whether that block is READ from the message rather than written into it.** Do not edit before carving. |
+| T1 | The octobus `place-domain` swapper stall | **ROOT-CAUSED = an ORDERING race** | Our MON 377B answer writes param-3's value slot (`5AP3`/`5DP3` = HW `0o104`) which IS `SWMSG.SWPINFO` (`HSWPI=0o104`), landing between SINTRAN's store of the request pointer and `LNEWSWAP`'s `IF D><0` gate. **The layout, the message base and the 377B answer are all VERIFIED CORRECT - do not 'fix' any of them** (classic lane: 78 x 377B into SWMSG, all K=0, and that lane works). Standoffs 228-230. **Next: capture the same ordering around `0x420DB8` on the CLASSIC lane and diff the interleaving.** |
 | T2 | `Emulated.Tests.ND100` red | **build FIXED 2026-09-02**, 1 real failure left | The compile break is gone (commit `cde2ac1e1`); suite runs 423/429. The remaining failure is T3. |
 | T3 | `StartMicroprogram_ResultWord_MeasuredWithALiveCpu` fails | **DONE 2026-09-02** | Not a defect - a stale baseline. The firmware writes an incrementing pattern; the guard is now the real low-half round-trip assertion. Suite 425/430 green. |
 
